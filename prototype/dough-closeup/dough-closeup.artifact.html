@@ -1,0 +1,625 @@
+<title>Растяжка теста роти</title>
+<style>
+  :root{ --bg:#14100c; --ink:#e8ddcc; --dim:#8b7f6e; --line:#2a231b; --hot:#d98b3a; }
+  *{ box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  html,body{ margin:0; height:100%; background:var(--bg); color:var(--ink);
+    font:13px/1.45 ui-monospace,SFMono-Regular,Menlo,monospace; overscroll-behavior:none; }
+  body{ display:flex; flex-direction:column; touch-action:none; }
+  #stage{ flex:1; position:relative; min-height:0; }
+  canvas{ position:absolute; inset:0; width:100%; height:100%; display:block; touch-action:none; }
+  #panel{ border-top:1px solid var(--line); padding:8px 10px; display:flex; flex-wrap:wrap;
+    gap:6px 14px; align-items:center; background:#0f0c09; }
+  .grp{ display:flex; gap:4px; align-items:center; }
+  .grp b{ color:var(--dim); font-weight:400; margin-right:2px; }
+  button{ font:inherit; color:var(--ink); background:#1c1710; border:1px solid var(--line);
+    padding:4px 9px; cursor:pointer; }
+  button:hover{ border-color:var(--dim); }
+  button.on{ background:var(--hot); color:#14100c; border-color:var(--hot); }
+  #tear{ padding:8px 18px; font-weight:bold; }
+  #stats{ color:var(--dim); margin-left:auto; text-align:right; white-space:pre; }
+  #hint{ position:absolute; left:10px; top:10px; color:var(--dim); pointer-events:none; }
+  #flash{ position:absolute; inset:0; pointer-events:none; opacity:0; background:#d98b3a; }
+  #turn{ position:absolute; inset:0; display:none; align-items:center; justify-content:center;
+    background:var(--bg); color:var(--dim); text-align:center; padding:24px; z-index:5; }
+  @media (orientation:portrait){ #turn{ display:flex; } }
+</style>
+
+<div id="stage">
+  <canvas id="cv"></canvas>
+  <div id="hint">прижми край и подержи — возьмёшь шире · тяни или веди по кругу (ฟาด) · SPACE когда «сейчас порвётся»</div>
+  <div id="flash"></div>
+  <div id="turn">поверни экран горизонтально —<br>раскладка стола рассчитана на альбомную ориентацию</div>
+</div>
+
+<div id="panel">
+  <div class="grp"><b>вариант</b>
+    <button data-v="A" class="on">A · пиксель 80</button>
+    <button data-v="B">B · пиксель 224</button>
+    <button data-v="C">C · контроль</button>
+  </div>
+  <div class="grp"><b>условие</b>
+    <button data-c="both" class="on">оба</button>
+    <button data-c="sound">только звук</button>
+    <button data-c="sight">только картинка</button>
+  </div>
+  <button id="tear">СЕЙЧАС ПОРВЁТСЯ (space)</button>
+  <div class="grp">
+    <button id="reset">заново</button>
+    <button id="dump">скопировать лог</button>
+  </div>
+  <div id="stats"></div>
+</div>
+
+<script>
+"use strict";
+/* Прототип «крупный план теста» — замер читаемости, не демо.
+   Гипотеза и критерии: HYPOTHESIS.md. Полировка запрещена до конца замеров.
+   Модель: XPBD, полярная сетка 24x48 = 1152 узла (параметры линзы T2). */
+
+// ─────────────────────────── параметры модели
+// Топология: РАВНОМЕРНАЯ решётка, обрезанная по кругу.
+// Полярная сетка (24x48 из линзы T2) даёт верное число узлов, но вырождается в центре:
+// длина окружного ребра там падает до долей пикселя, относительное растяжение скачет
+// до 400%+ и лист «рвётся» в середине от любого движения. Замер это обнаружил сразу.
+// Число узлов сохранено (~1150), однородность рёбер восстановлена.
+const GRID = 38;                   // 38x38, в круг попадает ~1130 узлов
+let SUBSTEPS = 8;                  // T2: 8–10 подшагов, 1 итерация
+let COMPLIANCE = 0.00004;          // податливость: тесто тянучее, натяжение расходится по листу,
+                                   // а не копится под пальцем (замер показал разрыв при 2% растяжения)
+let DAMP = 0.986;
+let THICK_BREAK = 0.12;            // лист рвётся там, где ИСТОНЧИЛСЯ до этой доли толщины
+const HOLE_THICK = 0.085;          // ниже этой толщины лист просвечен насквозь
+
+// ─────────────────────────── состояние
+let N = 0;
+let px, py, vx, vy, prx, pry, pinned, thick;
+let gi = new Int32Array(GRID*GRID);          // (i,j) -> node | -1
+let quads = [];                              // ячейки решётки для рендера
+let quadCons = [], quadPrev = null, quadSm = null;
+let spinAngle = 0, spinRate = 0, spinTotal = 0, lastSlap = 0;   // раскрутка теста (ฟาด)
+let cons = null;                             // {a,b,rest,broken}
+let edgeNodes = [];                          // граничные узлы — за них берут лист
+let grabs = [];
+let broke = false, breakTime = 0, pressTime = 0, pressed = false;
+let runStart = 0, R0 = 1;
+let variant = "A", condition = "both";
+let log = [];
+let latencies = [];
+
+const stage = document.getElementById("stage");
+const cv = document.getElementById("cv"), ctx = cv.getContext("2d", { alpha:false });
+const lo = document.createElement("canvas"), lctx = lo.getContext("2d", { alpha:false });
+const stats = document.getElementById("stats"), flash = document.getElementById("flash");
+
+// ─────────────────────────── раскладка стола (v3: тесто слева, начинки по центру, тава справа)
+// Раскладка закрепляется навсегда, чтобы игрок со временем готовил «не глядя».
+// Точные пропорции были в утраченном addendum-v3; здесь рабочее приближение, которое и проверяем.
+const ZONES = { work:[0.00,0.46], bridge:[0.46,0.62], tawa:[0.62,1.00] };
+function zone(name){
+  const [a,b] = ZONES[name];
+  return { x:a*cv.width, y:0, w:(b-a)*cv.width, h:cv.height,
+           cx:(a+b)/2*cv.width, cy:cv.height/2 };
+}
+
+// ─────────────────────────── построение листа
+function build(){
+  const z = zone("work");
+  R0 = Math.min(z.w, z.h) * 0.34;
+  const h = (R0*2)/(GRID-1);                 // шаг решётки — одинаков везде
+  const x0 = z.cx - R0, y0 = z.cy - R0;
+
+  gi.fill(-1);
+  const xs=[], ys=[];
+  for(let j=0;j<GRID;j++) for(let i=0;i<GRID;i++){
+    const x = x0 + i*h, y = y0 + j*h;
+    const dx = x - z.cx, dy = y - z.cy;
+    if(dx*dx + dy*dy > R0*R0) continue;      // обрезаем круг
+    gi[j*GRID+i] = xs.length; xs.push(x); ys.push(y);
+  }
+  N = xs.length;
+  px = Float32Array.from(xs); py = Float32Array.from(ys);
+  vx = new Float32Array(N); vy = new Float32Array(N);
+  prx = new Float32Array(N); pry = new Float32Array(N);
+  pinned = new Uint8Array(N); thick = new Float32Array(N).fill(1);
+
+  const c = [];
+  const at = (i,j) => (i<0||j<0||i>=GRID||j>=GRID) ? -1 : gi[j*GRID+i];
+  const add = (a,b) => { if(a<0||b<0) return;
+    c.push({ a, b, rest: Math.hypot(px[a]-px[b], py[a]-py[b]), broken:0, prev:0 }); };
+  quads = [];
+  for(let j=0;j<GRID;j++) for(let i=0;i<GRID;i++){
+    const n = at(i,j); if(n<0) continue;
+    add(n, at(i+1,j));                        // →
+    add(n, at(i,j+1));                        // ↓
+    add(n, at(i+1,j+1));                      // ↘ держит сдвиг
+    add(at(i+1,j), at(i,j+1));                // ↙ держит сдвиг
+    const a=n, b=at(i+1,j), d=at(i+1,j+1), e=at(i,j+1);
+    if(b>=0&&d>=0&&e>=0){ quads.push([a,b,d,e]); }
+  }
+  cons = c;
+
+  // какие связи держат каждую ячейку — чтобы дырка рвала ячейку, а не весь лист
+  const key = (a,b)=> a<b ? a+":"+b : b+":"+a;
+  const byPair = new Map();
+  for(const cc of cons) byPair.set(key(cc.a,cc.b), cc);
+  quadCons = quads.map(([a,b,d,e])=>{
+    const list=[];
+    for(const [x,y] of [[a,b],[b,d],[d,e],[e,a]]){ const cc=byPair.get(key(x,y)); if(cc) list.push(cc); }
+    return list;
+  });
+  quadPrev = new Float32Array(quads.length).fill(1);
+  quadSm = new Float32Array(quads.length).fill(1);
+  quadRest = null;
+
+  // связи, инцидентные узлу — чтобы «дырка» рвала именно ячейку, а не весь лист
+  const deg = new Int32Array(N);
+  for(const cc of cons){ deg[cc.a]++; deg[cc.b]++; }
+  edgeNodes = [];
+  for(let i=0;i<N;i++) if(deg[i] < 8) edgeNodes.push(i);   // граница круга
+
+  grabs = []; broke = false; pressed = false; breakTime = pressTime = 0;
+  spinRate = spinTotal = lastSlap = 0;
+  runStart = performance.now();
+}
+
+// ─────────────────────────── XPBD
+function step(dt){
+  const h = dt / SUBSTEPS;
+  for(let ss=0; ss<SUBSTEPS; ss++){
+    for(let i=0;i<N;i++){
+      if(pinned[i]){ prx[i]=px[i]; pry[i]=py[i]; continue; }
+      vx[i]*=DAMP; vy[i]*=DAMP;
+      prx[i]=px[i]+vx[i]*h; pry[i]=py[i]+vy[i]*h;
+    }
+    for(const g of grabs){ grabPull(g); }
+
+    const alpha = COMPLIANCE/(h*h);
+    for(let k=0;k<cons.length;k++){
+      const c = cons[k]; if(c.broken) continue;
+      const a=c.a, b=c.b;
+      const dx=prx[b]-prx[a], dy=pry[b]-pry[a];
+      const d=Math.hypot(dx,dy); if(d<1e-6) continue;
+      const wa = pinned[a]?0:1, wb = pinned[b]?0:1, w = wa+wb;
+      if(w===0) continue;
+      const lam=-(d-c.rest)/(w+alpha), nx=dx/d, ny=dy/d;
+      prx[a]-=nx*lam*wa; pry[a]-=ny*lam*wa;
+      prx[b]+=nx*lam*wb; pry[b]+=ny*lam*wb;
+    }
+    for(const g of grabs){ grabPull(g); }
+
+    for(let i=0;i<N;i++){
+      if(pinned[i]) continue;
+      vx[i]=(prx[i]-px[i])/h; vy[i]=(pry[i]-py[i])/h;
+      px[i]=prx[i]; py[i]=pry[i];
+    }
+  }
+  creep(dt);
+  applySpin(dt);
+  measureThickness();
+  checkBreak(dt);
+}
+
+// Палец не телепортирует узел, а тянет его пружиной. Жёсткая привязка давала мгновенный
+// выброс натяжения на соседнем ребре: лист «рвался» от скорости руки, а не от растянутости.
+const GRAB_K = 0.30;
+function grabPull(g){
+  // Палец держит участок края, а не одну точку: у касания есть площадь.
+  // Точечный захват давал концентрацию натяжения и рвал лист под пальцем.
+  const dx = g.x - prx[g.node], dy = g.y - pry[g.node];
+  for(let m=0;m<g.grip.length;m++){
+    const n = g.grip[m], w = g.gripW[m];
+    prx[n] += dx * GRAB_K * w;
+    pry[n] += dy * GRAB_K * w;
+  }
+}
+// Ширина хвата решает, получится лист или жгут: замер показал 4% тонкой площади
+// при щипке в 5 узлов против 76% при широком хвате в 64 узла. Поэтому хват РАСТЁТ,
+// пока игрок прижимает край перед тягой — это стадия «finger press» из v3,
+// и она же делает терпение осмысленным до всякого растягивания.
+const GRIP_MIN = 5, GRIP_MAX = 22, GRIP_GROW = 1.4;   // шагов решётки; секунда прижима — полный хват
+
+// ฟาด — раскрутить и прихлопнуть о стол. Главная техника растягивания роти:
+// «rotate and stretch the dough in a forward, circular motion, slapping the far end on the table».
+// Растягивание за два края даёт жгут; круговое движение растит лист во все стороны разом.
+const SPIN_GAIN = 0.020;           // сколько роста даёт оборот: секунда раскрутки — примерно +25% диаметра
+function centerOfSheet(){
+  let sx=0, sy=0; for(let i=0;i<N;i++){ sx+=px[i]; sy+=py[i]; }
+  return { x:sx/N, y:sy/N };
+}
+function applySpin(dt){
+  if(Math.abs(spinRate) < 0.35){ spinRate *= 0.90; return; }
+  const grow = Math.min(0.004, Math.abs(spinRate) * SPIN_GAIN * dt);
+  for(let i=0;i<cons.length;i++){ const c=cons[i]; if(!c.broken) c.rest *= (1+grow); }
+  spinTotal += Math.abs(spinRate)*dt;
+  if(spinTotal - lastSlap > Math.PI){ lastSlap = spinTotal; slap(); }
+  spinRate *= 0.94;
+}
+// хлопок дальнего края о стол — тот самый звук, по которому узнают макашницу
+function slap(){
+  const c = centerOfSheet();
+  for(let i=0;i<N;i++){
+    const dx=px[i]-c.x, dy=py[i]-c.y, d=Math.hypot(dx,dy)||1;
+    if(d < R0*0.55) continue;
+    vx[i] += dx/d * 22; vy[i] += dy/d * 22;      // импульс наружу по дальнему краю
+  }
+  audioSlap();
+}
+function makeGrip(n, held){
+  const mul = GRIP_MIN + (GRIP_MAX-GRIP_MIN) * Math.min(1, (held||0)/GRIP_GROW);
+  const rad = (R0*2/(GRID-1)) * mul;
+  const ids=[], ws=[];
+  for(const i of edgeNodes){
+    const d = Math.hypot(px[i]-px[n], py[i]-py[n]);
+    if(d<=rad){ ids.push(i); ws.push(1 - d/rad*0.75); }
+  }
+  return { ids, ws, mul };
+}
+
+// Разрыв судится по устойчивому натяжению за кадр, а не по шуму отдельного подшага,
+// и распространяется по соседям — дырка рвётся дальше, как в настоящем тесте.
+let RATE_SENS = 0.30;              // насколько рывок снижает предел прочности
+let CREEP = 1.1;                   // текучесть: скорость, с которой длина покоя догоняет текущую
+const CREEP_ON = 0.06;             // порог растяжения, с которого тесто начинает течь
+
+// Тесто ПЛАСТИЧНО: удержанное натяжение оно не возвращает, а запоминает — лист
+// остаётся растянутым и становится тоньше. Чисто упругая модель рвалась на 1,3x
+// и «прозрачного листа» из v3 не давала в принципе.
+function creep(dt){
+  const k = Math.min(1, CREEP*dt);
+  for(let i=0;i<cons.length;i++){
+    const c=cons[i]; if(c.broken) continue;
+    const d=Math.hypot(px[c.b]-px[c.a], py[c.b]-py[c.a]);
+    if((d-c.rest)/c.rest > CREEP_ON) c.rest += (d-c.rest)*k;
+  }
+}
+function checkBreak(dt){
+  // Тесто рвётся не там, где сильнее натянуто, а там, где стало слишком тонким:
+  // «дырка» из v3 — это следствие истончения. Рывок рвёт раньше, чем терпеливое
+  // растягивание, потому что поднимает эффективный порог толщины.
+  // судим по СГЛАЖЕННОЙ толщине: лист не рвётся от мгновенной дрожи после хлопка
+  let torn = 0;
+  if(!quadSm || quadSm.length!==quads.length) quadSm = new Float32Array(quads.length).fill(1);
+  for(let q=0;q<quads.length;q++){
+    const qq = quads[q];
+    const raw = (thick[qq[0]]+thick[qq[1]]+thick[qq[2]]+thick[qq[3]])/4;
+    quadSm[q] += (raw - quadSm[q]) * 0.12;
+    const t = quadSm[q];
+    if(t > 0.5) continue;
+    const grow = quadPrev ? Math.max(0, (quadPrev[q]-t)/Math.max(1e-4,dt)) : 0;  // скорость истончения
+    if(t < THICK_BREAK * Math.min(1.6, 1 + grow*RATE_SENS)){
+      for(const c of quadCons[q]) if(!c.broken){ c.broken=1; torn++; }
+    }
+  }
+  if(quadPrev) for(let q=0;q<quads.length;q++){
+    const qq=quads[q]; quadPrev[q]=(thick[qq[0]]+thick[qq[1]]+thick[qq[2]]+thick[qq[3]])/4;
+  }
+  if(torn) onBreak();
+}
+
+// Толщина: чем сильнее узел растянут, тем тоньше лист и тем сильнее он просвечивает.
+let maxStrain = 0, avgStrain = 0;
+let accBuf=null, cntBuf=null, quadRest=null;
+function area(q){
+  const [a,b,c,d]=q;
+  return Math.abs((px[a]*(py[b]-py[d]) + px[b]*(py[c]-py[a]) +
+                   px[c]*(py[d]-py[b]) + px[d]*(py[a]-py[c]))/2);
+}
+// Объём теста сохраняется: во сколько раз выросла площадь, во столько раз лист тоньше.
+// Это и есть «растянуть почти до прозрачности» — толщина падает как 1/площадь.
+function measureThickness(){
+  if(!accBuf || accBuf.length!==N){ accBuf=new Float32Array(N); cntBuf=new Float32Array(N); }
+  if(!quadRest || quadRest.length!==quads.length){
+    quadRest = new Float32Array(quads.length);
+    for(let q=0;q<quads.length;q++) quadRest[q] = area(quads[q]) || 1;
+  }
+  accBuf.fill(0); cntBuf.fill(0);
+  for(let q=0;q<quads.length;q++){
+    const t = Math.min(1, quadRest[q] / Math.max(1e-3, area(quads[q])));
+    for(const n of quads[q]){ accBuf[n]+=t; cntBuf[n]++; }
+  }
+  for(let i=0;i<N;i++) thick[i] = cntBuf[i] ? accBuf[i]/cntBuf[i] : 1;
+
+  let mx=0, sum=0, live=0;
+  for(let k=0;k<cons.length;k++){
+    const c=cons[k]; if(c.broken) continue;
+    const d=Math.hypot(px[c.b]-px[c.a], py[c.b]-py[c.a]);
+    const st=Math.max(0,(d-c.rest)/c.rest);
+    if(st>mx) mx=st; sum+=st; live++;
+  }
+  maxStrain=mx; avgStrain = live? sum/live : 0;
+}
+
+// ─────────────────────────── звук: три слоя, процедурно, без ассетов
+let AC=null, master=null, tenseGain=null, tenseFilt=null, thinOsc=null, thinGain=null, noiseBuf=null;
+function audioInit(){
+  if(AC) return;
+  AC = new (window.AudioContext||window.webkitAudioContext)({ latencyHint:"interactive" });
+  master = AC.createGain(); master.gain.value = 0.9; master.connect(AC.destination);
+
+  const len = AC.sampleRate*2, b = AC.createBuffer(1, len, AC.sampleRate), d = b.getChannelData(0);
+  for(let i=0;i<len;i++) d[i] = Math.random()*2-1;
+  noiseBuf = b;
+
+  // слой 1 — натяжение: полосовой шум, «скрип» волокон
+  const src = AC.createBufferSource(); src.buffer=b; src.loop=true;
+  tenseFilt = AC.createBiquadFilter(); tenseFilt.type="bandpass"; tenseFilt.Q.value=6.5;
+  tenseFilt.frequency.value=340;
+  tenseGain = AC.createGain(); tenseGain.gain.value=0;
+  src.connect(tenseFilt); tenseFilt.connect(tenseGain); tenseGain.connect(master); src.start();
+
+  // слой 2 — утончение: тон, ползёт вверх по мере истончения
+  thinOsc = AC.createOscillator(); thinOsc.type="triangle"; thinOsc.frequency.value=210;
+  thinGain = AC.createGain(); thinGain.gain.value=0;
+  thinOsc.connect(thinGain); thinGain.connect(master); thinOsc.start();
+}
+function audioFrame(){
+  if(!AC || condition==="sight"){ if(tenseGain){tenseGain.gain.value=0; thinGain.gain.value=0;} return; }
+  const t = Math.min(1, maxStrain/BREAK_STRAIN);
+  const now = AC.currentTime;
+  tenseGain.gain.setTargetAtTime(Math.min(0.30, avgStrain*0.85), now, 0.02);
+  tenseFilt.frequency.setTargetAtTime(300 + t*1500, now, 0.03);
+  thinGain.gain.setTargetAtTime(t>0.45 ? (t-0.45)*0.20 : 0, now, 0.03);
+  thinOsc.frequency.setTargetAtTime(210 + t*t*760, now, 0.03);
+}
+// слой 3 — разрыв
+function audioSnap(){
+  if(!AC || condition==="sight") return;
+  const s=AC.createBufferSource(); s.buffer=noiseBuf;
+  const f=AC.createBiquadFilter(); f.type="highpass"; f.frequency.value=900;
+  const g=AC.createGain(); const t=AC.currentTime;
+  g.gain.setValueAtTime(0.55,t); g.gain.exponentialRampToValueAtTime(0.001,t+0.18);
+  s.connect(f); f.connect(g); g.connect(master); s.start(t); s.stop(t+0.2);
+}
+
+function audioSlap(){
+  if(!AC || condition==="sight") return;
+  const s=AC.createBufferSource(); s.buffer=noiseBuf;
+  const f=AC.createBiquadFilter(); f.type="lowpass"; f.frequency.value=520; f.Q.value=1.2;
+  const g=AC.createGain(); const t=AC.currentTime;
+  g.gain.setValueAtTime(0.5,t); g.gain.exponentialRampToValueAtTime(0.001,t+0.13);
+  s.connect(f); f.connect(g); g.connect(master); s.start(t); s.stop(t+0.15);
+}
+
+// ─────────────────────────── события разрыва и нажатия
+function onBreak(){
+  if(broke) return;
+  broke = true; breakTime = performance.now();
+  audioSnap();
+  record();
+}
+function pressNow(){
+  if(pressed || broke) { if(broke && !pressed){ pressed=true; pressTime=performance.now(); record(); } return; }
+  pressed = true; pressTime = performance.now();
+  flash.style.opacity = "0.18";
+  setTimeout(()=>flash.style.opacity="0", 90);
+}
+let recorded = false;
+function record(){
+  if(recorded) return;
+  if(!broke) return;                       // пишем только законченные попытки
+  recorded = true;
+  const lead = pressed ? (breakTime - pressTime)/1000 : null;   // за сколько секунд до разрыва
+  log.push({
+    variant, condition,
+    lead_s: lead === null ? null : +lead.toFixed(3),
+    predicted: lead !== null && lead >= 0.3,
+    pressed_at_all: pressed,
+    run_ms: Math.round(breakTime - runStart),
+    max_strain: +maxStrain.toFixed(3),
+    audio_latency_ms: latencies.length ? +median(latencies).toFixed(1) : null,
+    ts: new Date().toISOString()
+  });
+  try{ localStorage.setItem("dough_log", JSON.stringify(log)); }catch(e){}
+}
+function median(a){ const b=[...a].sort((x,y)=>x-y); const m=b.length>>1;
+  return b.length%2 ? b[m] : (b[m-1]+b[m])/2; }
+
+// ─────────────────────────── ввод
+function nodeNear(x,y){
+  let best=-1, bd=1e9;
+  for(const i of edgeNodes){                         // берут лист за край, как в реальной технике
+    const d=(px[i]-x)**2+(py[i]-y)**2; if(d<bd){bd=d;best=i;}
+  }
+  return Math.sqrt(bd) < R0*0.55 ? best : -1;
+}
+function oppositeEdge(n){                            // «вторая рука» — противоположный край
+  let best=-1, bd=-1;
+  for(const i of edgeNodes){
+    const d=(px[i]-px[n])**2+(py[i]-py[n])**2; if(d>bd){bd=d;best=i;}
+  }
+  return best;
+}
+function toLocal(e){
+  const r = cv.getBoundingClientRect();
+  return { x:(e.clientX-r.left)*cv.width/r.width, y:(e.clientY-r.top)*cv.height/r.height };
+}
+stage.addEventListener("pointerdown", e=>{
+  const tDown = performance.now();
+  audioInit(); if(AC && AC.state==="suspended") AC.resume();
+  if(AC){                                            // замер 0: задержка жест→звук
+    const lat = (AC.baseLatency||0)*1000 + (AC.outputLatency||0)*1000 + (performance.now()-tDown);
+    latencies.push(lat); if(latencies.length>60) latencies.shift();
+  }
+  const p = toLocal(e), n = nodeNear(p.x,p.y);
+  if(n<0) return;
+  stage.setPointerCapture(e.pointerId);
+  const gp = makeGrip(n, 0);
+  grabs.push({ id:e.pointerId, node:n, x:p.x, y:p.y, x0:p.x, y0:p.y,
+               t0:performance.now(), grip:gp.ids, gripW:gp.ws, mul:gp.mul });
+  if(grabs.length===1){                              // вторая точка — противоположный край, как вторая рука
+    const opp = oppositeEdge(n);
+    if(opp>=0) pinned[opp]=1;
+  }
+});
+stage.addEventListener("pointermove", e=>{
+  const g = grabs.find(g=>g.id===e.pointerId); if(!g) return;
+  const p = toLocal(e);
+  // пока палец почти не сдвинулся — он прижимает, и хват расширяется
+  const moved = Math.hypot(p.x-g.x0, p.y-g.y0);
+  if(moved < R0*0.10){
+    const held = (performance.now()-g.t0)/1000;
+    const gp = makeGrip(g.node, held);
+    g.grip=gp.ids; g.gripW=gp.ws; g.mul=gp.mul;
+  }
+  // круговое движение вокруг центра листа = раскрутка
+  const c = centerOfSheet();
+  const a0 = Math.atan2(g.y-c.y, g.x-c.x), a1 = Math.atan2(p.y-c.y, p.x-c.x);
+  let da = a1-a0; while(da>Math.PI) da-=Math.PI*2; while(da<-Math.PI) da+=Math.PI*2;
+  spinRate = spinRate*0.72 + (da*60)*0.28;
+  g.x=p.x; g.y=p.y;
+});
+function release(e){
+  const i = grabs.findIndex(g=>g.id===e.pointerId);
+  if(i>=0) grabs.splice(i,1);
+}
+stage.addEventListener("pointerup", release);
+stage.addEventListener("pointercancel", release);
+
+addEventListener("keydown", e=>{
+  if(e.code==="Space"){ e.preventDefault(); pressNow(); }
+  if(e.code==="KeyR"){ reset(); }
+});
+document.getElementById("tear").addEventListener("click", pressNow);
+document.getElementById("reset").addEventListener("click", reset);
+
+function reset(){ recorded=false; resize(); }
+
+document.querySelectorAll("[data-v]").forEach(b=>b.addEventListener("click",()=>{
+  variant=b.dataset.v;
+  document.querySelectorAll("[data-v]").forEach(x=>x.classList.toggle("on",x===b));
+  reset();
+}));
+document.querySelectorAll("[data-c]").forEach(b=>b.addEventListener("click",()=>{
+  condition=b.dataset.c;
+  document.querySelectorAll("[data-c]").forEach(x=>x.classList.toggle("on",x===b));
+  reset();
+}));
+document.getElementById("dump").addEventListener("click", async ()=>{
+  const txt = JSON.stringify(log, null, 2);
+  const btn = document.getElementById("dump");
+  try{ await navigator.clipboard.writeText(txt); btn.textContent = `скопировано (${log.length})`; }
+  catch(e){ console.log(txt); btn.textContent = "лог в консоли"; }
+  setTimeout(()=>btn.textContent = "скопировать лог", 1800);
+});
+
+// ─────────────────────────── рендер
+// Тесто лежит на тёмной столешнице. Толстое — непрозрачное и бежевое; растянутое
+// истончается и НАЧИНАЕТ ПРОСВЕЧИВАТЬ, то есть темнеет к цвету стола.
+// Это и есть «растянуть почти до прозрачности» из v3, и это же — читаемый сигнал «сейчас порвётся».
+const DOUGH = [236, 219, 186], TABLE = [36, 28, 19];
+function mix(t){                                   // t: 1 толстое → 0 тонкое
+  const k = Math.pow(Math.max(0,Math.min(1,t)), 0.85);
+  return [ Math.round(TABLE[0]+(DOUGH[0]-TABLE[0])*k),
+           Math.round(TABLE[1]+(DOUGH[1]-TABLE[1])*k),
+           Math.round(TABLE[2]+(DOUGH[2]-TABLE[2])*k) ];
+}
+const PAL = Array.from({length:16}, (_,i)=>{ const c = mix(i/15); return `rgb(${c[0]},${c[1]},${c[2]})`; });
+function quant(t){ return PAL[Math.max(0,Math.min(15, Math.round(t*15)))]; }
+
+function draw(){
+  const pixelated = variant!=="C";
+  const LOGW = variant==="A" ? 80 : 224;
+  let g, W, H, sx, sy, ox, oy;
+
+  if(pixelated){
+    const ar = cv.height/cv.width;
+    W = LOGW; H = Math.max(8, Math.round(LOGW*ar));
+    if(lo.width!==W||lo.height!==H){ lo.width=W; lo.height=H; }
+    g = lctx; sx = W/cv.width; sy = H/cv.height; ox=0; oy=0;
+  } else {
+    g = ctx; W=cv.width; H=cv.height; sx=1; sy=1; ox=0; oy=0;
+  }
+
+  g.fillStyle = "#14100c"; g.fillRect(0,0,W,H);
+  if(condition!=="sound") drawTable(g, sx, sy, pixelated);
+
+  if(condition!=="sound"){
+    // ячейки решётки; порванные и просвеченные насквозь — дырки
+    for(let q=0;q<quads.length;q++){
+      const [a,b2,c,d] = quads[q];
+      const t=(thick[a]+thick[b2]+thick[c]+thick[d])/4;
+      if(t < HOLE_THICK) continue;                    // истончилось до сквозной дыры
+      g.fillStyle = pixelated ? quant(t) : shade(t);
+      g.beginPath();
+      g.moveTo(px[a]*sx+ox, py[a]*sy+oy);
+      g.lineTo(px[b2]*sx+ox, py[b2]*sy+oy);
+      g.lineTo(px[c]*sx+ox, py[c]*sy+oy);
+      g.lineTo(px[d]*sx+ox, py[d]*sy+oy);
+      g.closePath(); g.fill();
+    }
+    // точки захвата — минимальная отметка, без украшений
+    g.fillStyle="#d98b3a";
+    for(const gr of grabs){ const S2=pixelated?1.5:4;
+      g.fillRect(px[gr.node]*sx-S2/2, py[gr.node]*sy-S2/2, S2, S2); }
+  }
+
+  if(pixelated){
+    ctx.imageSmoothingEnabled=false;
+    ctx.fillStyle="#14100c"; ctx.fillRect(0,0,cv.width,cv.height);
+    ctx.drawImage(lo,0,0,W,H,0,0,cv.width,cv.height);
+  }
+}
+// Стол: рабочая зона · мостик начинок · тава.
+// Тава по F1 — กระทะโรตี, толстая сталь 18–20″ с ВОГНУТЫМ дном, удерживающим масло,
+// а не плоская «тава»: лужица жира собирается в центре, отсюда техника подгона масла к краям.
+function drawTable(g, sx, sy, px_){
+  const w = zone("work"), br = zone("bridge"), tw = zone("tawa");
+  const R_ = (x)=>x*sx, D_ = (y)=>y*sy;
+
+  g.fillStyle = px_ ? "#241c13" : "#241c13";                 // рабочая столешница
+  g.fillRect(R_(w.x), D_(w.y), R_(w.w), D_(w.h));
+
+  g.fillStyle = "#1b1610";                                    // мостик начинок
+  g.fillRect(R_(br.x), D_(br.y), R_(br.w), D_(br.h));
+  const cells = 4, ch = br.h/(cells+1);
+  for(let i=0;i<cells;i++){
+    g.fillStyle = ["#4a5b2a","#6d4a2c","#7a6a2f","#3f3a44"][i];   // заглушки начинок
+    const cy = br.y + ch*(i+0.75), pad = br.w*0.22;
+    g.fillRect(R_(br.x+pad), D_(cy), R_(br.w-pad*2), D_(ch*0.55));
+  }
+
+  const cx = tw.cx, cy = tw.cy, rad = Math.min(tw.w, tw.h)*0.40;
+  const rings = px_ ? 7 : 26;                                  // вогнутость — кольцами внутрь
+  for(let i=rings;i>=1;i--){
+    const t = i/rings;
+    const v = Math.round(26 + (1-t)*30);
+    g.fillStyle = `rgb(${v},${v-4},${v-8})`;
+    g.beginPath(); g.arc(R_(cx), D_(cy), R_(rad*t), 0, Math.PI*2); g.fill();
+  }
+  g.fillStyle = px_ ? "#6b5a2a" : "rgba(150,125,60,0.55)";     // масло в углублении
+  g.beginPath(); g.arc(R_(cx), D_(cy), R_(rad*0.30), 0, Math.PI*2); g.fill();
+}
+
+function shade(t){ const c = mix(t); return `rgb(${c[0]},${c[1]},${c[2]})`; }
+
+// ─────────────────────────── цикл
+let last=performance.now(), fps=60, acc=0, frames=0;
+function loop(now){
+  const dt = Math.min(0.033, (now-last)/1000); last=now;
+  if(!broke) step(dt); else measureThickness();
+  audioFrame();
+  draw();
+
+  acc+=dt; frames++;
+  if(acc>0.5){ fps=frames/acc; acc=0; frames=0; }
+  const done = log.filter(l=>l.variant===variant&&l.condition===condition).length;
+  const hit  = log.filter(l=>l.variant===variant&&l.condition===condition&&l.predicted).length;
+  stats.textContent =
+    `${variant}/${condition}  попыток ${done}/30  распознано ${done?Math.round(hit/done*100):0}%\n` +
+    `натяж ${maxStrain.toFixed(2)}  хват ${grabs.length?Math.round(grabs[0].mul||0):0}  раскрутка ${Math.abs(spinRate).toFixed(1)}  ` +
+    `${broke?"ПОРВАЛОСЬ":pressed?"нажато":"—"}  ` +
+    `${fps.toFixed(0)} fps  задержка ${latencies.length?median(latencies).toFixed(0):"—"} мс`;
+  requestAnimationFrame(loop);
+}
+
+function resize(){
+  const r = stage.getBoundingClientRect(), dpr = Math.min(2, devicePixelRatio||1);
+  cv.width = Math.max(64, Math.round(r.width*dpr));
+  cv.height = Math.max(64, Math.round(r.height*dpr));
+  build();
+}
+addEventListener("resize", resize);
+try{ const s=localStorage.getItem("dough_log"); if(s) log=JSON.parse(s); }catch(e){}
+resize();
+requestAnimationFrame(loop);
+</script>
