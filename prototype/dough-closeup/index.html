@@ -22,6 +22,10 @@
     gap:6px 14px; align-items:center; background:#0f0c09; }
   .grp{ display:flex; gap:4px; align-items:center; }
   .grp b{ color:var(--dim); font-weight:400; margin-right:2px; }
+  /* Кнопки замера меняют условия эксперимента (вплоть до выключения картинки),
+     поэтому они приглушены и подписаны — иначе читаются как обычные настройки. */
+  .measure{ opacity:.62; }
+  .measure b{ color:#5d5346; font-size:11px; }
   button{ font:inherit; color:var(--ink); background:#1c1710; border:1px solid var(--line);
     padding:4px 9px; cursor:pointer; }
   button:hover{ border-color:var(--dim); }
@@ -30,6 +34,15 @@
   #stats{ color:var(--dim); margin-left:auto; text-align:right; white-space:pre; }
   #hint{ position:absolute; left:10px; top:10px; color:var(--dim); pointer-events:none; }
   #flash{ position:absolute; inset:0; pointer-events:none; opacity:0; background:#d98b3a; }
+  #torn{ position:absolute; inset:0; display:none; align-items:center; justify-content:center;
+    color:var(--hot); font-size:clamp(18px,4vw,32px); letter-spacing:.08em;
+    pointer-events:none; z-index:4; }
+  #torn.on{ display:flex; }
+  #blind{ position:absolute; inset:0; display:none; flex-direction:column; gap:6px;
+    align-items:center; justify-content:center; color:var(--dim); text-align:center;
+    pointer-events:none; z-index:3; }
+  #blind span{ color:#5d5346; font-size:12px; }
+  #blind.on{ display:flex; }
   /* Подсказка про ориентацию перекрывала весь холст и съедала касания:
      при вертикальном телефоне играть было нельзя вообще. Теперь она сквозная. */
   #turn{ position:absolute; left:0; right:0; bottom:8px; display:none; justify-content:center;
@@ -42,16 +55,18 @@
   <canvas id="cv"></canvas>
   <div id="hint">растяни комок до пунктира, не порвав · прижми край и подержи — возьмёшь шире · потом веди пальцем по кругу</div>
   <div id="flash"></div>
+  <div id="torn">ПОРВАЛОСЬ · новый комок…</div>
+  <div id="blind">картинка выключена намеренно<br><span>это режим замера: тяни на слух</span></div>
   <div id="turn">удобнее горизонтально</div>
 </div>
 
 <div id="panel">
-  <div class="grp"><b>вариант</b>
+  <div class="grp measure"><b>замер: вид</b>
     <button data-v="A" class="on">A · пиксель 80</button>
     <button data-v="B">B · пиксель 224</button>
     <button data-v="C">C · контроль</button>
   </div>
-  <div class="grp"><b>условие</b>
+  <div class="grp measure"><b>замер: по чему судишь</b>
     <button data-c="both" class="on">оба</button>
     <button data-c="sound">только звук</button>
     <button data-c="sight">только картинка</button>
@@ -77,7 +92,7 @@
 // длина окружного ребра там падает до долей пикселя, относительное растяжение скачет
 // до 400%+ и лист «рвётся» в середине от любого движения. Замер это обнаружил сразу.
 // Число узлов сохранено (~1150), однородность рёбер восстановлена.
-const BUILD = "2026-08-22 · ввод на окне";
+const BUILD = "2026-08-22 · экран не гаснет молча";
 const GRID = 38;                   // 38x38, в круг попадает ~1130 узлов
 let SUBSTEPS = 8;                  // T2: 8–10 подшагов, 1 итерация
 let COMPLIANCE = 0.00004;          // податливость: тесто тянучее, натяжение расходится по листу,
@@ -278,7 +293,13 @@ function applySpin(dt){
   const drive = Math.abs(spinRate) + workRate*0.5;
   workRate *= 0.90;
   if(drive < 0.15){ spinRate *= 0.90; return; }
-  const grow = Math.min(0.004, drive * SPIN_GAIN * dt);
+  // Лист не резиновый: у теста есть предел, за которым он больше не растёт, а только
+  // истончается и рвётся. Без потолка комок раздувался в девять раз больше цели,
+  // и мишень переставала что-либо значить.
+  const over = sheetRadius() / targetR;
+  if(over > 1.25) { spinRate *= 0.90; return; }
+  const ease = over > 1.0 ? Math.max(0, 1 - (over-1.0)/0.25) : 1;
+  const grow = Math.min(0.004, drive * SPIN_GAIN * dt) * ease;
   for(let i=0;i<cons.length;i++){ const c=cons[i]; if(!c.broken) c.rest *= (1+grow); }
   spinTotal += drive*dt;
   if(spinTotal - lastSlap > Math.PI){ lastSlap = spinTotal; slap(); }
@@ -315,6 +336,7 @@ const CREEP_ON = 0.06;             // порог растяжения, с кот
 // остаётся растянутым и становится тоньше. Чисто упругая модель рвалась на 1,3x
 // и «прозрачного листа» из v3 не давала в принципе.
 function creep(dt){
+  if(sheetRadius() > targetR*1.25) return;          // предел растяжимости — общий с раскруткой
   const k = Math.min(1, CREEP*dt);
   for(let i=0;i<cons.length;i++){
     const c=cons[i]; if(c.broken) continue;
@@ -323,6 +345,10 @@ function creep(dt){
   }
 }
 function checkBreak(dt){
+  // Первые полторы секунды после нового комка тесто прощает: рвать новичка мгновенно
+  // за первое же резкое движение — значит не дать ему вообще ничего понять.
+  const young = (performance.now() - runStart) < 1500;
+  if(young) return;
   // Тесто рвётся не там, где сильнее натянуто, а там, где стало слишком тонким:
   // «дырка» из v3 — это следствие истончения. Рывок рвёт раньше, чем терпеливое
   // растягивание, потому что поднимает эффективный порог толщины.
@@ -436,6 +462,9 @@ function onBreak(){
   broke = true; breakTime = performance.now();
   audioSnap();
   record();
+  // Раньше после разрыва симуляция замирала навсегда: игрок тыкал в мёртвый экран,
+  // пока случайно не попадал в «заново». Теперь тесто само возвращается на стол.
+  setTimeout(()=>{ if(broke) reset(); }, 1400);
 }
 function pressNow(){
   if(pressed || broke) { if(broke && !pressed){ pressed=true; pressTime=performance.now(); record(); } return; }
@@ -494,6 +523,9 @@ let dbgDown = 0, dbgMove = 0, dbgKind = "ждёт";
 
 function onDown(id, cx, cy){
   dbgDown++;
+  if(broke){ reset(); return; }                      // порвалось — касание начинает заново
+  const dup = grabs.findIndex(g=>g.id===id);         // iOS переиспользует id: старый захват душил новый
+  if(dup>=0) grabs.splice(dup,1);
   const tDown = performance.now();
   audioInit(); if(AC && AC.state==="suspended") AC.resume();
   if(AC){
@@ -744,12 +776,15 @@ function loop(now){
 
   acc+=dt; frames++;
   if(acc>0.5){ fps=frames/acc; acc=0; frames=0; }
+  document.getElementById("torn").classList.toggle("on", broke);
+  document.getElementById("blind").classList.toggle("on", condition === "sound");
   const done = log.filter(l=>l.variant===variant&&l.condition===condition).length;
   const hit  = log.filter(l=>l.variant===variant&&l.condition===condition&&l.predicted).length;
   stats.textContent =
     `сборка: ${BUILD}\n` +
     `${variant}/${condition}  попыток ${done}/30  распознано ${done?Math.round(hit/done*100):0}%\n` +
-    `${grabs.length?"◆ держишь тесто":"○ коснись теста слева"}  лист ${Math.round(sheetRadius()/targetR*100)}%  ` +
+    `${grabs.length?"◆ держишь тесто":"○ коснись теста слева"}  ` +
+    `лист ${Math.round(sheetRadius()/targetR*100)}%${sheetRadius()>=targetR?" ✓ готов":""}  ` +
     `[на странице: касаний ${rawTouch}, мыши ${rawPointer} · до теста: ↓${dbgDown} ↔${dbgMove} · ${dbgKind}]  ` +
     `хват ${grabs.length?Math.round(grabs[0].mul||0):0}  раскрутка ${Math.abs(spinRate).toFixed(1)}  ` +
     `${broke?"ПОРВАЛОСЬ":pressed?"нажато":"—"}  ` +
