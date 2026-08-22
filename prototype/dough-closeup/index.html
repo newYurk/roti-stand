@@ -98,7 +98,7 @@
 // длина окружного ребра там падает до долей пикселя, относительное растяжение скачет
 // до 400%+ и лист «рвётся» в середине от любого движения. Замер это обнаружил сразу.
 // Число узлов сохранено (~1150), однородность рёбер восстановлена.
-const BUILD = "2026-08-22 · починен цикл кадра";
+const BUILD = "2026-08-22 · размах и мягкий звук";
 const GRID = 38;                   // 38x38, в круг попадает ~1130 узлов
 let SUBSTEPS = 8;                  // T2: 8–10 подшагов, 1 итерация
 let COMPLIANCE = 0.00004;          // податливость: тесто тянучее, натяжение расходится по листу,
@@ -281,7 +281,7 @@ const GRIP_MIN = 5, GRIP_MAX = 22, GRIP_GROW = 1.4;   // шагов решётк
 // ฟาด — раскрутить и прихлопнуть о стол. Главная техника растягивания роти:
 // «rotate and stretch the dough in a forward, circular motion, slapping the far end on the table».
 // Растягивание за два края даёт жгут; круговое движение растит лист во все стороны разом.
-const SPIN_GAIN = 0.020;           // сколько роста даёт оборот: секунда раскрутки — примерно +25% диаметра
+const SPIN_GAIN = 0.034;           // сколько роста даёт оборот: секунда раскрутки — примерно +25% диаметра
 function sheetRadius(){
   const c = centerOfSheet();
   let m = 0;
@@ -412,7 +412,7 @@ function measureThickness(){
 }
 
 // ─────────────────────────── звук: три слоя, процедурно, без ассетов
-let AC=null, master=null, tenseGain=null, tenseFilt=null, thinOsc=null, thinGain=null, noiseBuf=null;
+let AC=null, master=null, tenseGain=null, tenseFilt=null, thinOsc=null, thinGain=null, thinFilt=null, noiseBuf=null;
 function audioInit(){
   if(AC) return;
   AC = new (window.AudioContext||window.webkitAudioContext)({ latencyHint:"interactive" });
@@ -430,9 +430,12 @@ function audioInit(){
   src.connect(tenseFilt); tenseFilt.connect(tenseGain); tenseGain.connect(master); src.start();
 
   // слой 2 — утончение: тон, ползёт вверх по мере истончения
-  thinOsc = AC.createOscillator(); thinOsc.type="triangle"; thinOsc.frequency.value=210;
+  // Треугольник наверху диапазона резал ухо. Ниже, тише и через мягкий фильтр:
+  // это должно читаться как «тесто на пределе», а не как писк прибора.
+  thinOsc = AC.createOscillator(); thinOsc.type="sine"; thinOsc.frequency.value=120;
   thinGain = AC.createGain(); thinGain.gain.value=0;
-  thinOsc.connect(thinGain); thinGain.connect(master); thinOsc.start();
+  thinFilt = AC.createBiquadFilter(); thinFilt.type="lowpass"; thinFilt.frequency.value=900;
+  thinOsc.connect(thinFilt); thinFilt.connect(thinGain); thinGain.connect(master); thinOsc.start();
 }
 function audioFrame(){
   if(!AC || condition==="sight"){ if(tenseGain){tenseGain.gain.value=0; thinGain.gain.value=0;} return; }
@@ -441,10 +444,11 @@ function audioFrame(){
   for(let i=0;i<N;i++) if(thick[i]<tmin) tmin = thick[i];
   const t = Math.max(0, Math.min(1, 1 - (tmin - THICK_BREAK)/(0.6 - THICK_BREAK)));
   const now = AC.currentTime;
-  tenseGain.gain.setTargetAtTime(Math.min(0.30, avgStrain*0.85), now, 0.02);
-  tenseFilt.frequency.setTargetAtTime(300 + t*1500, now, 0.03);
-  thinGain.gain.setTargetAtTime(t>0.45 ? (t-0.45)*0.20 : 0, now, 0.03);
-  thinOsc.frequency.setTargetAtTime(210 + t*t*760, now, 0.03);
+  tenseGain.gain.setTargetAtTime(Math.min(0.22, avgStrain*0.7), now, 0.04);
+  tenseFilt.frequency.setTargetAtTime(260 + t*700, now, 0.05);
+  thinGain.gain.setTargetAtTime(t>0.55 ? (t-0.55)*0.16 : 0, now, 0.05);
+  thinOsc.frequency.setTargetAtTime(120 + t*t*190, now, 0.05);
+  thinFilt.frequency.setTargetAtTime(500 + t*900, now, 0.05);
 }
 // слой 3 — разрыв
 function audioSnap(){
@@ -568,7 +572,15 @@ function onMove(id, cx, cy){
   const a0 = Math.atan2(g.y-c.y, g.x-c.x), a1 = Math.atan2(p.y-c.y, p.x-c.x);
   let da = a1-a0; while(da>Math.PI) da-=Math.PI*2; while(da<-Math.PI) da+=Math.PI*2;
   spinRate = spinRate*0.72 + (da*60)*0.28;
-  workRate = Math.min(6, workRate + Math.hypot(p.x-g.x, p.y-g.y)/Math.max(1,R0) * 6);
+  // Раньше «работа» копилась на каждом событии касания, поэтому мелкая частая дрожь
+  // давала больше, чем широкий размах: событий больше — прибавок больше. Теперь
+  // считается скорость пальца и его удалённость от центра, то есть именно размах.
+  const nowT = performance.now();
+  const dtm = Math.max(8, nowT - (g.tm || nowT)) / 1000;
+  g.tm = nowT;
+  const speed = Math.hypot(p.x-g.x, p.y-g.y) / Math.max(1,R0) / dtm;   // радиусов в секунду
+  const reach = Math.min(1.6, Math.hypot(p.x-c.x, p.y-c.y) / Math.max(1,R0));
+  workRate = workRate*0.82 + Math.min(9, speed * reach) * 0.18;
   g.x=p.x; g.y=p.y;
 }
 function onUp(id){
