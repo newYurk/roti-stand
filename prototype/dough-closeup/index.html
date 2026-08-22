@@ -32,7 +32,12 @@
   button.on{ background:var(--hot); color:#14100c; border-color:var(--hot); }
   #tear{ padding:8px 18px; font-weight:bold; }
   #stats{ color:var(--dim); margin-left:auto; text-align:right; white-space:pre; }
-  #hint{ position:absolute; left:10px; top:10px; color:var(--dim); pointer-events:none; }
+  #hint{ position:absolute; left:10px; top:10px; right:10px; color:var(--dim);
+    pointer-events:none; font-size:11px; }
+  /* Крупный индикатор: мелкую строку внизу на телефоне не разглядеть,
+     а без неё непонятно, дошло ли касание вообще. */
+  #live{ position:absolute; left:0; right:0; top:34px; text-align:center;
+    pointer-events:none; font-size:clamp(14px,3.4vw,20px); color:var(--hot); }
   #flash{ position:absolute; inset:0; pointer-events:none; opacity:0; background:#d98b3a; }
   #torn{ position:absolute; inset:0; display:none; align-items:center; justify-content:center;
     color:var(--hot); font-size:clamp(18px,4vw,32px); letter-spacing:.08em;
@@ -53,7 +58,8 @@
 <body>
 <div id="stage">
   <canvas id="cv"></canvas>
-  <div id="hint">растяни комок до пунктира, не порвав · прижми край и подержи — возьмёшь шире · потом веди пальцем по кругу</div>
+  <div id="hint">растяни комок до пунктира · прижми край, подержи, веди по кругу</div>
+  <div id="live">коснись теста</div>
   <div id="flash"></div>
   <div id="torn">ПОРВАЛОСЬ · новый комок…</div>
   <div id="blind">картинка выключена намеренно<br><span>это режим замера: тяни на слух</span></div>
@@ -92,7 +98,7 @@
 // длина окружного ребра там падает до долей пикселя, относительное растяжение скачет
 // до 400%+ и лист «рвётся» в середине от любого движения. Замер это обнаружил сразу.
 // Число узлов сохранено (~1150), однородность рёбер восстановлена.
-const BUILD = "2026-08-22 · экран не гаснет молча";
+const BUILD = "2026-08-22 · починен цикл кадра";
 const GRID = 38;                   // 38x38, в круг попадает ~1130 узлов
 let SUBSTEPS = 8;                  // T2: 8–10 подшагов, 1 итерация
 let COMPLIANCE = 0.00004;          // податливость: тесто тянучее, натяжение расходится по листу,
@@ -430,7 +436,10 @@ function audioInit(){
 }
 function audioFrame(){
   if(!AC || condition==="sight"){ if(tenseGain){tenseGain.gain.value=0; thinGain.gain.value=0;} return; }
-  const t = Math.min(1, maxStrain/BREAK_STRAIN);
+  // Напряжение по звуку теперь берём от истончения: чем тоньше лист, тем ближе разрыв.
+  let tmin = 1;
+  for(let i=0;i<N;i++) if(thick[i]<tmin) tmin = thick[i];
+  const t = Math.max(0, Math.min(1, 1 - (tmin - THICK_BREAK)/(0.6 - THICK_BREAK)));
   const now = AC.currentTime;
   tenseGain.gain.setTargetAtTime(Math.min(0.30, avgStrain*0.85), now, 0.02);
   tenseFilt.frequency.setTargetAtTime(300 + t*1500, now, 0.03);
@@ -523,7 +532,7 @@ let dbgDown = 0, dbgMove = 0, dbgKind = "ждёт";
 
 function onDown(id, cx, cy){
   dbgDown++;
-  if(broke){ reset(); return; }                      // порвалось — касание начинает заново
+  if(broke) reset();                                 // порвалось — тот же тап и начинает заново, и берёт тесто
   const dup = grabs.findIndex(g=>g.id===id);         // iOS переиспользует id: старый захват душил новый
   if(dup>=0) grabs.splice(dup,1);
   const tDown = performance.now();
@@ -768,14 +777,27 @@ function shade(t){ const c = mix(t); return `rgb(${c[0]},${c[1]},${c[2]})`; }
 
 // ─────────────────────────── цикл
 let last=performance.now(), fps=60, acc=0, frames=0;
+let loopErrs = 0;
 function loop(now){
   const dt = Math.min(0.033, (now-last)/1000); last=now;
-  if(!broke) step(dt); else measureThickness();
-  audioFrame();
-  draw();
+  try{
+    if(!broke) step(dt); else measureThickness();
+    audioFrame();
+    draw();
+  }catch(err){
+    // Раньше единственное исключение в кадре останавливало игру насмерть:
+    // requestAnimationFrame больше не вызывался, и экран замирал.
+    loopErrs++;
+    if(loopErrs < 4) console.error("кадр упал:", err);
+  }
 
   acc+=dt; frames++;
   if(acc>0.5){ fps=frames/acc; acc=0; frames=0; }
+  const liveEl = document.getElementById("live");
+  liveEl.textContent = broke ? "порвалось — коснись, начнём заново"
+    : grabs.length ? `держишь · лист ${Math.round(sheetRadius()/targetR*100)}%${sheetRadius()>=targetR?" ✓ готов":""}`
+    : (rawTouch||rawPointer) ? "коснись теста слева" : "коснись теста";
+  liveEl.style.color = grabs.length ? "#8fbf6a" : "#d98b3a";
   document.getElementById("torn").classList.toggle("on", broke);
   document.getElementById("blind").classList.toggle("on", condition === "sound");
   const done = log.filter(l=>l.variant===variant&&l.condition===condition).length;
@@ -785,7 +807,7 @@ function loop(now){
     `${variant}/${condition}  попыток ${done}/30  распознано ${done?Math.round(hit/done*100):0}%\n` +
     `${grabs.length?"◆ держишь тесто":"○ коснись теста слева"}  ` +
     `лист ${Math.round(sheetRadius()/targetR*100)}%${sheetRadius()>=targetR?" ✓ готов":""}  ` +
-    `[на странице: касаний ${rawTouch}, мыши ${rawPointer} · до теста: ↓${dbgDown} ↔${dbgMove} · ${dbgKind}]  ` +
+    `[касаний ${rawTouch} · до теста ↓${dbgDown} ↔${dbgMove} · ${dbgKind}${loopErrs?" · сбоев "+loopErrs:""}]  ` +
     `хват ${grabs.length?Math.round(grabs[0].mul||0):0}  раскрутка ${Math.abs(spinRate).toFixed(1)}  ` +
     `${broke?"ПОРВАЛОСЬ":pressed?"нажато":"—"}  ` +
     `${fps.toFixed(0)} fps  задержка ${latencies.length?median(latencies).toFixed(0):"—"} мс`;
