@@ -1,7 +1,8 @@
 <title>Растяжка теста роти</title>
 <style>
   :root{ --bg:#14100c; --ink:#e8ddcc; --dim:#8b7f6e; --line:#2a231b; --hot:#d98b3a; }
-  *{ box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  *{ box-sizing:border-box; -webkit-tap-highlight-color:transparent;
+     -webkit-touch-callout:none; -webkit-user-select:none; user-select:none; }
   html,body{ margin:0; height:100%; background:var(--bg); color:var(--ink);
     font:13px/1.45 ui-monospace,SFMono-Regular,Menlo,monospace; overscroll-behavior:none; }
   body{ display:flex; flex-direction:column; touch-action:none; }
@@ -63,7 +64,7 @@
 // длина окружного ребра там падает до долей пикселя, относительное растяжение скачет
 // до 400%+ и лист «рвётся» в середине от любого движения. Замер это обнаружил сразу.
 // Число узлов сохранено (~1150), однородность рёбер восстановлена.
-const BUILD = "2026-08-22 · раскрутка и хват";
+const BUILD = "2026-08-22 · тап по тесту";
 const GRID = 38;                   // 38x38, в круг попадает ~1130 узлов
 let SUBSTEPS = 8;                  // T2: 8–10 подшагов, 1 итерация
 let COMPLIANCE = 0.00004;          // податливость: тесто тянучее, натяжение расходится по листу,
@@ -123,7 +124,7 @@ function zone(name){
 }
 
 // ─────────────────────────── построение листа
-const START_FRAC = 0.13, TARGET_FRAC = 0.42;   // комок теста → лист на всю рабочую зону
+const START_FRAC = 0.17, TARGET_FRAC = 0.46;   // комок теста → лист на всю рабочую зону
 let targetR = 1, startR = 1;
 function build(){
   const z = zone("work");
@@ -447,11 +448,13 @@ function median(a){ const b=[...a].sort((x,y)=>x-y); const m=b.length>>1;
 
 // ─────────────────────────── ввод
 function nodeNear(x,y){
+  // Палец толстый, а комок маленький: требовать попадания в край — значит не дать
+  // взять тесто вообще. Любое касание рабочей зоны берёт ближайший край листа.
   let best=-1, bd=1e9;
-  for(const i of edgeNodes){                         // берут лист за край, как в реальной технике
+  for(const i of edgeNodes){
     const d=(px[i]-x)**2+(py[i]-y)**2; if(d<bd){bd=d;best=i;}
   }
-  return Math.sqrt(bd) < R0*0.55 ? best : -1;
+  return best;
 }
 function oppositeEdge(n){                            // «вторая рука» — противоположный край
   let best=-1, bd=-1;
@@ -472,7 +475,10 @@ stage.addEventListener("pointerdown", e=>{
     const lat = (AC.baseLatency||0)*1000 + (AC.outputLatency||0)*1000 + (performance.now()-tDown);
     latencies.push(lat); if(latencies.length>60) latencies.shift();
   }
-  const p = toLocal(e), n = nodeNear(p.x,p.y);
+  const p = toLocal(e);
+  const w = zone("work");
+  if(p.x > w.x + w.w) return;                        // справа жарят, тесто не трогают
+  const n = nodeNear(p.x,p.y);
   if(n<0) return;
   stage.setPointerCapture(e.pointerId);
   const gp = makeGrip(n, 0);
@@ -488,7 +494,7 @@ stage.addEventListener("pointermove", e=>{
   const p = toLocal(e);
   // пока палец почти не сдвинулся — он прижимает, и хват расширяется
   const moved = Math.hypot(p.x-g.x0, p.y-g.y0);
-  if(moved < R0*0.10){
+  if(moved < R0*0.35){                              // палец дрожит: узкий порог не давал хвату расти
     const held = (performance.now()-g.t0)/1000;
     const gp = makeGrip(g.node, held);
     g.grip=gp.ids; g.gripW=gp.ws; g.mul=gp.mul;
@@ -600,7 +606,7 @@ function draw(){
     }
     // точки захвата — минимальная отметка, без украшений
     g.fillStyle="#d98b3a";
-    for(const gr of grabs){ const S2=pixelated?1.5:4;
+    for(const gr of grabs){ const S2=pixelated?3:9;
       g.fillRect(prX(px[gr.node],py[gr.node])*sx-S2/2, prY(px[gr.node],py[gr.node])*sy-S2/2, S2, S2); }
   }
 
@@ -675,7 +681,8 @@ function loop(now){
   stats.textContent =
     `сборка: ${BUILD}\n` +
     `${variant}/${condition}  попыток ${done}/30  распознано ${done?Math.round(hit/done*100):0}%\n` +
-    `лист ${Math.round(sheetRadius()/targetR*100)}% от нужного  хват ${grabs.length?Math.round(grabs[0].mul||0):0}  раскрутка ${Math.abs(spinRate).toFixed(1)}  ` +
+    `${grabs.length?"◆ держишь тесто":"○ коснись теста слева"}  лист ${Math.round(sheetRadius()/targetR*100)}%  ` +
+    `хват ${grabs.length?Math.round(grabs[0].mul||0):0}  раскрутка ${Math.abs(spinRate).toFixed(1)}  ` +
     `${broke?"ПОРВАЛОСЬ":pressed?"нажато":"—"}  ` +
     `${fps.toFixed(0)} fps  задержка ${latencies.length?median(latencies).toFixed(0):"—"} мс`;
   requestAnimationFrame(loop);
