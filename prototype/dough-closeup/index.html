@@ -26,6 +26,8 @@
      поэтому они приглушены и подписаны — иначе читаются как обычные настройки. */
   .measure{ opacity:.62; }
   .measure b{ color:#5d5346; font-size:11px; }
+  .tune label{ display:flex; align-items:center; gap:4px; color:var(--dim); font-size:11px; }
+  .tune input[type=range]{ width:74px; accent-color:var(--hot); }
   button{ font:inherit; color:var(--ink); background:#1c1710; border:1px solid var(--line);
     padding:4px 9px; cursor:pointer; }
   button:hover{ border-color:var(--dim); }
@@ -78,6 +80,11 @@
     <button data-c="sight">только картинка</button>
   </div>
   <button id="tear">СЕЙЧАС ПОРВЁТСЯ (space)</button>
+  <div class="grp tune"><b>ощущение</b>
+    <label>упругость<input id="sCom" type="range" min="0" max="100" value="35"></label>
+    <label>текучесть<input id="sCreep" type="range" min="0" max="100" value="35"></label>
+    <label>прочность<input id="sBreak" type="range" min="0" max="100" value="50"></label>
+  </div>
   <div class="grp">
     <button id="reset">заново</button>
     <button id="dump">скопировать лог</button>
@@ -98,13 +105,13 @@
 // длина окружного ребра там падает до долей пикселя, относительное растяжение скачет
 // до 400%+ и лист «рвётся» в середине от любого движения. Замер это обнаружил сразу.
 // Число узлов сохранено (~1150), однородность рёбер восстановлена.
-const BUILD = "2026-08-22 · размах и мягкий звук";
+const BUILD = "2026-08-22 · тесто снова упругое";
 const GRID = 38;                   // 38x38, в круг попадает ~1130 узлов
 let SUBSTEPS = 8;                  // T2: 8–10 подшагов, 1 итерация
-let COMPLIANCE = 0.00004;          // податливость: тесто тянучее, натяжение расходится по листу,
-                                   // а не копится под пальцем (замер показал разрыв при 2% растяжения)
+let COMPLIANCE = 0.000010;         // податливость. Крутилась вслепую, пока не работал тап,
+                                   // и тесто превратилось в сопли: вернул к упругому.
 let DAMP = 0.986;
-let THICK_BREAK = 0.028;           // лист рвётся там, где ИСТОНЧИЛСЯ до этой доли толщины.
+let THICK_BREAK = 0.020;           // лист рвётся там, где ИСТОНЧИЛСЯ до этой доли толщины.
                                    // Комок ~3 см превращается в лист ~1 мм: толщина падает раз в
                                    // тридцать, и настоящее тесто это выдерживает. Прежние 0.12
                                    // делали цель физически недостижимой.
@@ -281,7 +288,7 @@ const GRIP_MIN = 5, GRIP_MAX = 22, GRIP_GROW = 1.4;   // шагов решётк
 // ฟาด — раскрутить и прихлопнуть о стол. Главная техника растягивания роти:
 // «rotate and stretch the dough in a forward, circular motion, slapping the far end on the table».
 // Растягивание за два края даёт жгут; круговое движение растит лист во все стороны разом.
-const SPIN_GAIN = 0.034;           // сколько роста даёт оборот: секунда раскрутки — примерно +25% диаметра
+let SPIN_GAIN_F = 0.015;           // сколько роста даёт оборот: секунда раскрутки — примерно +25% диаметра
 function sheetRadius(){
   const c = centerOfSheet();
   let m = 0;
@@ -305,7 +312,7 @@ function applySpin(dt){
   const over = sheetRadius() / targetR;
   if(over > 1.25) { spinRate *= 0.90; return; }
   const ease = over > 1.0 ? Math.max(0, 1 - (over-1.0)/0.25) : 1;
-  const grow = Math.min(0.004, drive * SPIN_GAIN * dt) * ease;
+  const grow = Math.min(0.004, drive * SPIN_GAIN_F * dt) * ease;
   for(let i=0;i<cons.length;i++){ const c=cons[i]; if(!c.broken) c.rest *= (1+grow); }
   spinTotal += drive*dt;
   if(spinTotal - lastSlap > Math.PI){ lastSlap = spinTotal; slap(); }
@@ -335,7 +342,7 @@ function makeGrip(n, held){
 // Разрыв судится по устойчивому натяжению за кадр, а не по шуму отдельного подшага,
 // и распространяется по соседям — дырка рвётся дальше, как в настоящем тесте.
 let RATE_SENS = 0.30;              // насколько рывок снижает предел прочности
-let CREEP = 1.1;                   // текучесть: скорость, с которой длина покоя догоняет текущую
+let CREEP = 0.55;                   // текучесть: скорость, с которой длина покоя догоняет текущую
 const CREEP_ON = 0.06;             // порог растяжения, с которого тесто начинает течь
 
 // Тесто ПЛАСТИЧНО: удержанное натяжение оно не возвращает, а запоминает — лист
@@ -634,6 +641,25 @@ addEventListener("keydown", e=>{
 });
 document.getElementById("tear").addEventListener("click", pressNow);
 document.getElementById("reset").addEventListener("click", reset);
+
+// Ощущение теста подбирается рукой, а не прогоном: три ползунка меняют
+// упругость, текучесть и запас прочности, значения переживают перезагрузку.
+const TUNE = { com:35, creep:35, brk:50 };
+function applyTune(){
+  COMPLIANCE  = 0.000003 * Math.pow(40, TUNE.com/100);     // 3e-6 … 1.2e-4
+  CREEP       = 0.15 + (TUNE.creep/100) * 1.6;             // 0.15 … 1.75
+  SPIN_GAIN_F = 0.006 + (TUNE.creep/100) * 0.03;           // растёт вместе с текучестью
+  THICK_BREAK = 0.055 - (TUNE.brk/100) * 0.045;            // мягче … выносливее
+  try{ localStorage.setItem("dough_tune", JSON.stringify(TUNE)); }catch(e){}
+}
+try{ const t = JSON.parse(localStorage.getItem("dough_tune")||"null");
+     if(t) Object.assign(TUNE, t); }catch(e){}
+[["sCom","com"],["sCreep","creep"],["sBreak","brk"]].forEach(([id,key])=>{
+  const el = document.getElementById(id);
+  el.value = TUNE[key];
+  el.addEventListener("input", ()=>{ TUNE[key] = +el.value; applyTune(); });
+});
+applyTune();
 
 function reset(){ recorded=false; resize(); }
 
