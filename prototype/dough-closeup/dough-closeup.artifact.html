@@ -49,7 +49,7 @@
 
 <div id="stage">
   <canvas id="cv"></canvas>
-  <div id="hint">растяни комок до пунктира · прижми край, подержи, веди по кругу</div>
+  <div id="hint">растяни комок до пунктира · прижми край, подержи, веди по кругу · ползунки внизу меняют тесто</div>
   <div id="live">коснись теста</div>
   <div id="flash"></div>
   <div id="torn">ПОРВАЛОСЬ · новый комок…</div>
@@ -70,9 +70,9 @@
   </div>
   <button id="tear">СЕЙЧАС ПОРВЁТСЯ (space)</button>
   <div class="grp tune"><b>ощущение</b>
-    <label>упругость<input id="sCom" type="range" min="0" max="100" value="35"></label>
-    <label>текучесть<input id="sCreep" type="range" min="0" max="100" value="35"></label>
-    <label>прочность<input id="sBreak" type="range" min="0" max="100" value="50"></label>
+    <label>упругость<input id="sCom" type="range" min="0" max="100" value="30"></label>
+    <label>текучесть<input id="sCreep" type="range" min="0" max="100" value="30"></label>
+    <label>прочность<input id="sBreak" type="range" min="0" max="100" value="72"></label>
   </div>
   <div class="grp">
     <button id="reset">заново</button>
@@ -94,7 +94,7 @@
 // длина окружного ребра там падает до долей пикселя, относительное растяжение скачет
 // до 400%+ и лист «рвётся» в середине от любого движения. Замер это обнаружил сразу.
 // Число узлов сохранено (~1150), однородность рёбер восстановлена.
-const BUILD = "2026-08-22 · тесто снова упругое";
+const BUILD = "2026-08-22 · весь экран, тесто жёстче";
 const GRID = 38;                   // 38x38, в круг попадает ~1130 узлов
 let SUBSTEPS = 8;                  // T2: 8–10 подшагов, 1 итерация
 let COMPLIANCE = 0.000010;         // податливость. Крутилась вслепую, пока не работал тап,
@@ -130,7 +130,9 @@ const stats = document.getElementById("stats"), flash = document.getElementById(
 // ─────────────────────────── раскладка стола (v3: тесто слева, начинки по центру, тава справа)
 // Раскладка закрепляется навсегда, чтобы игрок со временем готовил «не глядя».
 // Точные пропорции были в утраченном addendum-v3; здесь рабочее приближение, которое и проверяем.
-const ZONES = { work:[0.00,0.46], bridge:[0.46,0.62], tawa:[0.62,1.00] };
+// Отладка раскрутки: тесту отдан весь экран. Мостик начинок и тава вернутся,
+// когда дойдём до жарки — сейчас они только отнимают место у главного жеста.
+const ZONES = { work:[0.00,1.00] };
 
 // Вид не сверху, а из-за прилавка: стол уходит от игрока, поэтому по вертикали
 // всё сжато, а дальний край ещё и сужен. Симуляция считается в плоскости стола,
@@ -154,7 +156,7 @@ function zone(name){
 }
 
 // ─────────────────────────── построение листа
-const START_FRAC = 0.17, TARGET_FRAC = 0.46;   // комок теста → лист на всю рабочую зону
+const START_FRAC = 0.17, TARGET_FRAC = 0.40;   // комок теста → лист на всю рабочую зону
 let targetR = 1, startR = 1;
 function build(){
   const z = zone("work");
@@ -337,8 +339,26 @@ const CREEP_ON = 0.06;             // порог растяжения, с кот
 // Тесто ПЛАСТИЧНО: удержанное натяжение оно не возвращает, а запоминает — лист
 // остаётся растянутым и становится тоньше. Чисто упругая модель рвалась на 1,3x
 // и «прозрачного листа» из v3 не давала в принципе.
+let evenBuf = null;
+function evenOut(dt){
+  // Тесто под руками выравнивается: толстые места отдают тонким. Без этого
+  // жёсткий лист рвался у точки захвата на 90% пути, так и не дойдя до цели.
+  const k = Math.min(0.5, 3.2*dt);
+  if(!evenBuf || evenBuf.length !== cons.length) evenBuf = new Float32Array(cons.length);
+  let sum = 0, n = 0;
+  for(let i=0;i<cons.length;i++){ const c=cons[i]; if(c.broken) continue;
+    const d = Math.hypot(px[c.b]-px[c.a], py[c.b]-py[c.a]);
+    evenBuf[i] = d / c.rest; sum += evenBuf[i]; n++; }
+  if(!n) return;
+  const mean = sum/n;
+  for(let i=0;i<cons.length;i++){ const c=cons[i]; if(c.broken) continue;
+    // перетянутые связи слегка удлиняют покой, недотянутые — укорачивают
+    c.rest *= 1 + (evenBuf[i] - mean)/Math.max(0.2, mean) * 0.02 * k;
+  }
+}
 function creep(dt){
   if(sheetRadius() > targetR*1.25) return;          // предел растяжимости — общий с раскруткой
+  evenOut(dt);
   const k = Math.min(1, CREEP*dt);
   for(let i=0;i<cons.length;i++){
     const c=cons[i]; if(c.broken) continue;
@@ -633,12 +653,14 @@ document.getElementById("reset").addEventListener("click", reset);
 
 // Ощущение теста подбирается рукой, а не прогоном: три ползунка меняют
 // упругость, текучесть и запас прочности, значения переживают перезагрузку.
-const TUNE = { com:35, creep:35, brk:50 };
+const TUNE = { com:30, creep:30, brk:72 };
 function applyTune(){
-  COMPLIANCE  = 0.000003 * Math.pow(40, TUNE.com/100);     // 3e-6 … 1.2e-4
-  CREEP       = 0.15 + (TUNE.creep/100) * 1.6;             // 0.15 … 1.75
-  SPIN_GAIN_F = 0.006 + (TUNE.creep/100) * 0.03;           // растёт вместе с текучестью
-  THICK_BREAK = 0.055 - (TUNE.brk/100) * 0.045;            // мягче … выносливее
+  // Диапазоны сдвинуты в упругую сторону: прежние делали тесто тряпкой на любом
+  // положении ползунка. Теперь даже максимум мягкости заметно держит форму.
+  COMPLIANCE  = 0.0000004 * Math.pow(60, TUNE.com/100);    // 4e-7 … 2.4e-5
+  CREEP       = 0.04 + (TUNE.creep/100) * 0.9;             // 0.04 … 0.94
+  SPIN_GAIN_F = 0.003 + (TUNE.creep/100) * 0.018;          // растёт вместе с текучестью
+  THICK_BREAK = 0.045 - (TUNE.brk/100) * 0.042;            // мягче … выносливее
   try{ localStorage.setItem("dough_tune", JSON.stringify(TUNE)); }catch(e){}
 }
 try{ const t = JSON.parse(localStorage.getItem("dough_tune")||"null");
@@ -756,48 +778,26 @@ function draw(){
 // Тава по F1 — กระทะโรตี, толстая сталь 18–20″ с ВОГНУТЫМ дном, удерживающим масло,
 // а не плоская «тава»: лужица жира собирается в центре, отсюда техника подгона масла к краям.
 function drawTable(g, sx, sy, px_){
-  const w = zone("work"), br = zone("bridge"), tw = zone("tawa");
+  const w = zone("work");
   const R_ = (x)=>x*sx, D_ = (y)=>y*sy;
 
-  // столешница: доска со слоями, а не пустой прямоугольник
-  g.fillStyle = "#2b2016";
+  g.fillStyle = "#2b2016";                                    // столешница
   g.fillRect(R_(w.x), D_(w.y), R_(w.w), D_(w.h));
-  const boards = 5, bh = w.h/boards;
+  const boards = 7, bh = w.h/boards;
   for(let i=0;i<boards;i++){
     g.fillStyle = i%2 ? "#31251a" : "#2b2016";
     g.fillRect(R_(w.x), D_(w.y+i*bh), R_(w.w), D_(bh-1));
     g.fillStyle = "#1d150e";
     g.fillRect(R_(w.x), D_(w.y+(i+1)*bh-1), R_(w.w), Math.max(1, D_(1)));
   }
-  // мишень: докуда надо растянуть лист
+
+  // мишень: докуда растянуть лист
   const c2 = centerOfSheet();
   g.strokeStyle = "#4a3a24"; g.lineWidth = Math.max(1, R_(2));
   g.setLineDash([R_(10), R_(8)]);
   g.beginPath();
   g.ellipse(R_(prX(c2.x,c2.y)), D_(prY(c2.x,c2.y)), R_(targetR), D_(targetR*TILT), 0, 0, Math.PI*2);
   g.stroke(); g.setLineDash([]);
-
-  g.fillStyle = "#1b1610";                                    // мостик начинок
-  g.fillRect(R_(br.x), D_(br.y), R_(br.w), D_(br.h));
-  const cells = 4, ch = br.h/(cells+1);
-  for(let i=0;i<cells;i++){
-    g.fillStyle = ["#4a5b2a","#6d4a2c","#7a6a2f","#3f3a44"][i];   // заглушки начинок
-    const cy = br.y + ch*(i+0.75), pad = br.w*0.22;
-    g.fillRect(R_(br.x+pad), D_(cy), R_(br.w-pad*2), D_(ch*0.55));
-  }
-
-  const cx = tw.cx, cy = tw.cy, rad = Math.min(tw.w, tw.h)*0.40;
-  const rings = px_ ? 7 : 26;                                  // вогнутость — кольцами внутрь
-  for(let i=rings;i>=1;i--){
-    const t = i/rings;
-    const v = Math.round(26 + (1-t)*30);
-    g.fillStyle = `rgb(${v},${v-4},${v-8})`;
-    g.beginPath();
-    g.ellipse(R_(prX(cx,cy)), D_(prY(cx,cy)), R_(rad*t), D_(rad*t*TILT), 0, 0, Math.PI*2); g.fill();
-  }
-  g.fillStyle = px_ ? "#6b5a2a" : "rgba(150,125,60,0.55)";     // масло в углублении
-  g.beginPath();
-  g.ellipse(R_(prX(cx,cy)), D_(prY(cx,cy)), R_(rad*0.30), D_(rad*0.30*TILT), 0, 0, Math.PI*2); g.fill();
 }
 
 function shade(t){ const c = mix(t); return `rgb(${c[0]},${c[1]},${c[2]})`; }
