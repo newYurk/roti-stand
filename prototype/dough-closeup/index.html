@@ -77,7 +77,7 @@
 // длина окружного ребра там падает до долей пикселя, относительное растяжение скачет
 // до 400%+ и лист «рвётся» в середине от любого движения. Замер это обнаружил сразу.
 // Число узлов сохранено (~1150), однородность рёбер восстановлена.
-const BUILD = "2026-08-22 · любое движение тянет";
+const BUILD = "2026-08-22 · touch напрямую";
 const GRID = 38;                   // 38x38, в круг попадает ~1130 узлов
 let SUBSTEPS = 8;                  // T2: 8–10 подшагов, 1 итерация
 let COMPLIANCE = 0.00004;          // податливость: тесто тянучее, натяжение расходится по листу,
@@ -481,56 +481,83 @@ function oppositeEdge(n){                            // «вторая рука�
   }
   return best;
 }
-function toLocal(e){
+function toLocal(cx, cy){
   const r = cv.getBoundingClientRect();
-  const sx=(e.clientX-r.left)*cv.width/r.width, sy=(e.clientY-r.top)*cv.height/r.height;
+  const sx=(cx-r.left)*cv.width/r.width, sy=(cy-r.top)*cv.height/r.height;
   return unproject(sx, sy);
 }
-stage.addEventListener("pointerdown", e=>{
+// ─────────────────────────── ввод
+// На iOS Safari pointer-события на холсте отменяются жестами страницы: pointerdown
+// приходит, а pointermove — уже нет. Поэтому на тач-устройствах слушаем touch-события
+// напрямую и гасим жест через preventDefault; мышь идёт своим путём.
+let dbgDown = 0, dbgMove = 0, dbgKind = "ждёт";
+
+function onDown(id, cx, cy){
+  dbgDown++;
   const tDown = performance.now();
   audioInit(); if(AC && AC.state==="suspended") AC.resume();
-  if(AC){                                            // замер 0: задержка жест→звук
+  if(AC){
     const lat = (AC.baseLatency||0)*1000 + (AC.outputLatency||0)*1000 + (performance.now()-tDown);
     latencies.push(lat); if(latencies.length>60) latencies.shift();
   }
-  const p = toLocal(e);
+  const p = toLocal(cx, cy);
   const w = zone("work");
   if(p.x > w.x + w.w) return;                        // справа жарят, тесто не трогают
-  const n = nodeNear(p.x,p.y);
+  const n = nodeNear(p.x, p.y);
   if(n<0) return;
   const gp = makeGrip(n, 0);
-  grabs.push({ id:e.pointerId, node:n, x:p.x, y:p.y, x0:p.x, y0:p.y,
+  grabs.push({ id, node:n, x:p.x, y:p.y, x0:p.x, y0:p.y,
                t0:performance.now(), grip:gp.ids, gripW:gp.ws, mul:gp.mul });
-  try{ stage.setPointerCapture(e.pointerId); }catch(err){}   // на iOS умеет бросать, захват от него не зависит
-  if(grabs.length===1){                              // вторая точка — противоположный край, как вторая рука
+  if(grabs.length===1){
     const opp = oppositeEdge(n);
     if(opp>=0) pinned[opp]=1;
   }
-});
-stage.addEventListener("pointermove", e=>{
-  const g = grabs.find(g=>g.id===e.pointerId); if(!g) return;
-  const p = toLocal(e);
-  // пока палец почти не сдвинулся — он прижимает, и хват расширяется
+}
+function onMove(id, cx, cy){
+  const g = grabs.find(g=>g.id===id); if(!g) return;
+  dbgMove++;
+  const p = toLocal(cx, cy);
   const moved = Math.hypot(p.x-g.x0, p.y-g.y0);
-  if(moved < R0*0.35){                              // палец дрожит: узкий порог не давал хвату расти
+  if(moved < R0*0.35){
     const held = (performance.now()-g.t0)/1000;
     const gp = makeGrip(g.node, held);
     g.grip=gp.ids; g.gripW=gp.ws; g.mul=gp.mul;
   }
-  // круговое движение вокруг центра листа = раскрутка
   const c = centerOfSheet();
   const a0 = Math.atan2(g.y-c.y, g.x-c.x), a1 = Math.atan2(p.y-c.y, p.x-c.x);
   let da = a1-a0; while(da>Math.PI) da-=Math.PI*2; while(da<-Math.PI) da+=Math.PI*2;
   spinRate = spinRate*0.72 + (da*60)*0.28;
   workRate = Math.min(6, workRate + Math.hypot(p.x-g.x, p.y-g.y)/Math.max(1,R0) * 6);
   g.x=p.x; g.y=p.y;
-});
-function release(e){
-  const i = grabs.findIndex(g=>g.id===e.pointerId);
+}
+function onUp(id){
+  const i = grabs.findIndex(g=>g.id===id);
   if(i>=0) grabs.splice(i,1);
 }
-stage.addEventListener("pointerup", release);
-stage.addEventListener("pointercancel", release);
+
+// Слушаем ОБА семейства событий: определять устройство по "ontouchstart" ненадёжно
+// (гибриды, iPad с мышью), а пропущенный ввод стоит дороже лишнего обработчика.
+// touch обслуживает пальцы, pointer — мышь и перо; дублей нет, потому что
+// pointer-события с pointerType "touch" здесь игнорируются.
+let touchSeen = false;
+
+stage.addEventListener("touchstart", e=>{ e.preventDefault(); touchSeen = true; dbgKind = "touch";
+  for(const t of e.changedTouches) onDown("t"+t.identifier, t.clientX, t.clientY); }, {passive:false});
+stage.addEventListener("touchmove", e=>{ e.preventDefault();
+  for(const t of e.changedTouches) onMove("t"+t.identifier, t.clientX, t.clientY); }, {passive:false});
+stage.addEventListener("touchend", e=>{ e.preventDefault();
+  for(const t of e.changedTouches) onUp("t"+t.identifier); }, {passive:false});
+stage.addEventListener("touchcancel", e=>{
+  for(const t of e.changedTouches) onUp("t"+t.identifier); }, {passive:false});
+
+stage.addEventListener("pointerdown", e=>{
+  if(e.pointerType === "touch" || touchSeen) return;
+  dbgKind = "pointer"; onDown("p"+e.pointerId, e.clientX, e.clientY); });
+stage.addEventListener("pointermove", e=>{
+  if(e.pointerType === "touch" || touchSeen) return;
+  onMove("p"+e.pointerId, e.clientX, e.clientY); });
+stage.addEventListener("pointerup", e=>{ onUp("p"+e.pointerId); });
+stage.addEventListener("pointercancel", e=>{ onUp("p"+e.pointerId); });
 
 addEventListener("keydown", e=>{
   if(e.code==="Space"){ e.preventDefault(); pressNow(); }
@@ -707,6 +734,7 @@ function loop(now){
     `сборка: ${BUILD}\n` +
     `${variant}/${condition}  попыток ${done}/30  распознано ${done?Math.round(hit/done*100):0}%\n` +
     `${grabs.length?"◆ держишь тесто":"○ коснись теста слева"}  лист ${Math.round(sheetRadius()/targetR*100)}%  ` +
+    `[${dbgKind} ↓${dbgDown} ↔${dbgMove}]  ` +
     `хват ${grabs.length?Math.round(grabs[0].mul||0):0}  раскрутка ${Math.abs(spinRate).toFixed(1)}  ` +
     `${broke?"ПОРВАЛОСЬ":pressed?"нажато":"—"}  ` +
     `${fps.toFixed(0)} fps  задержка ${latencies.length?median(latencies).toFixed(0):"—"} мс`;
