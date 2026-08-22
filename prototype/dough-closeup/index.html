@@ -30,8 +30,10 @@
   #stats{ color:var(--dim); margin-left:auto; text-align:right; white-space:pre; }
   #hint{ position:absolute; left:10px; top:10px; color:var(--dim); pointer-events:none; }
   #flash{ position:absolute; inset:0; pointer-events:none; opacity:0; background:#d98b3a; }
-  #turn{ position:absolute; inset:0; display:none; align-items:center; justify-content:center;
-    background:var(--bg); color:var(--dim); text-align:center; padding:24px; z-index:5; }
+  /* Подсказка про ориентацию перекрывала весь холст и съедала касания:
+     при вертикальном телефоне играть было нельзя вообще. Теперь она сквозная. */
+  #turn{ position:absolute; left:0; right:0; bottom:8px; display:none; justify-content:center;
+    color:var(--dim); text-align:center; padding:8px; z-index:5; pointer-events:none; }
   @media (orientation:portrait){ #turn{ display:flex; } }
 </style>
 </head>
@@ -40,7 +42,7 @@
   <canvas id="cv"></canvas>
   <div id="hint">растяни комок до пунктира, не порвав · прижми край и подержи — возьмёшь шире · потом веди пальцем по кругу</div>
   <div id="flash"></div>
-  <div id="turn">поверни экран горизонтально —<br>раскладка стола рассчитана на альбомную ориентацию</div>
+  <div id="turn">удобнее горизонтально</div>
 </div>
 
 <div id="panel">
@@ -75,7 +77,7 @@
 // длина окружного ребра там падает до долей пикселя, относительное растяжение скачет
 // до 400%+ и лист «рвётся» в середине от любого движения. Замер это обнаружил сразу.
 // Число узлов сохранено (~1150), однородность рёбер восстановлена.
-const BUILD = "2026-08-22 · тап по тесту";
+const BUILD = "2026-08-22 · любое движение тянет";
 const GRID = 38;                   // 38x38, в круг попадает ~1130 узлов
 let SUBSTEPS = 8;                  // T2: 8–10 подшагов, 1 итерация
 let COMPLIANCE = 0.00004;          // податливость: тесто тянучее, натяжение расходится по листу,
@@ -269,11 +271,16 @@ function centerOfSheet(){
   let sx=0, sy=0; for(let i=0;i<N;i++){ sx+=px[i]; sy+=py[i]; }
   return { x:sx/N, y:sy/N };
 }
+let workRate = 0;                  // сколько игрок «наработал» пальцем за последние кадры
 function applySpin(dt){
-  if(Math.abs(spinRate) < 0.35){ spinRate *= 0.90; return; }
-  const grow = Math.min(0.004, Math.abs(spinRate) * SPIN_GAIN * dt);
+  // Требовать чистого кругового жеста — значит ничего не дать тому, кто просто тянет.
+  // Растит и раскрутка, и обычная работа пальцем; круг просто вдвое эффективнее.
+  const drive = Math.abs(spinRate) + workRate*0.5;
+  workRate *= 0.90;
+  if(drive < 0.15){ spinRate *= 0.90; return; }
+  const grow = Math.min(0.004, drive * SPIN_GAIN * dt);
   for(let i=0;i<cons.length;i++){ const c=cons[i]; if(!c.broken) c.rest *= (1+grow); }
-  spinTotal += Math.abs(spinRate)*dt;
+  spinTotal += drive*dt;
   if(spinTotal - lastSlap > Math.PI){ lastSlap = spinTotal; slap(); }
   spinRate *= 0.94;
 }
@@ -491,10 +498,10 @@ stage.addEventListener("pointerdown", e=>{
   if(p.x > w.x + w.w) return;                        // справа жарят, тесто не трогают
   const n = nodeNear(p.x,p.y);
   if(n<0) return;
-  stage.setPointerCapture(e.pointerId);
   const gp = makeGrip(n, 0);
   grabs.push({ id:e.pointerId, node:n, x:p.x, y:p.y, x0:p.x, y0:p.y,
                t0:performance.now(), grip:gp.ids, gripW:gp.ws, mul:gp.mul });
+  try{ stage.setPointerCapture(e.pointerId); }catch(err){}   // на iOS умеет бросать, захват от него не зависит
   if(grabs.length===1){                              // вторая точка — противоположный край, как вторая рука
     const opp = oppositeEdge(n);
     if(opp>=0) pinned[opp]=1;
@@ -515,6 +522,7 @@ stage.addEventListener("pointermove", e=>{
   const a0 = Math.atan2(g.y-c.y, g.x-c.x), a1 = Math.atan2(p.y-c.y, p.x-c.x);
   let da = a1-a0; while(da>Math.PI) da-=Math.PI*2; while(da<-Math.PI) da+=Math.PI*2;
   spinRate = spinRate*0.72 + (da*60)*0.28;
+  workRate = Math.min(6, workRate + Math.hypot(p.x-g.x, p.y-g.y)/Math.max(1,R0) * 6);
   g.x=p.x; g.y=p.y;
 });
 function release(e){
@@ -617,6 +625,12 @@ function draw(){
     }
     // точки захвата — минимальная отметка, без украшений
     g.fillStyle="#d98b3a";
+    for(const gr of grabs){                          // кольцо под пальцем: касание принято
+      const rr = pixelated ? 4 : 14;
+      g.beginPath();
+      g.ellipse(prX(gr.x,gr.y)*sx, prY(gr.x,gr.y)*sy, rr, rr*TILT, 0, 0, Math.PI*2);
+      g.fill();
+    }
     for(const gr of grabs){ const S2=pixelated?3:9;
       g.fillRect(prX(px[gr.node],py[gr.node])*sx-S2/2, prY(px[gr.node],py[gr.node])*sy-S2/2, S2, S2); }
   }
