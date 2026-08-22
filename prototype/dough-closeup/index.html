@@ -77,7 +77,7 @@
 // длина окружного ребра там падает до долей пикселя, относительное растяжение скачет
 // до 400%+ и лист «рвётся» в середине от любого движения. Замер это обнаружил сразу.
 // Число узлов сохранено (~1150), однородность рёбер восстановлена.
-const BUILD = "2026-08-22 · touch напрямую";
+const BUILD = "2026-08-22 · ввод на окне";
 const GRID = 38;                   // 38x38, в круг попадает ~1130 узлов
 let SUBSTEPS = 8;                  // T2: 8–10 подшагов, 1 итерация
 let COMPLIANCE = 0.00004;          // податливость: тесто тянучее, натяжение расходится по листу,
@@ -535,29 +535,45 @@ function onUp(id){
   if(i>=0) grabs.splice(i,1);
 }
 
-// Слушаем ОБА семейства событий: определять устройство по "ontouchstart" ненадёжно
-// (гибриды, iPad с мышью), а пропущенный ввод стоит дороже лишнего обработчика.
-// touch обслуживает пальцы, pointer — мышь и перо; дублей нет, потому что
-// pointer-события с pointerType "touch" здесь игнорируются.
-let touchSeen = false;
+// Слушаем на УРОВНЕ ОКНА в фазе перехвата: любой элемент поверх холста — подсказка,
+// оверлей, что угодно — раньше съедал касание, и до игры не доходило ничего.
+// На окне его не перехватит никто. Панель с кнопками отфильтрована по цели события.
+let rawTouch = 0, rawPointer = 0;
 
-stage.addEventListener("touchstart", e=>{ e.preventDefault(); touchSeen = true; dbgKind = "touch";
-  for(const t of e.changedTouches) onDown("t"+t.identifier, t.clientX, t.clientY); }, {passive:false});
-stage.addEventListener("touchmove", e=>{ e.preventDefault();
-  for(const t of e.changedTouches) onMove("t"+t.identifier, t.clientX, t.clientY); }, {passive:false});
-stage.addEventListener("touchend", e=>{ e.preventDefault();
-  for(const t of e.changedTouches) onUp("t"+t.identifier); }, {passive:false});
-stage.addEventListener("touchcancel", e=>{
-  for(const t of e.changedTouches) onUp("t"+t.identifier); }, {passive:false});
+function inPanel(t){ return !!(t && t.closest && t.closest("#panel")); }
 
-stage.addEventListener("pointerdown", e=>{
-  if(e.pointerType === "touch" || touchSeen) return;
-  dbgKind = "pointer"; onDown("p"+e.pointerId, e.clientX, e.clientY); });
-stage.addEventListener("pointermove", e=>{
-  if(e.pointerType === "touch" || touchSeen) return;
-  onMove("p"+e.pointerId, e.clientX, e.clientY); });
-stage.addEventListener("pointerup", e=>{ onUp("p"+e.pointerId); });
-stage.addEventListener("pointercancel", e=>{ onUp("p"+e.pointerId); });
+window.addEventListener("touchstart", e=>{
+  rawTouch++;
+  if(inPanel(e.target)) return;
+  e.preventDefault(); dbgKind = "touch";
+  for(const t of e.changedTouches) onDown("t"+t.identifier, t.clientX, t.clientY);
+}, {passive:false, capture:true});
+
+window.addEventListener("touchmove", e=>{
+  if(inPanel(e.target)) return;
+  e.preventDefault();
+  for(const t of e.changedTouches) onMove("t"+t.identifier, t.clientX, t.clientY);
+}, {passive:false, capture:true});
+
+window.addEventListener("touchend", e=>{
+  for(const t of e.changedTouches) onUp("t"+t.identifier);
+}, {passive:false, capture:true});
+
+window.addEventListener("touchcancel", e=>{
+  for(const t of e.changedTouches) onUp("t"+t.identifier);
+}, {passive:false, capture:true});
+
+window.addEventListener("pointerdown", e=>{
+  rawPointer++;
+  if(e.pointerType === "touch" || inPanel(e.target)) return;
+  dbgKind = "мышь"; onDown("p"+e.pointerId, e.clientX, e.clientY);
+}, true);
+window.addEventListener("pointermove", e=>{
+  if(e.pointerType === "touch" || inPanel(e.target)) return;
+  onMove("p"+e.pointerId, e.clientX, e.clientY);
+}, true);
+window.addEventListener("pointerup", e=>{ onUp("p"+e.pointerId); }, true);
+window.addEventListener("pointercancel", e=>{ onUp("p"+e.pointerId); }, true);
 
 addEventListener("keydown", e=>{
   if(e.code==="Space"){ e.preventDefault(); pressNow(); }
@@ -734,7 +750,7 @@ function loop(now){
     `сборка: ${BUILD}\n` +
     `${variant}/${condition}  попыток ${done}/30  распознано ${done?Math.round(hit/done*100):0}%\n` +
     `${grabs.length?"◆ держишь тесто":"○ коснись теста слева"}  лист ${Math.round(sheetRadius()/targetR*100)}%  ` +
-    `[${dbgKind} ↓${dbgDown} ↔${dbgMove}]  ` +
+    `[на странице: касаний ${rawTouch}, мыши ${rawPointer} · до теста: ↓${dbgDown} ↔${dbgMove} · ${dbgKind}]  ` +
     `хват ${grabs.length?Math.round(grabs[0].mul||0):0}  раскрутка ${Math.abs(spinRate).toFixed(1)}  ` +
     `${broke?"ПОРВАЛОСЬ":pressed?"нажато":"—"}  ` +
     `${fps.toFixed(0)} fps  задержка ${latencies.length?median(latencies).toFixed(0):"—"} мс`;
