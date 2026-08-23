@@ -109,7 +109,7 @@
 // длина окружного ребра там падает до долей пикселя, относительное растяжение скачет
 // до 400%+ и лист «рвётся» в середине от любого движения. Замер это обнаружил сразу.
 // Число узлов сохранено (~1150), однородность рёбер восстановлена.
-const BUILD = "2026-08-22 · шаги 1–2 · разрыв = узор";
+const BUILD = "2026-08-22 · дырки видно, потолок держит";
 const GRID = 38;                   // 38x38, в круг попадает ~1130 узлов
 let SUBSTEPS = 8;                  // T2: 8–10 подшагов, 1 итерация
 let COMPLIANCE = 0.000010;         // податливость. Крутилась вслепую, пока не работал тап,
@@ -140,6 +140,8 @@ let edgeNodes = [];                          // граничные узлы — 
 // Разрыв — не провал и не перезапуск (решение владельца 22.08.2026): дырка остаётся
 // в листе рваным узором, симуляция не останавливается, тесто не переделывается.
 let tornAt = 0, lastSnap = 0, breakTime = 0, pressTime = 0, pressed = false;
+let tornNode = null;               // узлы порванных ячеек — для подсветки рваного края
+let conDeg = null;                 // сколько живых связей держит узел; 0 = осколок
 let runStart = 0, R0 = 1;
 let variant = "A", condition = "both";
 let log = [];
@@ -240,6 +242,8 @@ function build(){
   quadPrev = new Float32Array(quads.length).fill(1);
   quadSm = new Float32Array(quads.length).fill(1);
   quadRest = null;
+  conDeg = new Int32Array(N);
+  for(const cc of c){ conDeg[cc.a]++; conDeg[cc.b]++; }
 
   // связи, инцидентные узлу — чтобы «дырка» рвала именно ячейку, а не весь лист
   const deg = new Int32Array(N);
@@ -318,15 +322,31 @@ function liftPull(){
 // а не за полторы секунды: удержание — удобная замена ширине ладони (audit §6.2).
 const GRIP_MIN = 5, GRIP_MAX = 22;   // шагов решётки
 
+let radBuf = null;
 function sheetRadius(){
+  // Радиус ТЕЛА листа: 92-й перцентиль расстояний живых узлов. Максимум не годится:
+  // после разрывов остаётся бахрома из полудержащихся цепочек, шлепки задирают её
+  // наружу, и по ней процент листа улетал за потолок (живой тест: 5000 %).
   const c = centerOfSheet();
-  let m = 0;
-  for(let i=0;i<N;i++){ const d = Math.hypot(px[i]-c.x, py[i]-c.y); if(d>m) m=d; }
-  return m;
+  if(!radBuf || radBuf.length !== N) radBuf = new Float32Array(N);
+  let n = 0;
+  for(let i=0;i<N;i++){
+    if(conDeg && conDeg[i] <= 0) continue;
+    radBuf[n++] = Math.hypot(px[i]-c.x, py[i]-c.y);
+  }
+  if(!n) return 0;
+  const a = radBuf.subarray(0, n);
+  Array.prototype.sort.call(a, (x,y)=>x-y);
+  return a[Math.min(n-1, Math.floor(n*0.92))];
 }
 function centerOfSheet(){
-  let sx=0, sy=0; for(let i=0;i<N;i++){ sx+=px[i]; sy+=py[i]; }
-  return { x:sx/N, y:sy/N };
+  let sx=0, sy=0, n=0;
+  for(let i=0;i<N;i++){
+    if(conDeg && conDeg[i] <= 0) continue;
+    sx+=px[i]; sy+=py[i]; n++;
+  }
+  n = n || 1;
+  return { x:sx/n, y:sy/n };
 }
 
 // ─── Жест «поднять и шлёпнуть» — ฟาด как единица действия (audit §5–6) ───
@@ -466,7 +486,7 @@ function punchHole(direction){
     const c2 = cons[k2]; if(c2.broken) continue;
     const mx = (px[c2.a]+px[c2.b])/2 - px[best], my = (py[c2.a]+py[c2.b])/2 - py[best];
     const d = Math.hypot(mx,my);
-    if(d < rad * (0.65 + Math.random()*0.5)){ c2.broken = 1; torn++; }   // неровный край
+    if(d < rad * (0.65 + Math.random()*0.5)){ if(breakCon(c2)) torn++; }  // неровный край
   }
   if(torn) onTear();
 }
@@ -521,10 +541,26 @@ function applySlapImpulse(I, direction, center){
     const dx = ddx/dl, dy = ddy/dl;
     const radial = Math.max(0, dx*direction.x + dy*direction.y);
     const edgeBias = Math.max(0, Math.min(1, dl/sr));
-    const w = 0.35 + 0.45*edgeBias + 0.20*radial;
+    // Рыхлый край (мало живых связей) не хлещет наружу: бахрома у дырок получала
+    // полный импульс и улетала, задирая радиус.
+    const loose = conDeg ? Math.min(1, conDeg[i]/3) : 1;
+    const w = (0.35 + 0.45*edgeBias + 0.20*radial) * loose;
     vx[i] += dx * I * w;
     vy[i] += dy * I * w;
   }
+}
+
+// Связь рвётся только здесь. Узел, потерявший все связи, — осколок: он замирает
+// на месте и выпадает из всех измерений. Иначе шлепки разгоняли свободные узлы
+// в бесконечность, и «радиус листа» (а с ним процент, хват и потолок роста)
+// мерился по улетевшему мусору — живой тест поймал 5000 %.
+function breakCon(c){
+  if(c.broken) return false;
+  c.broken = 1;
+  for(const nn of [c.a, c.b]){
+    if(--conDeg[nn] <= 0){ pinned[nn] = 1; vx[nn] = 0; vy[nn] = 0; }
+  }
+  return true;
 }
 
 function sheetSpeed(){
@@ -625,7 +661,7 @@ function checkBreak(dt){
     if(t > 0.5) continue;
     const grow = quadPrev ? Math.max(0, (quadPrev[q]-t)/Math.max(1e-4,dt)) : 0;  // скорость истончения
     if(t < THICK_BREAK * Math.min(1.6, 1 + grow*RATE_SENS)){
-      for(const c of quadCons[q]) if(!c.broken){ c.broken=1; torn++; }
+      for(const c of quadCons[q]) if(breakCon(c)) torn++;
     }
   }
   if(quadPrev) for(let q=0;q<quads.length;q++){
@@ -933,7 +969,9 @@ document.getElementById("dump").addEventListener("click", async ()=>{
 // Это и есть «растянуть почти до прозрачности» из v3, и это же — читаемый сигнал «сейчас порвётся».
 const DOUGH = [236, 219, 186], TABLE = [36, 28, 19];
 function mix(t){                                   // t: 1 толстое → 0 тонкое
-  const k = Math.pow(Math.max(0,Math.min(1,t)), 0.85);
+  // Пол просвечивания: самое тонкое тесто остаётся чуть светлее стола, иначе
+  // дырка (настоящий стол и тень под ним) неотличима от тонкого места.
+  const k = 0.14 + Math.pow(Math.max(0,Math.min(1,t)), 0.85) * 0.86;
   return [ Math.round(TABLE[0]+(DOUGH[0]-TABLE[0])*k),
            Math.round(TABLE[1]+(DOUGH[1]-TABLE[1])*k),
            Math.round(TABLE[2]+(DOUGH[2]-TABLE[2])*k) ];
@@ -960,14 +998,31 @@ function draw(){
 
   if(condition!=="sound"){
     // ячейки решётки; порванные и просвеченные насквозь — дырки
+    // порванные ячейки: пометить их узлы, чтобы подсветить рваный край у соседей
+    if(tornAt){
+      if(!tornNode || tornNode.length!==N) tornNode = new Uint8Array(N);
+      tornNode.fill(0);
+      for(let q=0;q<quads.length;q++){
+        if(quadCons[q].some(cc=>cc.broken)){
+          const [a,b2,c,d] = quads[q];
+          tornNode[a]=tornNode[b2]=tornNode[c]=tornNode[d]=1;
+        }
+      }
+    }
     for(let q=0;q<quads.length;q++){
       const qc = quadCons[q];
-      if(qc[0].broken || (qc[1]&&qc[1].broken) || (qc[2]&&qc[2].broken) || (qc[3]&&qc[3].broken))
-        continue;                                     // порванная ячейка = дырка, узор остаётся
       const [a,b2,c,d] = quads[q];
-      const t=(thick[a]+thick[b2]+thick[c]+thick[d])/4;
-      if(t < HOLE_THICK) continue;                    // истончилось до сквозной дыры
-      g.fillStyle = pixelated ? quant(t) : shade(t);
+      const torn = qc[0].broken || (qc[1]&&qc[1].broken) || (qc[2]&&qc[2].broken) || (qc[3]&&qc[3].broken);
+      let t=(thick[a]+thick[b2]+thick[c]+thick[d])/4;
+      if(torn){
+        // Сквозная дыра — тень ПОД листом, темнее и стола, и любого тонкого теста.
+        g.fillStyle = "#100a06";
+      } else {
+        if(t < HOLE_THICK) continue;                  // истончилось до сквозной дыры
+        // Рваный край собирается толще — у настоящего теста кромка разрыва скатывается.
+        if(tornAt && (tornNode[a]||tornNode[b2]||tornNode[c]||tornNode[d])) t = Math.min(1, t + 0.28);
+        g.fillStyle = pixelated ? quant(t) : shade(t);
+      }
       g.beginPath();
       g.moveTo(prX(px[a],py[a])*sx+ox, prY(px[a],py[a])*sy+oy);
       g.lineTo(prX(px[b2],py[b2])*sx+ox, prY(px[b2],py[b2])*sy+oy);
