@@ -163,6 +163,12 @@
     padding:13px 16px; margin:18px 0; font-size:15.5px; color:var(--dim); max-width:none; }
   .note b{ color:var(--ink); }
 
+  .board{ overflow-x:auto; border:1px solid var(--line); border-radius:14px; background:#0d0906; }
+  .board svg{ display:block; min-width:820px; width:100%; height:auto; }
+  .polar{ display:flex; gap:22px; align-items:center; flex-wrap:wrap; margin:22px 0 6px; }
+  .polar svg{ flex:0 0 auto; }
+  .polar p{ margin:0; }
+
   footer{ margin-top:70px; border-top:1px solid var(--line); padding:26px 0 46px;
     font:400 12.5px/1.7 var(--mono); color:var(--faint); }
 
@@ -403,6 +409,118 @@
   <h2>Семь шагов одного роти</h2>
   <p class="dim">Порядок — по уличной практике из фактчека (лист на таву кладут до начинки).
   Список — предложение; владелец просил «сначала посмотреть, сколько шагов будет».</p>
+
+  <h3>Макет экрана готовки</h3>
+  <figure class="scene" aria-label="Макет: раскладка экрана готовки — тесто слева, мостик начинок в центре, тава справа">
+  <svg viewBox="0 0 880 400" role="img">
+    <rect width="880" height="400" fill="#0d0906"/>
+    <ellipse cx="200" cy="10" rx="320" ry="130" fill="#e08a33" opacity=".06"/>
+    <g>
+      <rect x="0" y="96" width="880" height="304" fill="#241b11"/>
+      <rect x="0" y="96" width="880" height="50" fill="#2b2015"/>
+      <rect x="0" y="150" width="880" height="46" fill="#241b11"/>
+      <rect x="0" y="200" width="880" height="46" fill="#2b2015"/>
+      <rect x="0" y="250" width="880" height="46" fill="#241b11"/>
+      <rect x="0" y="300" width="880" height="46" fill="#2b2015"/>
+      <rect x="0" y="350" width="880" height="50" fill="#241b11"/>
+      <rect x="0" y="146" width="880" height="2" fill="#171008"/>
+      <rect x="0" y="196" width="880" height="2" fill="#171008"/>
+      <rect x="0" y="246" width="880" height="2" fill="#171008"/>
+      <rect x="0" y="296" width="880" height="2" fill="#171008"/>
+      <rect x="0" y="346" width="880" height="2" fill="#171008"/>
+    </g>
+    <!-- рабочая зона: лист и мишень -->
+    <ellipse cx="195" cy="252" rx="182" ry="58" fill="none" stroke="#4a3a24" stroke-width="2.5" stroke-dasharray="12 9"/>
+    <ellipse cx="195" cy="252" rx="148" ry="46" fill="#d9c6a2"/>
+    <ellipse cx="172" cy="246" rx="98" ry="30" fill="#e6d5b4"/>
+    <ellipse cx="160" cy="242" rx="55" ry="17" fill="#eee0c2"/>
+    <!-- мостик начинок: четыре лотка -->
+    <g>
+      <rect x="408" y="128" width="132" height="52" rx="9" fill="#1d1610" stroke="#332a1c"/>
+      <circle cx="443" cy="154" r="12" fill="#d9b44a"/><circle cx="472" cy="150" r="12" fill="#d9b44a"/>
+      <circle cx="500" cy="156" r="12" fill="#d9b44a"/>
+      <rect x="408" y="192" width="132" height="52" rx="9" fill="#1d1610" stroke="#332a1c"/>
+      <ellipse cx="474" cy="218" rx="40" ry="17" fill="#e7dfcf"/><circle cx="474" cy="217" r="10" fill="#e0a32e"/>
+      <rect x="408" y="256" width="132" height="52" rx="9" fill="#1d1610" stroke="#332a1c"/>
+      <ellipse cx="474" cy="282" rx="42" ry="16" fill="#e8dcc2"/>
+      <path d="M436 282 q10 -8 20 0 t20 0 t20 0" fill="none" stroke="#f4ead6" stroke-width="3"/>
+      <rect x="408" y="320" width="132" height="52" rx="9" fill="#1d1610" stroke="#332a1c"/>
+      <g fill="#efe6d2"><circle cx="440" cy="346" r="2.4"/><circle cx="456" cy="341" r="2.4"/>
+        <circle cx="472" cy="349" r="2.4"/><circle cx="488" cy="343" r="2.4"/><circle cx="504" cy="348" r="2.4"/></g>
+    </g>
+    <!-- тава с жарящимся конвертом -->
+    <g>
+      <ellipse cx="712" cy="258" rx="146" ry="52" fill="#241d15"/>
+      <ellipse cx="712" cy="255" rx="136" ry="47" fill="#2c241a"/>
+      <ellipse cx="712" cy="253" rx="112" ry="38" fill="#332a1e"/>
+      <ellipse cx="712" cy="252" rx="84" ry="28" fill="#3a2f21"/>
+      <ellipse cx="712" cy="251" rx="46" ry="15" fill="#6b5a2a"/>
+      <g transform="rotate(-4 712 246)">
+        <rect x="652" y="212" width="120" height="72" rx="12" fill="#d9a04a"/>
+        <rect x="652" y="212" width="120" height="72" rx="12" fill="none" stroke="#a86e2c" stroke-width="3"/>
+        <path d="M652 248 h120 M712 212 v72" stroke="#c08a38" stroke-width="2" opacity=".7"/>
+        <circle cx="676" cy="232" r="4" fill="#b5762e" opacity=".8"/>
+        <circle cx="742" cy="266" r="5" fill="#b5762e" opacity=".7"/>
+      </g>
+      <path d="M690 196 q-8 -14 2 -26 q8 -10 2 -22" fill="none" stroke="#988972" stroke-width="2.5" opacity=".5"/>
+      <path d="M736 192 q-8 -14 2 -26" fill="none" stroke="#988972" stroke-width="2.5" opacity=".4"/>
+    </g>
+    <g font-family="JetBrains Mono, monospace" font-size="12.5" fill="#988972">
+      <text x="118" y="80">тесто · всегда слева</text>
+      <text x="398" y="80">мостик начинок</text>
+      <text x="628" y="80">тава · жарим на слух</text>
+      <text x="398" y="118" fill="#6b5f4e" font-size="11">банан · яйцо · сгущёнка · сахар</text>
+    </g>
+  </svg>
+  <figcaption class="scene-cap">макет раскладки из v3: зоны привязаны к руке — для левшей раскладка зеркалится (тава слева), и в пределах выбранной руки закреплена навсегда, чтобы готовить «не глядя»; интерфейса нет — только стол, горизонтальный экран</figcaption>
+  </figure>
+
+  <h3>Раскадровка одного роти</h3>
+  <figure class="board" aria-label="Семь шагов приготовления одного роти, раскадровка">
+  <svg viewBox="0 0 880 168" role="img" font-family="JetBrains Mono, monospace">
+    <rect width="880" height="168" fill="#0d0906"/>
+    <g stroke="#221a10" stroke-width="1.5">
+      <line x1="126" y1="12" x2="126" y2="128"/><line x1="252" y1="12" x2="252" y2="128"/>
+      <line x1="378" y1="12" x2="378" y2="128"/><line x1="504" y1="12" x2="504" y2="128"/>
+      <line x1="630" y1="12" x2="630" y2="128"/><line x1="756" y1="12" x2="756" y2="128"/>
+    </g>
+    <!-- 1 кусочек + палец -->
+    <circle cx="63" cy="66" r="20" fill="#eee0c2"/>
+    <ellipse cx="63" cy="74" rx="24" ry="8" fill="#0d0906" opacity=".45"/>
+    <circle cx="84" cy="46" r="9" fill="none" stroke="#e08a33" stroke-width="2.5"/>
+    <!-- 2 лист + мах -->
+    <ellipse cx="189" cy="70" rx="42" ry="16" fill="#ddcaa6"/>
+    <ellipse cx="189" cy="70" rx="52" ry="21" fill="none" stroke="#4a3a24" stroke-width="2" stroke-dasharray="7 6"/>
+    <path d="M158 38 q30 -18 62 0" fill="none" stroke="#e08a33" stroke-width="2.5"/>
+    <path d="M216 34 l6 5 -8 3 z" fill="#e08a33"/>
+    <!-- 3 лист на таве -->
+    <ellipse cx="315" cy="72" rx="46" ry="19" fill="#2c241a"/>
+    <ellipse cx="315" cy="70" rx="33" ry="13" fill="#e2d0ae"/>
+    <!-- 4 начинка -->
+    <ellipse cx="441" cy="72" rx="40" ry="16" fill="#e2d0ae"/>
+    <circle cx="431" cy="68" r="6.5" fill="#d9b44a"/><circle cx="447" cy="72" r="6.5" fill="#d9b44a"/>
+    <circle cx="440" cy="63" r="5" fill="#e0a32e"/>
+    <!-- 5 конверт -->
+    <rect x="543" y="52" width="48" height="36" rx="6" fill="#ddb45e"/>
+    <path d="M543 70 h48 M567 52 v36" stroke="#b58a3a" stroke-width="2"/>
+    <!-- 6 жарка: пар и звук -->
+    <rect x="668" y="56" width="46" height="34" rx="6" fill="#d9a04a" stroke="#a86e2c" stroke-width="2"/>
+    <path d="M676 46 q-5 -9 1 -17 M692 44 q-5 -9 1 -17" fill="none" stroke="#988972" stroke-width="2" opacity=".6"/>
+    <path d="M722 60 q7 12 0 24 M730 56 q10 16 0 32" fill="none" stroke="#e08a33" stroke-width="2" opacity=".7"/>
+    <!-- 7 резка и полив -->
+    <rect x="792" y="52" width="52" height="38" rx="5" fill="#d9a04a"/>
+    <path d="M809 52 v38 M826 52 v38 M792 71 h52" stroke="#5b4324" stroke-width="2"/>
+    <path d="M794 46 q12 -10 22 0 t22 0" fill="none" stroke="#f0e2c4" stroke-width="3"/>
+    <line x1="834" y1="44" x2="846" y2="32" stroke="#c9b184" stroke-width="2.5"/>
+    <line x1="824" y1="42" x2="838" y2="28" stroke="#c9b184" stroke-width="2.5"/>
+    <g font-size="11" fill="#988972" text-anchor="middle">
+      <text x="63" y="150">1 · расплющить</text><text x="189" y="150">2 · растянуть</text>
+      <text x="315" y="150">3 · на таву</text><text x="441" y="150">4 · начинка</text>
+      <text x="567" y="150">5 · конверт</text><text x="693" y="150">6 · жарка</text>
+      <text x="819" y="150">7 · резка·полив</text>
+    </g>
+  </svg>
+  </figure>
   <div class="steps">
     <div class="step"><div><b>Расплющить кусочек <span class="tag ok" style="float:none">в стенде</span></b>
       <span>от «колбаски» — прижатым пальцем до 42 % мишени</span></div></div>
@@ -418,6 +536,31 @@
       <span>готовность — на слух: шипение → пузыри → «суше и звонче»</span></div></div>
     <div class="step"><div><b>Резка и полив</b>
       <span>6–9 квадратов, сгущёнка с инерцией, две зубочистки — и паспорт роти</span></div></div>
+  </div>
+
+  <h3>Финал смены — паспорт роти</h3>
+  <div class="polar">
+    <svg width="216" height="270" viewBox="0 0 216 270" role="img" aria-label="Макет карточки-полароида готового роти">
+      <g transform="rotate(-3 108 135)">
+        <rect x="8" y="6" width="200" height="252" rx="7" fill="#e9dcc0"/>
+        <rect x="8" y="6" width="200" height="252" rx="7" fill="none" stroke="#c9b892"/>
+        <rect x="22" y="20" width="172" height="164" rx="4" fill="#17100a"/>
+        <rect x="40" y="52" width="136" height="100" rx="10" fill="#d9a04a"/>
+        <path d="M85 52 v100 M131 52 v100 M40 102 h136" stroke="#5b4324" stroke-width="3"/>
+        <path d="M96 74 l24 -6 16 8 -6 12 -22 4 -14 -8 z" fill="#17100a"/>
+        <path d="M96 74 l24 -6 16 8 -6 12 -22 4 -14 -8 z" fill="none" stroke="#f0e2c4" stroke-width="2.5" opacity=".85"/>
+        <path d="M46 60 q22 -14 40 0 t40 0 t40 0" fill="none" stroke="#f4ead6" stroke-width="4" opacity=".9"/>
+        <line x1="60" y1="46" x2="80" y2="24" stroke="#c9b184" stroke-width="3"/>
+        <line x1="150" y1="48" x2="168" y2="28" stroke="#c9b184" stroke-width="3"/>
+        <g font-family="JetBrains Mono, monospace" fill="#5b4b33">
+          <text x="24" y="216" font-size="14">№ 47 · вечер · дождь</text>
+          <text x="24" y="238" font-size="12" fill="#8a7a5c">рваный узор · банан + яйцо</text>
+        </g>
+      </g>
+    </svg>
+    <p class="dim" style="max-width:24em">После каждого роти — секундная карточка: форма, узор
+    полива, степень зажаренности, <b style="color:var(--ink)">рваный узор как подпись</b>.
+    Со временем — визуальный дневник смены, который приятно пролистать вечером (v3).</p>
   </div>
 </section>
 
