@@ -49,8 +49,8 @@
 
 <div id="stage">
   <canvas id="cv"></canvas>
-  <div id="hint">растяни комок до пунктира · прижми край, подержи, веди по кругу · ползунки внизу меняют тесто</div>
-  <div id="live">коснись теста</div>
+  <div id="hint">возьми край, миг подержи — возьмёшь шире · резкий мах — шлепок · доведи лист до пунктира, не порвав</div>
+  <div id="live">коснись края теста</div>
   <div id="flash"></div>
   <div id="torn">ПОРВАЛОСЬ · новый комок…</div>
   <div id="blind">картинка выключена намеренно<br><span>это режим замера: тяни на слух</span></div>
@@ -84,9 +84,10 @@
 
 <script>
 "use strict";
-/* Прототип «крупный план теста» — замер читаемости, не демо.
-   Гипотеза и критерии: HYPOTHESIS.md. Полировка запрещена до конца замеров.
-   Модель: XPBD, полярная сетка 24x48 = 1152 узла (параметры линзы T2). */
+/* Прототип «крупный план теста». Ввод перестроен по docs/slap-input-audit.md:
+   вместо непрерывной тяги — дискретный жест «поднять и шлёпнуть» со state machine
+   RESTING → ARMED → LIFTING → FLYING → IMPACT → SETTLING. Проход A + ядро прохода B.
+   Физика: XPBD, равномерная решётка ~1060 узлов; толщина из площади квадов. */
 
 // ─────────────────────────── параметры модели
 // Топология: РАВНОМЕРНАЯ решётка, обрезанная по кругу.
@@ -94,7 +95,7 @@
 // длина окружного ребра там падает до долей пикселя, относительное растяжение скачет
 // до 400%+ и лист «рвётся» в середине от любого движения. Замер это обнаружил сразу.
 // Число узлов сохранено (~1150), однородность рёбер восстановлена.
-const BUILD = "2026-08-22 · весь экран, тесто жёстче";
+const BUILD = "2026-08-22 · шлепок: проход A+B";
 const GRID = 38;                   // 38x38, в круг попадает ~1130 узлов
 let SUBSTEPS = 8;                  // T2: 8–10 подшагов, 1 итерация
 let COMPLIANCE = 0.000010;         // податливость. Крутилась вслепую, пока не работал тап,
@@ -112,10 +113,16 @@ let px, py, vx, vy, prx, pry, pinned, thick;
 let gi = new Int32Array(GRID*GRID);          // (i,j) -> node | -1
 let quads = [];                              // ячейки решётки для рендера
 let quadCons = [], quadPrev = null, quadSm = null;
-let spinAngle = 0, spinRate = 0, spinTotal = 0, lastSlap = 0;   // раскрутка теста (ฟาด)
+// Единственный источник истины о жесте (audit §6.1). Не хранить состояние
+// параллельно в grabs, DOM и замыканиях — прежний захват означал четыре вещи разом.
+let action = { state:"RESTING", pointerId:null, edgeNode:-1, gripIds:[], gripWeights:[],
+  down:{x:0,y:0,t:0}, last:{x:0,y:0,t:0}, velocity:{x:0,y:0},
+  impulse:0, direction:{x:0,y:0}, timer:0, mul:0, heldAtLift:0 };
+let plasticT = 0;                  // окно пластичности после удара, с
+let startArea = 1;                 // площадь листа при рождении — база для areaRatio
+let gestures = [];                 // журнал шлепков (audit §6.6)
 let cons = null;                             // {a,b,rest,broken}
 let edgeNodes = [];                          // граничные узлы — за них берут лист
-let grabs = [];
 let broke = false, breakTime = 0, pressTime = 0, pressed = false;
 let runStart = 0, R0 = 1;
 let variant = "A", condition = "both";
@@ -215,21 +222,26 @@ function build(){
   edgeNodes = [];
   for(let i=0;i<N;i++) if(deg[i] < 8) edgeNodes.push(i);   // граница круга
 
-  grabs = []; broke = false; pressed = false; breakTime = pressTime = 0;
-  spinRate = spinTotal = lastSlap = 0;
+  clearAction(); plasticT = 0;
+  broke = false; pressed = false; breakTime = pressTime = 0;
+  startArea = 0; for(let q=0;q<quads.length;q++) startArea += area(quads[q]);
   runStart = performance.now();
 }
 
 // ─────────────────────────── XPBD
 function step(dt){
   const h = dt / SUBSTEPS;
+  // Затухание зависит от фазы: в полёте лист скользит свободнее, после удара,
+  // когда окно пластичности закрылось, — успокаивается быстрее (audit §5).
+  const damp = action.state==="FLYING" ? 0.995
+             : (action.state==="SETTLING" && plasticT<=0) ? 0.94 : DAMP;
   for(let ss=0; ss<SUBSTEPS; ss++){
     for(let i=0;i<N;i++){
       if(pinned[i]){ prx[i]=px[i]; pry[i]=py[i]; continue; }
-      vx[i]*=DAMP; vy[i]*=DAMP;
+      vx[i]*=damp; vy[i]*=damp;
       prx[i]=px[i]+vx[i]*h; pry[i]=py[i]+vy[i]*h;
     }
-    for(const g of grabs){ grabPull(g); }
+    if(action.state==="LIFTING") liftPull();
 
     const alpha = COMPLIANCE/(h*h);
     for(let k=0;k<cons.length;k++){
@@ -243,7 +255,7 @@ function step(dt){
       prx[a]-=nx*lam*wa; pry[a]-=ny*lam*wa;
       prx[b]+=nx*lam*wb; pry[b]+=ny*lam*wb;
     }
-    for(const g of grabs){ grabPull(g); }
+    if(action.state==="LIFTING") liftPull();
 
     for(let i=0;i<N;i++){
       if(pinned[i]) continue;
@@ -251,35 +263,30 @@ function step(dt){
       px[i]=prx[i]; py[i]=pry[i];
     }
   }
+  plasticT = Math.max(0, plasticT - dt);
+  updateAction(dt);
   creep(dt);
-  applySpin(dt);
   measureThickness();
   checkBreak(dt);
 }
 
-// Палец не телепортирует узел, а тянет его пружиной. Жёсткая привязка давала мгновенный
-// выброс натяжения на соседнем ребре: лист «рвался» от скорости руки, а не от растянутости.
+// Краткая тяга дуги хвата — ТОЛЬКО в LIFTING (≤80 мс). Постоянной буксировки
+// больше нет: она и была источником «липкости» из живого теста. Палец по-прежнему
+// тянет пружиной, а не телепортом, и дугу, а не точку.
 const GRAB_K = 0.30;
-function grabPull(g){
-  // Палец держит участок края, а не одну точку: у касания есть площадь.
-  // Точечный захват давал концентрацию натяжения и рвал лист под пальцем.
-  const dx = g.x - prx[g.node], dy = g.y - pry[g.node];
-  for(let m=0;m<g.grip.length;m++){
-    const n = g.grip[m], w = g.gripW[m];
+function liftPull(){
+  const dx = action.last.x - prx[action.edgeNode], dy = action.last.y - pry[action.edgeNode];
+  for(let m=0;m<action.gripIds.length;m++){
+    const n = action.gripIds[m], w = action.gripWeights[m];
     prx[n] += dx * GRAB_K * w;
     pry[n] += dy * GRAB_K * w;
   }
 }
-// Ширина хвата решает, получится лист или жгут: замер показал 4% тонкой площади
-// при щипке в 5 узлов против 76% при широком хвате в 64 узла. Поэтому хват РАСТЁТ,
-// пока игрок прижимает край перед тягой — это стадия «finger press» из v3,
-// и она же делает терпение осмысленным до всякого растягивания.
-const GRIP_MIN = 5, GRIP_MAX = 22, GRIP_GROW = 1.4;   // шагов решётки; секунда прижима — полный хват
+// Ширина хвата решает, получится лист или жгут (замер: 4% тонкой площади при щипке
+// против 76% при широком хвате). Хват растёт от прижима, но насыщается за 100–250 мс,
+// а не за полторы секунды: удержание — удобная замена ширине ладони (audit §6.2).
+const GRIP_MIN = 5, GRIP_MAX = 22;   // шагов решётки
 
-// ฟาด — раскрутить и прихлопнуть о стол. Главная техника растягивания роти:
-// «rotate and stretch the dough in a forward, circular motion, slapping the far end on the table».
-// Растягивание за два края даёт жгут; круговое движение растит лист во все стороны разом.
-let SPIN_GAIN_F = 0.015;           // сколько роста даёт оборот: секунда раскрутки — примерно +25% диаметра
 function sheetRadius(){
   const c = centerOfSheet();
   let m = 0;
@@ -290,37 +297,184 @@ function centerOfSheet(){
   let sx=0, sy=0; for(let i=0;i<N;i++){ sx+=px[i]; sy+=py[i]; }
   return { x:sx/N, y:sy/N };
 }
-let workRate = 0;                  // сколько игрок «наработал» пальцем за последние кадры
-function applySpin(dt){
-  // Требовать чистого кругового жеста — значит ничего не дать тому, кто просто тянет.
-  // Растит и раскрутка, и обычная работа пальцем; круг просто вдвое эффективнее.
-  const drive = Math.abs(spinRate) + workRate*0.5;
-  workRate *= 0.90;
-  if(drive < 0.15){ spinRate *= 0.90; return; }
-  // Лист не резиновый: у теста есть предел, за которым он больше не растёт, а только
-  // истончается и рвётся. Без потолка комок раздувался в девять раз больше цели,
-  // и мишень переставала что-либо значить.
-  const over = sheetRadius() / targetR;
-  if(over > 1.25) { spinRate *= 0.90; return; }
-  const ease = over > 1.0 ? Math.max(0, 1 - (over-1.0)/0.25) : 1;
-  const grow = Math.min(0.004, drive * SPIN_GAIN_F * dt) * ease;
-  for(let i=0;i<cons.length;i++){ const c=cons[i]; if(!c.broken) c.rest *= (1+grow); }
-  spinTotal += drive*dt;
-  if(spinTotal - lastSlap > Math.PI){ lastSlap = spinTotal; slap(); }
-  spinRate *= 0.94;
+
+// ─── Жест «поднять и шлёпнуть» — ฟาด как единица действия (audit §5–6) ───
+// Скорости в радиусах листа в секунду, чтобы пороги не зависели от экрана.
+// Направление хорошего свайпа НЕ фиксировано до живого iPhone-теста: формула
+// принимает и мах «от центра», и касательный (audit §6.3, оговорка).
+let V_MIN = 1.6;             // минимальная скорость свайпа, R0/с
+let ACTION_MIN = 1.4;        // порог направленной скорости outward + 0.55·tangent, R0/с
+let IMPULSE_K = 0.5;         // сила удара на единицу направленной скорости (в R0)
+let IMPULSE_MAX = 3.5;       // потолок силы, R0/с скорости узлов
+const HOLD_MIN = 80;         // мс: раньше — не жест, а проезд пальца
+const LIFT_MAX = 0.08;       // с: лимит фазы LIFTING
+let PLASTIC_BOOST = 5.0;     // множитель текучести в окне удара
+let SETTLE_SPEED = 12;       // px/с средней скорости листа: «успокоился»
+
+function heldMs(){ return performance.now() - action.down.t; }
+
+function clearAction(){
+  action.state = "RESTING"; action.pointerId = null; action.edgeNode = -1;
+  action.gripIds = []; action.gripWeights = []; action.impulse = 0;
+  action.direction = {x:0,y:0}; action.velocity = {x:0,y:0};
+  action.timer = 0; action.mul = 0; action.heldAtLift = 0;
 }
-// хлопок дальнего края о стол — тот самый звук, по которому узнают макашницу
-function slap(){
-  const c = centerOfSheet();
-  for(let i=0;i<N;i++){
-    const dx=px[i]-c.x, dy=py[i]-c.y, d=Math.hypot(dx,dy)||1;
-    if(d < R0*0.55) continue;
-    vx[i] += dx/d * 22; vy[i] += dy/d * 22;      // импульс наружу по дальнему краю
+
+function armAction(pointerId, p){
+  const n = nodeNear(p.x, p.y);
+  if(n < 0) return;
+  action.state = "ARMED"; action.pointerId = pointerId; action.edgeNode = n;
+  action.down = { x:p.x, y:p.y, t: performance.now() };
+  action.last = { x:p.x, y:p.y, t: performance.now() };
+  action.velocity = {x:0,y:0}; action.impulse = 0;
+  updateGripFromHold();
+}
+
+function updateGripFromHold(){
+  const t = Math.max(0, Math.min(1, (heldMs() - 100) / 150));
+  const st = t*t*(3-2*t);                            // smoothstep
+  const gp = gripArc(action.edgeNode, GRIP_MIN + (GRIP_MAX - GRIP_MIN) * st);
+  action.gripIds = gp.ids; action.gripWeights = gp.ws; action.mul = gp.mul;
+}
+
+function updateActionMove(p){
+  if(action.state === "LIFTING"){                    // палец ещё ведёт дугу
+    action.last = { x:p.x, y:p.y, t: performance.now() };
+    return;
   }
-  audioSlap();
+  if(action.state !== "ARMED") return;
+  const nowT = performance.now();
+  const dtm = Math.max(0.008, (nowT - action.last.t)/1000);
+  action.velocity = { x:(p.x - action.last.x)/dtm, y:(p.y - action.last.y)/dtm };
+  action.last = { x:p.x, y:p.y, t:nowT };
+  updateGripFromHold();
+
+  const c = centerOfSheet();
+  const rl = Math.hypot(px[action.edgeNode]-c.x, py[action.edgeNode]-c.y) || 1;
+  const rx = (px[action.edgeNode]-c.x)/rl, ry = (py[action.edgeNode]-c.y)/rl;
+  const outward = Math.max(0, action.velocity.x*rx + action.velocity.y*ry);
+  const tangent = Math.abs(rx*action.velocity.y - ry*action.velocity.x);
+  const speed = Math.hypot(action.velocity.x, action.velocity.y);
+  const drive = (outward + 0.55*tangent) / Math.max(1, R0);   // R0/с
+
+  if(heldMs() >= HOLD_MIN && speed/Math.max(1,R0) >= V_MIN && drive >= ACTION_MIN){
+    action.state = "LIFTING";
+    action.timer = LIFT_MAX;
+    action.heldAtLift = Math.round(heldMs());
+    const sl = speed || 1;
+    action.direction = { x:action.velocity.x/sl, y:action.velocity.y/sl };
+    action.impulse = Math.min(IMPULSE_MAX, IMPULSE_K * drive);   // в R0-единицах
+  }
 }
-function makeGrip(n, held){
-  const mul = GRIP_MIN + (GRIP_MAX-GRIP_MIN) * Math.min(1, (held||0)/GRIP_GROW);
+
+function releaseAction(){
+  if(action.state === "ARMED"){ clearAction(); return; }   // медленное отпускание — ничего
+  if(action.state === "LIFTING"){ toFlying(); return; }    // бросок
+  // FLYING/IMPACT/SETTLING: жест автономен; поздний pointerup его не убивает.
+  // (Псевдокод аудита здесь очищал бы состояние — это обрывало бы удар на лету.)
+  action.pointerId = null;
+}
+function toFlying(){
+  action.state = "FLYING";
+  action.timer = 0.08 + Math.random()*0.08;                // 80–160 мс до удара
+}
+
+function updateAction(dt){
+  if(action.state === "LIFTING"){
+    action.timer -= dt;
+    if(action.timer <= 0) toFlying();                      // лимит 80 мс, палец ещё на экране
+  } else if(action.state === "FLYING"){
+    action.timer -= dt;
+    if(action.timer <= 0) impactAction();
+  } else if(action.state === "SETTLING"){
+    action.timer -= dt;
+    // Ранний выход по скорости — только со второй половины окна, иначе метрики
+    // жеста записываются до того, как лист дорос до новых длин покоя.
+    if(action.timer <= 0 || (action.timer < 0.15 && sheetSpeed() < SETTLE_SPEED)) finalizeGesture();
+  }
+}
+
+let SLAP_GROW = 0.075;           // пластическое растяжение за удар на единицу силы
+function impactAction(){
+  action.state = "IMPACT";
+  const c = centerOfSheet();
+  applySlapImpulse(action.impulse * R0, action.direction, c);
+  // Сработал стоп-сигнал audit §6.6: скоростной импульс в одиночку не растил площадь —
+  // жёсткий решатель гасил растяжение раньше, чем пластичность его захватывала
+  // (замер: diameterRatio 0.99–1.00 при любом ударе). Чиним связь по предписанию
+  // аудита: удар даёт одноразовое пластическое растяжение длин покоя с той же
+  // пространственной формулой весов, что у импульса. Скорости остаются как рывок и звук.
+  plasticStretch(action.impulse, action.direction, c);
+  audioSlap(action.impulse);
+  plasticT = 0.15;
+  action.timer = 0.30;             // успокоение = релаксация в новые длины покоя
+  action.state = "SETTLING";
+}
+
+function plasticStretch(I, direction, center){
+  const over = sheetRadius() / targetR;
+  if(over > 1.25) return;                            // предел растяжимости — общий для всех путей роста
+  const ease = over > 1.0 ? Math.max(0, 1 - (over-1.0)/0.25) : 1;
+  const sr = Math.max(1, sheetRadius());
+  for(let k2=0;k2<cons.length;k2++){
+    const c2 = cons[k2]; if(c2.broken) continue;
+    const mx = (px[c2.a]+px[c2.b])/2 - center.x, my = (py[c2.a]+py[c2.b])/2 - center.y;
+    const dl = Math.hypot(mx,my) || 1;
+    const radial = Math.max(0, (mx/dl)*direction.x + (my/dl)*direction.y);
+    const edgeBias = Math.max(0, Math.min(1, dl/sr));
+    const w = 0.35 + 0.45*edgeBias + 0.20*radial;
+    c2.rest *= 1 + SLAP_GROW * I * w * ease;
+  }
+}
+
+// audit §6.5 дословно: не симуляция удара, а явная игровая модель —
+// быстрый жест даёт краткое, широкое и наблюдаемое расправление.
+function applySlapImpulse(I, direction, center){
+  const sr = Math.max(1, sheetRadius());
+  for(let i=0;i<N;i++){
+    const ddx = px[i]-center.x, ddy = py[i]-center.y;
+    const dl = Math.hypot(ddx,ddy) || 1;
+    const dx = ddx/dl, dy = ddy/dl;
+    const radial = Math.max(0, dx*direction.x + dy*direction.y);
+    const edgeBias = Math.max(0, Math.min(1, dl/sr));
+    const w = 0.35 + 0.45*edgeBias + 0.20*radial;
+    vx[i] += dx * I * w;
+    vy[i] += dy * I * w;
+  }
+}
+
+function sheetSpeed(){
+  let sum=0; for(let i=0;i<N;i++) sum += Math.hypot(vx[i],vy[i]);
+  return sum/Math.max(1,N);
+}
+
+// Инварианты после каждого удара (audit §6.6). Стоп-сигнал: если медианная толщина
+// падает, а areaRatio почти не растёт — чинить связь пластичности с импульсом,
+// а не маскировать масштабом рендера.
+function finalizeGesture(){
+  let areaNow=0, holes=0;
+  for(let q=0;q<quads.length;q++){
+    areaNow += area(quads[q]);
+    const [qa,qb,qc,qd] = quads[q];
+    if((thick[qa]+thick[qb]+thick[qc]+thick[qd])/4 < HOLE_THICK) holes++;
+  }
+  const ths = Array.from(thick).sort((x,y)=>x-y);
+  gestures.push({
+    impulse: +action.impulse.toFixed(2),
+    held_ms: action.heldAtLift,
+    areaRatio: +(areaNow/Math.max(1,startArea)).toFixed(3),
+    diameterRatio: +(sheetRadius()/Math.max(1,startR)).toFixed(3),
+    medianThickness: +(ths[ths.length>>1]||0).toFixed(3),
+    minThickness: +(ths[0]||0).toFixed(3),
+    holeQuads: holes,
+    ts: new Date().toISOString()
+  });
+  if(gestures.length>200) gestures.shift();
+  try{ localStorage.setItem("dough_gestures", JSON.stringify(gestures)); }catch(e){}
+  clearAction();
+}
+
+function gripArc(n, mul){
   const rad = (R0*2/(GRID-1)) * mul;
   const ids=[], ws=[];
   for(const i of edgeNodes){
@@ -359,7 +513,9 @@ function evenOut(dt){
 function creep(dt){
   if(sheetRadius() > targetR*1.25) return;          // предел растяжимости — общий с раскруткой
   evenOut(dt);
-  const k = Math.min(1, CREEP*dt);
+  // В окне удара тесто на порядок пластичнее: расправление закрепляется в длинах
+  // покоя; вне окна лист упругий (audit, группа B: creep).
+  const k = Math.min(1, CREEP * (plasticT>0 ? PLASTIC_BOOST : 1) * dt);
   for(let i=0;i<cons.length;i++){
     const c=cons[i]; if(c.broken) continue;
     const d=Math.hypot(px[c.b]-px[c.a], py[c.b]-py[c.a]);
@@ -476,13 +632,15 @@ function audioSnap(){
   s.connect(f); f.connect(g); g.connect(master); s.start(t); s.stop(t+0.2);
 }
 
-function audioSlap(){
+function audioSlap(I){
+  // Вызывается на переходе FLYING → IMPACT; громкость и яркость — от силы жеста.
   if(!AC || condition==="sight") return;
+  const k = Math.max(0, Math.min(1, (I||1)/IMPULSE_MAX));
   const s=AC.createBufferSource(); s.buffer=noiseBuf;
-  const f=AC.createBiquadFilter(); f.type="lowpass"; f.frequency.value=520; f.Q.value=1.2;
+  const f=AC.createBiquadFilter(); f.type="lowpass"; f.frequency.value=420+420*k; f.Q.value=1.2;
   const g=AC.createGain(); const t=AC.currentTime;
-  g.gain.setValueAtTime(0.5,t); g.gain.exponentialRampToValueAtTime(0.001,t+0.13);
-  s.connect(f); f.connect(g); g.connect(master); s.start(t); s.stop(t+0.15);
+  g.gain.setValueAtTime(0.20+0.45*k,t); g.gain.exponentialRampToValueAtTime(0.001,t+0.11+0.06*k);
+  s.connect(f); f.connect(g); g.connect(master); s.start(t); s.stop(t+0.2);
 }
 
 // ─────────────────────────── события разрыва и нажатия
@@ -532,13 +690,6 @@ function nodeNear(x,y){
   }
   return best;
 }
-function oppositeEdge(n){                            // «вторая рука» — противоположный край
-  let best=-1, bd=-1;
-  for(const i of edgeNodes){
-    const d=(px[i]-px[n])**2+(py[i]-py[n])**2; if(d>bd){bd=d;best=i;}
-  }
-  return best;
-}
 function toLocal(cx, cy){
   const r = cv.getBoundingClientRect();
   const sx=(cx-r.left)*cv.width/r.width, sy=(cy-r.top)*cv.height/r.height;
@@ -552,9 +703,10 @@ let dbgDown = 0, dbgMove = 0, dbgKind = "ждёт";
 
 function onDown(id, cx, cy){
   dbgDown++;
-  if(broke) reset();                                 // порвалось — тот же тап и начинает заново, и берёт тесто
-  const dup = grabs.findIndex(g=>g.id===id);         // iOS переиспользует id: старый захват душил новый
-  if(dup>=0) grabs.splice(dup,1);
+  if(broke) reset();                                 // порвалось — тап начинает заново и берёт тесто
+  if(action.pointerId !== null) return;              // один активный палец; второй игнорируется (audit §5)
+  if(action.state === "SETTLING") finalizeGesture(); // быстрый повторный тап не ждёт хвоста успокоения
+  if(action.state !== "RESTING") return;             // остальные фазы доигрывают автономно
   const tDown = performance.now();
   audioInit(); if(AC && AC.state==="suspended") AC.resume();
   if(AC){
@@ -563,45 +715,24 @@ function onDown(id, cx, cy){
   }
   const p = toLocal(cx, cy);
   const w = zone("work");
-  if(p.x > w.x + w.w) return;                        // справа жарят, тесто не трогают
-  const n = nodeNear(p.x, p.y);
-  if(n<0) return;
-  const gp = makeGrip(n, 0);
-  grabs.push({ id, node:n, x:p.x, y:p.y, x0:p.x, y0:p.y,
-               t0:performance.now(), grip:gp.ids, gripW:gp.ws, mul:gp.mul });
-  if(grabs.length===1){
-    const opp = oppositeEdge(n);
-    if(opp>=0) pinned[opp]=1;
-  }
+  if(p.x > w.x + w.w) return;
+  armAction(id, p);                                  // только выбор края: тесто НЕ двигается
 }
 function onMove(id, cx, cy){
-  const g = grabs.find(g=>g.id===id); if(!g) return;
+  if(action.pointerId !== id) return;
   dbgMove++;
-  const p = toLocal(cx, cy);
-  const moved = Math.hypot(p.x-g.x0, p.y-g.y0);
-  if(moved < R0*0.35){
-    const held = (performance.now()-g.t0)/1000;
-    const gp = makeGrip(g.node, held);
-    g.grip=gp.ids; g.gripW=gp.ws; g.mul=gp.mul;
-  }
-  const c = centerOfSheet();
-  const a0 = Math.atan2(g.y-c.y, g.x-c.x), a1 = Math.atan2(p.y-c.y, p.x-c.x);
-  let da = a1-a0; while(da>Math.PI) da-=Math.PI*2; while(da<-Math.PI) da+=Math.PI*2;
-  spinRate = spinRate*0.72 + (da*60)*0.28;
-  // Раньше «работа» копилась на каждом событии касания, поэтому мелкая частая дрожь
-  // давала больше, чем широкий размах: событий больше — прибавок больше. Теперь
-  // считается скорость пальца и его удалённость от центра, то есть именно размах.
-  const nowT = performance.now();
-  const dtm = Math.max(8, nowT - (g.tm || nowT)) / 1000;
-  g.tm = nowT;
-  const speed = Math.hypot(p.x-g.x, p.y-g.y) / Math.max(1,R0) / dtm;   // радиусов в секунду
-  const reach = Math.min(1.6, Math.hypot(p.x-c.x, p.y-c.y) / Math.max(1,R0));
-  workRate = workRate*0.82 + Math.min(9, speed * reach) * 0.18;
-  g.x=p.x; g.y=p.y;
+  updateActionMove(toLocal(cx, cy));
 }
 function onUp(id){
-  const i = grabs.findIndex(g=>g.id===id);
-  if(i>=0) grabs.splice(i,1);
+  if(action.pointerId !== id) return;
+  releaseAction();
+}
+function onCancel(id){
+  if(action.pointerId !== id) return;
+  // Отмена всегда возвращает покой из ARMED/LIFTING (audit §5);
+  // автономные фазы (FLYING и дальше) доигрывают сами и очистятся за ≤0.4 с.
+  if(action.state === "ARMED" || action.state === "LIFTING") clearAction();
+  else action.pointerId = null;
 }
 
 // Слушаем на УРОВНЕ ОКНА в фазе перехвата: любой элемент поверх холста — подсказка,
@@ -629,7 +760,7 @@ window.addEventListener("touchend", e=>{
 }, {passive:false, capture:true});
 
 window.addEventListener("touchcancel", e=>{
-  for(const t of e.changedTouches) onUp("t"+t.identifier);
+  for(const t of e.changedTouches) onCancel("t"+t.identifier);
 }, {passive:false, capture:true});
 
 window.addEventListener("pointerdown", e=>{
@@ -642,7 +773,11 @@ window.addEventListener("pointermove", e=>{
   onMove("p"+e.pointerId, e.clientX, e.clientY);
 }, true);
 window.addEventListener("pointerup", e=>{ onUp("p"+e.pointerId); }, true);
-window.addEventListener("pointercancel", e=>{ onUp("p"+e.pointerId); }, true);
+window.addEventListener("pointercancel", e=>{ onCancel("p"+e.pointerId); }, true);
+// Уход в фон — та же отмена: не оставлять взведённый жест (audit §5).
+addEventListener("blur", ()=>{
+  if(action.state==="ARMED"||action.state==="LIFTING") clearAction();
+});
 
 addEventListener("keydown", e=>{
   if(e.code==="Space"){ e.preventDefault(); pressNow(); }
@@ -659,7 +794,6 @@ function applyTune(){
   // положении ползунка. Теперь даже максимум мягкости заметно держит форму.
   COMPLIANCE  = 0.0000004 * Math.pow(60, TUNE.com/100);    // 4e-7 … 2.4e-5
   CREEP       = 0.04 + (TUNE.creep/100) * 0.9;             // 0.04 … 0.94
-  SPIN_GAIN_F = 0.003 + (TUNE.creep/100) * 0.018;          // растёт вместе с текучестью
   THICK_BREAK = 0.045 - (TUNE.brk/100) * 0.042;            // мягче … выносливее
   try{ localStorage.setItem("dough_tune", JSON.stringify(TUNE)); }catch(e){}
 }
@@ -704,9 +838,9 @@ document.getElementById("hardReload").addEventListener("click", ()=>{
 });
 
 document.getElementById("dump").addEventListener("click", async ()=>{
-  const txt = JSON.stringify(log, null, 2);
+  const txt = JSON.stringify({ tears: log, gestures }, null, 2);
   const btn = document.getElementById("dump");
-  try{ await navigator.clipboard.writeText(txt); btn.textContent = `скопировано (${log.length})`; }
+  try{ await navigator.clipboard.writeText(txt); btn.textContent = `скопировано (${log.length}+${gestures.length})`; }
   catch(e){ console.log(txt); btn.textContent = "лог в консоли"; }
   setTimeout(()=>btn.textContent = "скопировать лог", 1800);
 });
@@ -756,16 +890,19 @@ function draw(){
       g.lineTo(prX(px[d],py[d])*sx+ox, prY(px[d],py[d])*sy+oy);
       g.closePath(); g.fill();
     }
-    // точки захвата — минимальная отметка, без украшений
-    g.fillStyle="#d98b3a";
-    for(const gr of grabs){                          // кольцо под пальцем: касание принято
+    // дуга хвата и палец видны только пока жест взводится: ARMED подсвечивает
+    // выбранный край (audit, проход A), тесто при этом не двигается.
+    if(action.state==="ARMED" || action.state==="LIFTING"){
+      g.fillStyle="#d98b3a";
+      const S2 = pixelated ? 2 : 6;
+      for(const n of action.gripIds)
+        g.fillRect(prX(px[n],py[n])*sx-S2/2, prY(px[n],py[n])*sy-S2/2, S2, S2);
       const rr = pixelated ? 4 : 14;
       g.beginPath();
-      g.ellipse(prX(gr.x,gr.y)*sx, prY(gr.x,gr.y)*sy, rr, rr*TILT, 0, 0, Math.PI*2);
+      g.ellipse(prX(action.last.x,action.last.y)*sx, prY(action.last.x,action.last.y)*sy,
+                rr, rr*TILT, 0, 0, Math.PI*2);
       g.fill();
     }
-    for(const gr of grabs){ const S2=pixelated?3:9;
-      g.fillRect(prX(px[gr.node],py[gr.node])*sx-S2/2, prY(px[gr.node],py[gr.node])*sy-S2/2, S2, S2); }
   }
 
   if(pixelated){
@@ -821,10 +958,14 @@ function loop(now){
   acc+=dt; frames++;
   if(acc>0.5){ fps=frames/acc; acc=0; frames=0; }
   const liveEl = document.getElementById("live");
+  const pct = Math.round(sheetRadius()/targetR*100);
+  const ready = sheetRadius()>=targetR ? " ✓ готов" : "";
   liveEl.textContent = broke ? "порвалось — коснись, начнём заново"
-    : grabs.length ? `держишь · лист ${Math.round(sheetRadius()/targetR*100)}%${sheetRadius()>=targetR?" ✓ готов":""}`
-    : (rawTouch||rawPointer) ? "коснись теста слева" : "коснись теста";
-  liveEl.style.color = grabs.length ? "#8fbf6a" : "#d98b3a";
+    : action.state==="ARMED" ? `держишь край · хват ${Math.round(action.mul||GRIP_MIN)} · смахни!`
+    : (action.state==="LIFTING"||action.state==="FLYING") ? "бросок…"
+    : (action.state==="IMPACT"||action.state==="SETTLING") ? `ШЛЕП · лист ${pct}%${ready}`
+    : `коснись края · лист ${pct}%${ready}`;
+  liveEl.style.color = action.state!=="RESTING" ? "#8fbf6a" : "#d98b3a";
   document.getElementById("torn").classList.toggle("on", broke);
   document.getElementById("blind").classList.toggle("on", condition === "sound");
   const done = log.filter(l=>l.variant===variant&&l.condition===condition).length;
@@ -832,10 +973,9 @@ function loop(now){
   stats.textContent =
     `сборка: ${BUILD}\n` +
     `${variant}/${condition}  попыток ${done}/30  распознано ${done?Math.round(hit/done*100):0}%\n` +
-    `${grabs.length?"◆ держишь тесто":"○ коснись теста слева"}  ` +
-    `лист ${Math.round(sheetRadius()/targetR*100)}%${sheetRadius()>=targetR?" ✓ готов":""}  ` +
+    `${action.state!=="RESTING"?"◆ "+action.state:"○ покой"}  ` +
+    `лист ${pct}%${ready}  шлепков ${gestures.length}  ` +
     `[касаний ${rawTouch} · до теста ↓${dbgDown} ↔${dbgMove} · ${dbgKind}${loopErrs?" · сбоев "+loopErrs:""}]  ` +
-    `хват ${grabs.length?Math.round(grabs[0].mul||0):0}  раскрутка ${Math.abs(spinRate).toFixed(1)}  ` +
     `${broke?"ПОРВАЛОСЬ":pressed?"нажато":"—"}  ` +
     `${fps.toFixed(0)} fps  задержка ${latencies.length?median(latencies).toFixed(0):"—"} мс`;
   requestAnimationFrame(loop);
@@ -849,6 +989,7 @@ function resize(){
 }
 addEventListener("resize", resize);
 try{ const s=localStorage.getItem("dough_log"); if(s) log=JSON.parse(s); }catch(e){}
+try{ const s=localStorage.getItem("dough_gestures"); if(s) gestures=JSON.parse(s); }catch(e){}
 resize();
 requestAnimationFrame(loop);
 </script>
