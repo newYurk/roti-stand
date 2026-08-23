@@ -1,0 +1,567 @@
+<title>Roti Stand</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Prata&family=Alegreya+Sans:ital,wght@0,400;0,500;0,700;1,400&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+  /* Единственная тема — ночь у макашницы: тёмное дерево, свет фонаря, тесто.
+     Это визуальный язык самого стенда; страница живёт в мире игры. */
+  :root{
+    --bg:#120d09; --panel:#1a140e; --panel2:#211a12; --line:#2e251a;
+    --ink:#ecdfca; --dim:#988972; --faint:#6b5f4e;
+    --hot:#e08a33; --hot-soft:#c9762a;
+    --ok:#96b06a; --warn:#c9705a; --gold:#e6cf9f;
+    --mono:'JetBrains Mono',ui-monospace,SFMono-Regular,Menlo,monospace;
+  }
+  *{ box-sizing:border-box; }
+  html{ scroll-behavior:smooth; }
+  @media (prefers-reduced-motion: reduce){ html{ scroll-behavior:auto; } }
+  body{
+    margin:0; background:#120d09; color:var(--ink);
+    font:17px/1.66 'Alegreya Sans',system-ui,sans-serif;
+    -webkit-font-smoothing:antialiased;
+  }
+  ::selection{ background:#e08a33; color:#120d09; }
+
+  .wrap{ max-width:880px; margin:0 auto; padding:0 20px; }
+
+  /* ── шапка ── */
+  header.hero{ padding:56px 0 8px; }
+  .eyebrow{ font:600 11px/1 var(--mono); letter-spacing:.22em; text-transform:uppercase;
+    color:var(--hot); }
+  h1{ font:400 clamp(38px,7vw,64px)/1.08 'Prata',serif; margin:14px 0 6px; color:var(--gold);
+    text-wrap:balance; }
+  .sub{ font-size:20px; color:var(--dim); max-width:34em; margin:10px 0 0; text-wrap:balance; }
+  .sub b{ color:var(--ink); font-weight:500; }
+  .hero-meta{ display:flex; flex-wrap:wrap; gap:8px; margin:26px 0 0; }
+  .chip{ font:600 12px/1 var(--mono); letter-spacing:.04em; padding:8px 12px;
+    border:1px solid var(--line); border-radius:999px; color:var(--dim); background:var(--panel);
+    text-decoration:none; }
+  .chip.hot{ color:#120d09; background:var(--hot); border-color:var(--hot); }
+  .chip.ok{ color:var(--ok); border-color:#3a4229; }
+
+  /* ── сцена ── */
+  .scene{ margin:34px 0 0; border:1px solid var(--line); border-radius:14px; overflow:hidden;
+    background:#0d0906; }
+  .scene svg{ display:block; width:100%; height:auto; }
+  .scene-cap{ font:400 12.5px/1.5 var(--mono); color:var(--faint); padding:9px 14px;
+    border-top:1px solid var(--line); }
+
+  /* ── навигация ── */
+  nav.toc{ position:sticky; top:0; z-index:50; background:rgba(18,13,9,.93);
+    backdrop-filter:blur(6px); border-bottom:1px solid var(--line); margin-top:40px; }
+  nav.toc .row{ display:flex; gap:6px; overflow-x:auto; padding:10px 20px;
+    max-width:880px; margin:0 auto; scrollbar-width:none; }
+  nav.toc .row::-webkit-scrollbar{ display:none; }
+  nav.toc a{ flex:0 0 auto; font:600 12px/1 var(--mono); letter-spacing:.03em; color:var(--dim);
+    text-decoration:none; padding:8px 11px; border-radius:8px; border:1px solid transparent; }
+  nav.toc a.cur{ color:var(--hot); border-color:var(--line); background:var(--panel); }
+
+  /* ── секции ── */
+  section{ padding:52px 0 6px; }
+  .sec-label{ font:600 11px/1 var(--mono); letter-spacing:.2em; text-transform:uppercase;
+    color:var(--hot); }
+  h2{ font:400 clamp(25px,4.4vw,32px)/1.2 'Prata',serif; color:var(--gold); margin:10px 0 16px;
+    text-wrap:balance; }
+  h3{ font:700 17px/1.35 'Alegreya Sans',sans-serif; color:var(--ink); margin:26px 0 8px; }
+  p{ margin:0 0 14px; max-width:38em; }
+  p.wide{ max-width:none; }
+  .dim{ color:var(--dim); }
+  .lead{ font-size:19px; }
+  a{ color:var(--hot); text-decoration:none; border-bottom:1px solid #4b3a24; }
+  a:hover{ border-bottom-color:var(--hot); }
+  a:focus-visible, button:focus-visible, summary:focus-visible{
+    outline:2px solid var(--hot); outline-offset:2px; border-radius:4px; }
+  code, .path{ font:400 13.5px/1.5 var(--mono); color:var(--gold); background:var(--panel);
+    border:1px solid var(--line); border-radius:5px; padding:1px 6px; white-space:nowrap; }
+  .kbd{ color:var(--ink); }
+
+  /* плитки чисел */
+  .tiles{ display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:10px;
+    margin:20px 0; }
+  .tile{ background:var(--panel); border:1px solid var(--line); border-radius:12px;
+    padding:16px 16px 13px; }
+  .tile .n{ font:600 30px/1 var(--mono); font-variant-numeric:tabular-nums; color:var(--gold); }
+  .tile .n small{ font-size:16px; color:var(--dim); }
+  .tile .t{ font-size:13.5px; color:var(--dim); margin-top:7px; line-height:1.45; }
+  .tile.hot .n{ color:var(--hot); }
+  .tile.warn .n{ color:var(--warn); }
+  .tile.ok .n{ color:var(--ok); }
+
+  /* карточки и списки */
+  .cards{ display:grid; gap:10px; margin:18px 0; }
+  .card{ background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:16px 18px; }
+  .card h4{ margin:0 0 6px; font:700 16px/1.35 'Alegreya Sans'; color:var(--ink); }
+  .card p{ margin:0; font-size:15.5px; color:var(--dim); max-width:none; }
+  .card .tag{ float:right; font:600 10.5px/1 var(--mono); letter-spacing:.08em; padding:5px 8px;
+    border-radius:999px; margin-left:10px; }
+  .tag.ok{ color:#1a2410; background:var(--ok); }
+  .tag.warn{ color:#2a120c; background:var(--warn); }
+  .tag.hot{ color:#241304; background:var(--hot); }
+  .tag.dim{ color:var(--dim); border:1px solid var(--line); }
+
+  ul.tight{ margin:0 0 14px; padding-left:20px; }
+  ul.tight li{ margin:0 0 8px; max-width:40em; }
+  ul.tight li::marker{ color:var(--hot); }
+
+  /* поток состояний */
+  .flow{ display:flex; flex-wrap:wrap; gap:6px; align-items:center; margin:18px 0;
+    font:600 12.5px/1 var(--mono); }
+  .flow .st{ padding:9px 12px; border:1px solid var(--line); border-radius:8px;
+    background:var(--panel); color:var(--gold); }
+  .flow .ar{ color:var(--faint); }
+
+  /* шаги готовки */
+  .steps{ counter-reset:s; display:grid; gap:8px; margin:18px 0; }
+  .step{ display:grid; grid-template-columns:44px 1fr; gap:14px; align-items:start;
+    background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:14px 16px; }
+  .step::before{ counter-increment:s; content:counter(s);
+    font:400 26px/1.5 'Prata',serif; color:var(--hot); text-align:center; }
+  .step b{ display:block; color:var(--ink); }
+  .step span{ font-size:14.5px; color:var(--dim); }
+
+  /* аккордеоны развилок */
+  details{ background:var(--panel); border:1px solid var(--line); border-radius:12px;
+    margin:0 0 10px; overflow:hidden; }
+  summary{ cursor:pointer; list-style:none; padding:15px 18px; font-weight:700;
+    display:flex; gap:10px; align-items:baseline; }
+  summary::-webkit-details-marker{ display:none; }
+  summary::before{ content:"›"; color:var(--hot); font:400 20px/1 'Prata'; transition:transform .15s; }
+  details[open] summary::before{ transform:rotate(90deg); }
+  details .body{ padding:0 18px 16px; font-size:15.5px; color:var(--dim); }
+  details .body b{ color:var(--ink); }
+  .fork-q{ margin-left:auto; font:600 10.5px/1 var(--mono); color:var(--faint); letter-spacing:.06em; }
+
+  /* таймлайн */
+  .tl{ position:relative; margin:22px 0; padding-left:26px; }
+  .tl::before{ content:""; position:absolute; left:8px; top:6px; bottom:6px; width:2px;
+    background:var(--line); }
+  .tl .ev{ position:relative; margin:0 0 20px; }
+  .tl .ev::before{ content:""; position:absolute; left:-24px; top:6px; width:10px; height:10px;
+    border-radius:50%; background:var(--hot); box-shadow:0 0 0 4px #120d09; }
+  .tl .ev.mut::before{ background:var(--faint); }
+  .tl .when{ font:600 11.5px/1 var(--mono); letter-spacing:.08em; color:var(--hot);
+    text-transform:uppercase; }
+  .tl .ev.mut .when{ color:var(--faint); }
+  .tl h4{ margin:6px 0 4px; font:700 16.5px/1.3 'Alegreya Sans'; }
+  .tl p{ font-size:15px; color:var(--dim); margin:0; }
+
+  /* код */
+  pre{ background:#0d0906; border:1px solid var(--line); border-radius:12px; padding:14px 16px;
+    overflow-x:auto; font:400 13px/1.6 var(--mono); color:var(--gold); margin:14px 0; }
+  pre .c{ color:var(--faint); }
+
+  /* таблицы */
+  .tblwrap{ overflow-x:auto; margin:16px 0; border:1px solid var(--line); border-radius:12px; }
+  table{ border-collapse:collapse; width:100%; min-width:520px; font-size:14.5px; }
+  th{ font:600 11px/1.3 var(--mono); letter-spacing:.08em; text-transform:uppercase;
+    color:var(--faint); text-align:left; padding:11px 14px; border-bottom:1px solid var(--line);
+    background:var(--panel); }
+  td{ padding:10px 14px; border-bottom:1px solid var(--line); color:var(--dim); vertical-align:top; }
+  td:first-child{ color:var(--ink); }
+  tr:last-child td{ border-bottom:none; }
+  td b{ color:var(--ink); }
+
+  .note{ border-left:3px solid var(--hot); background:var(--panel); border-radius:0 10px 10px 0;
+    padding:13px 16px; margin:18px 0; font-size:15.5px; color:var(--dim); max-width:none; }
+  .note b{ color:var(--ink); }
+
+  footer{ margin-top:70px; border-top:1px solid var(--line); padding:26px 0 46px;
+    font:400 12.5px/1.7 var(--mono); color:var(--faint); }
+
+  #top{ position:fixed; right:14px; bottom:14px; z-index:60; width:42px; height:42px;
+    border-radius:50%; border:1px solid var(--line); background:var(--panel); color:var(--hot);
+    font:400 20px/40px 'Prata'; text-align:center; cursor:pointer; opacity:0; pointer-events:none;
+    transition:opacity .2s; }
+  #top.show{ opacity:1; pointer-events:auto; }
+</style>
+
+<div class="wrap">
+<header class="hero">
+  <div class="eyebrow">Проект · соло + ИИ · iOS-first</div>
+  <h1>Roti Stand</h1>
+  <p class="sub">Вечерняя тайская макашница с роти. Кулинарный симулятор, где еду читают
+  <b>по звуку и виду</b>, а не по индикатору, дырка в тесте — <b>авторский рваный узор</b>,
+  а не поражение, и всё держится на одном честном удовольствии: превратить комок теста
+  в тонкую золотистую вещь руками.</p>
+  <div class="hero-meta">
+    <a class="chip hot" href="https://newyurk.github.io/roti-dough-proto/">▶ живой стенд теста</a>
+    <span class="chip ok">решений принято: 2</span>
+    <span class="chip">ревью: 175 находок</span>
+    <span class="chip">отпуск-спринт: 3–25 октября</span>
+  </div>
+
+  <figure class="scene" aria-label="Схема сцены: ночной стол макашницы, лист теста с рваной дыркой, тава">
+  <svg viewBox="0 0 880 300" role="img">
+    <rect width="880" height="300" fill="#0d0906"/>
+    <!-- свет фонаря -->
+    <ellipse cx="250" cy="30" rx="330" ry="150" fill="#e08a33" opacity=".07"/>
+    <ellipse cx="250" cy="20" rx="200" ry="90" fill="#e08a33" opacity=".08"/>
+    <circle cx="250" cy="8" r="17" fill="#e08a33" opacity=".85"/>
+    <rect x="248" y="-6" width="4" height="10" fill="#4b3a24"/>
+    <!-- стол досками, в перспективе -->
+    <g>
+      <rect x="0" y="120" width="880" height="180" fill="#241b11"/>
+      <rect x="0" y="120" width="880" height="34" fill="#2b2015"/>
+      <rect x="0" y="158" width="880" height="30" fill="#241b11"/>
+      <rect x="0" y="192" width="880" height="30" fill="#2b2015"/>
+      <rect x="0" y="226" width="880" height="30" fill="#241b11"/>
+      <rect x="0" y="260" width="880" height="40" fill="#2b2015"/>
+      <rect x="0" y="153" width="880" height="2" fill="#171008"/>
+      <rect x="0" y="187" width="880" height="2" fill="#171008"/>
+      <rect x="0" y="221" width="880" height="2" fill="#171008"/>
+      <rect x="0" y="255" width="880" height="2" fill="#171008"/>
+    </g>
+    <!-- мишень растяжки -->
+    <ellipse cx="300" cy="205" rx="196" ry="62" fill="none" stroke="#4a3a24" stroke-width="2.5"
+      stroke-dasharray="12 9"/>
+    <!-- лист теста с рваной дыркой -->
+    <g>
+      <ellipse cx="300" cy="205" rx="168" ry="52" fill="#d9c6a2"/>
+      <ellipse cx="268" cy="198" rx="118" ry="36" fill="#e4d3b2"/>
+      <ellipse cx="252" cy="193" rx="70" ry="21" fill="#ecdbba"/>
+      <!-- рваная дырка: тень + светлая кромка -->
+      <path d="M338 190 l34 -7 26 6 14 10 -10 9 -30 6 -30 -4 -12 -11 z" fill="#100a06"/>
+      <path d="M338 190 l34 -7 26 6 14 10 -10 9 -30 6 -30 -4 -12 -11 z" fill="none"
+        stroke="#f2e4c6" stroke-width="3" opacity=".8"/>
+      <!-- выеденный край снизу -->
+      <path d="M212 244 l26 -10 30 2 16 12 -22 8 -34 0 z" fill="#241b11"/>
+      <path d="M212 244 l26 -10 30 2 16 12 -22 8" fill="none" stroke="#e9d8b6"
+        stroke-width="3" opacity=".7"/>
+    </g>
+    <!-- тава -->
+    <g>
+      <ellipse cx="700" cy="212" rx="132" ry="44" fill="#241d15"/>
+      <ellipse cx="700" cy="209" rx="124" ry="40" fill="#2c241a"/>
+      <ellipse cx="700" cy="207" rx="102" ry="32" fill="#332a1e"/>
+      <ellipse cx="700" cy="206" rx="76" ry="24" fill="#3a2f21"/>
+      <ellipse cx="700" cy="205" rx="42" ry="13" fill="#6b5a2a"/>
+      <ellipse cx="688" cy="202" rx="16" ry="5" fill="#8a7436" opacity=".8"/>
+    </g>
+    <!-- подписи -->
+    <g font-family="JetBrains Mono, monospace" font-size="12" fill="#988972">
+      <text x="176" y="128">лист · рваный узор остаётся</text>
+      <text x="612" y="140">กระทะโรตี · вогнутое дно,</text>
+      <text x="612" y="156">лужица масла в центре</text>
+      <text x="205" y="284" fill="#6b5f4e">пунктир — мишень растяжки</text>
+    </g>
+  </svg>
+  <figcaption class="scene-cap">схема, не скриншот: стол из стенда — лист с дыркой и выеденным краем, справа тава с вогнутым дном (фактчек: กระทะโรตี, не плоская «тава»)</figcaption>
+  </figure>
+</header>
+</div>
+
+<nav class="toc" aria-label="Разделы">
+  <div class="row">
+    <a href="#game">Игра</a><a href="#decided">Решено</a><a href="#review">Ревью</a>
+    <a href="#proto">Прототип</a><a href="#mech">Механика</a><a href="#steps">Шаги</a>
+    <a href="#forks">Развилки</a><a href="#plan">План</a><a href="#culture">Шпаргалка</a>
+    <a href="#docs">Документы</a>
+  </div>
+</nav>
+
+<div class="wrap">
+
+<section id="game">
+  <div class="sec-label">01 · Что это</div>
+  <h2>Одна точка, одна тава, один прекрасный глагол</h2>
+  <p class="lead">Остров, вечер, навес. Игрок — за прилавком макашницы: расплющить кусочек,
+  растянуть лист шлепками, начинка, конверт, жарка на слух, резка, полив сгущёнкой.
+  Скрытая география для нас — <b>Ко Чанг</b>; для игрока — просто узнаваемый островной Таиланд.</p>
+  <h3>Несущие принципы (из корпуса, подтверждены ревью)</h3>
+  <ul class="tight">
+    <li><b>Звук — это HUD.</b> Готовность блюда слышно: шипение, пузыри, «суше и звонче». Ревью
+      измерило: из 18 позиций тактильного контракта арт-стиль влияет на 2 — тактильность живёт в звуке.</li>
+    <li><b>Дырка — не наказание.</b> Порвал — жаришь с рваным узором. Ни перезапуска, ни штрафа.</li>
+    <li><b>Без чисел в интерфейсе.</b> Тесто «капризное» или «покладистое» — рукой, не шкалой.</li>
+    <li><b>Культурная добросовестность.</b> Реальные блюда отделены от авторских; корни роти —
+      индийско-малайские и тайско-мусульманские, и это уважается, а не декорируется.</li>
+  </ul>
+  <h3>Почему в это стоит верить</h3>
+  <ul class="tight">
+    <li>Ядро — <b>один жест, которого нет ни у кого</b>: ฟาด, «поднять и шлёпнуть». Он уже живёт в стенде.</li>
+    <li>ASMR-кулинария — ниша с преданной аудиторией, а у нас звук не украшение, а механика.</li>
+    <li>Рваный узор превращает ошибку в автографику: каждый роти игрока — уникальный отпечаток.</li>
+  </ul>
+  <p class="dim">Честные риски — ниже, в «Ревью» и «Развилках»: объём корпуса в 6,4 раза больше ядра,
+  стек не выбран, культурные красные линии реальны.</p>
+</section>
+
+<section id="decided">
+  <div class="sec-label">02 · Что уже решено</div>
+  <h2>Два решения владельца — оба уже в стенде</h2>
+  <div class="cards">
+    <div class="card"><span class="tag ok">реализовано</span>
+      <h4>Разрыв — узор, не провал</h4>
+      <p>Переделать тесто нельзя: «как сделал, так и пожаришь. Так сопли, так сопли».
+      Предупреждающее гудение убрано — предупреждать не о чем. Звуки листа: скрип натяжения,
+      шлепок удара, треск новой дырки.</p></div>
+    <div class="card"><span class="tag ok">реализовано</span>
+      <h4>Подготовка теста — по шагам</h4>
+      <p>Растягивание — не первый шаг. Сначала кусочек, отрезанный от «колбаски», расплющивается
+      пальцем до 42 % мишени, и только потом — шлепки. В стенде переключатель шагов; полный список
+      шагов — раздел 06.</p></div>
+  </div>
+</section>
+
+<section id="review">
+  <div class="sec-label">03 · Ревью корпуса · 21–22 августа</div>
+  <h2>Восемь линз, три оси, всё с источниками</h2>
+  <div class="tiles">
+    <div class="tile"><div class="n">175</div><div class="t">находок, каждая с цитатой или ссылкой с датой доступа</div></div>
+    <div class="tile warn"><div class="n">44</div><div class="t">критических — блокируют проектирование дальше</div></div>
+    <div class="tile hot"><div class="n">92</div><div class="t">требуют решения владельца, а не агента</div></div>
+    <div class="tile"><div class="n">6,4<small>×</small></div><div class="t">корпус больше собственного ядра: 167 сущностей, в ядре 15</div></div>
+  </div>
+  <h3>Три вещи, которые меняют проект</h3>
+  <div class="cards">
+    <div class="card"><span class="tag warn">блокер</span>
+      <h4>Touch.force на всех iPhone с 2019 года — всегда ноль</h4>
+      <p>Датчика давления в экране физически нет. Механику «контроль натяжения силой нажатия»
+      нельзя построить ни в вебе, ни нативно — только расстояние, скорость, длительность.
+      Стенд уже так и построен.</p></div>
+    <div class="card"><span class="tag warn">блокер</span>
+      <h4>Режим подброса телефона не пройдёт App Store</h4>
+      <p>Прецедент найден поимённо: Send Me To Heaven отклонён <i>несмотря на дисклеймер</i>
+      (Guideline 1.4.5). Юридическая конструкция из дока не защищает, а шутливая шкала
+      «Насколько тебе жить надоело» — отягчающее обстоятельство.</p></div>
+    <div class="card"><span class="tag hot">масштаб</span>
+      <h4>24–41 человеко-месяц против 1,5–3 на минимальную петлю</h4>
+      <p>Полный корпус ≈ 2 330 кадров ассетов; персонажи (842 кадра) дороже всей готовки (479).
+      Минимальная играбельная петля: растягивание → складывание → тава на слух, одна начинка,
+      ноль персонажей, ≈ 150 кадров.</p></div>
+  </div>
+  <h3>Что развернуло дизайн в плюс</h3>
+  <ul class="tight">
+    <li><b>Тактильность держится на звуке</b> — значит арт-развилка (пиксель или нет) ядро не блокирует.</li>
+    <li><b>Ошибка с Сонгкраном чинит календарь:</b> после исправления фестивали разъезжаются на полгода,
+      и простой в игровом году падает с 50–65 смен до 25–35.</li>
+    <li><b>Порядок готовки был перевёрнут:</b> на улице лист кладут на таву <i>до</i> начинки —
+      это меняет шаги 3–4, и это подарок механике, а не проблема.</li>
+    <li><b>10 авторских начинок — чистый проход</b> по культурным правилам: ни свинины, ни алкоголя,
+      ни псевдотайских названий.</li>
+  </ul>
+</section>
+
+<section id="proto">
+  <div class="sec-label">04 · Прототип · живой</div>
+  <h2>Стенд шагов 1–2: от кусочка до рваного листа</h2>
+  <p><a class="chip hot" href="https://newyurk.github.io/roti-dough-proto/">▶ newyurk.github.io/roti-dough-proto</a>
+  <span class="dim"> · телефон, горизонтально; сборка пишется в правом нижнем углу</span></p>
+  <p>Каждый шаг этой цепочки — опровержение, добытое замером или живой рукой, и в этом главная
+  ценность стенда: он <b>убивает красивые неверные идеи дёшево</b>.</p>
+  <div class="tl">
+    <div class="ev mut"><div class="when">идея из дока</div>
+      <h4>«Две точки захвата, развести пальцы»</h4>
+      <p>Замер: так выходит жгут — тонким становится 4–16 % листа, 90 % не тронуто. Опровергнуто.</p></div>
+    <div class="ev mut"><div class="when">вторая попытка</div>
+      <h4>Раскрутка одним пальцем (ฟาด как вращение)</h4>
+      <p>Лист получился (93 % тонкой площади), но живой тест: «тесто липнет тучкой к пальцу». Жест неверный.</p></div>
+    <div class="ev"><div class="when">аудит ввода</div>
+      <h4>Диагноз: захват означал четыре вещи разом</h4>
+      <p>Палец касается · участок выбран · рука держит · рука тянет. Пока это один объект — любая
+      косметика сохранит «липкость». План перехода — six-state машина.</p></div>
+    <div class="ev"><div class="when">сейчас в стенде</div>
+      <h4>«Поднять и шлёпнуть» + расплющивание</h4>
+      <p>Шаг 1: прижал — кусочек расползается. Шаг 2: взял край, миг подержал (хват шире),
+      резкий мах — бросок, ШЛЕП, лист шире. Слабый / средний / сильный мах: +6 / +11 / +21 %
+      диаметра. До мишени — ~8 хороших шлепков. Сильный шлепок по тонкому листу пробивает
+      рваную дырку — навсегда.</p></div>
+  </div>
+  <div class="flow" aria-label="Машина состояний жеста">
+    <span class="st">RESTING</span><span class="ar">→</span>
+    <span class="st">ARMED</span><span class="ar">→</span>
+    <span class="st">LIFTING</span><span class="ar">→</span>
+    <span class="st">FLYING</span><span class="ar">→</span>
+    <span class="st">IMPACT</span><span class="ar">→</span>
+    <span class="st">SETTLING</span>
+  </div>
+  <p class="dim">Касание только выбирает край и ничего не двигает; медленное отпускание — ничего;
+  жест автономен после броска. Ноль «липкости» по замеру: 0 px сдвига без завершённого жеста.</p>
+</section>
+
+<section id="mech">
+  <div class="sec-label">05 · Под капотом</div>
+  <h2>Сетка, которая помнит растяжение</h2>
+  <p>Тесто — решётка 38×38, обрезанная по кругу: ~1060 узлов, ~4000 «волокон» с длиной покоя.
+  Решатель XPBD (8 подшагов на кадр) стягивает волокна к покою; растянутые волокна
+  <b>запоминают</b> растяжение — так лист остаётся тонким, а не пружинит назад.</p>
+  <pre><span class="c">// толщина не хранится — она следствие геометрии (сохранение объёма):</span>
+толщина ячейки = площадь_при_рождении / площадь_сейчас
+
+<span class="c">// удар: импульс + одноразовое пластическое растяжение с весами</span>
+вес узла = 0.35 + 0.45·край + 0.20·по-направлению-маха
+
+<span class="c">// дырка: перестарался — сильный шлепок по уже тонкому листу</span>
+если сила ≥ 2.9 и мин.толщина &lt; 0.20 → рваный пробой на дальней стороне</pre>
+  <div class="note"><b>Честное ограничение:</b> сетка двумерная, самостолкновений нет —
+  лист может наложиться сам на себя, склейки не существует. Для нынешних жестов это не мешает,
+  но <b>шаг «сложить конвертом» на этой модели невозможен без доработки</b> (слои / высота / 2.5D).
+  Записано заранее, чтобы не удивляться в октябре.</div>
+  <p class="dim">Полное описание: <span class="path">prototype/dough-closeup/MECHANICS.md</span></p>
+</section>
+
+<section id="steps">
+  <div class="sec-label">06 · Готовка</div>
+  <h2>Семь шагов одного роти</h2>
+  <p class="dim">Порядок — по уличной практике из фактчека (лист на таву кладут до начинки).
+  Список — предложение; владелец просил «сначала посмотреть, сколько шагов будет».</p>
+  <div class="steps">
+    <div class="step"><div><b>Расплющить кусочек <span class="tag ok" style="float:none">в стенде</span></b>
+      <span>от «колбаски» — прижатым пальцем до 42 % мишени</span></div></div>
+    <div class="step"><div><b>Растянуть шлепками <span class="tag ok" style="float:none">в стенде</span></b>
+      <span>ฟาด: взять край, мах, шлепок; рваный узор — навсегда</span></div></div>
+    <div class="step"><div><b>Перенести лист на таву</b>
+      <span>по фактчеку — до начинки; лист схватывается на маргарине</span></div></div>
+    <div class="step"><div><b>Начинка</b>
+      <span>банан и яйцо на подпекающееся тесто; MVP-вкус: банан + яйцо + сгущёнка</span></div></div>
+    <div class="step"><div><b>Сложить конвертом <span class="tag warn" style="float:none">нужна доработка модели</span></b>
+      <span>наложение листа — то самое ограничение из раздела 05</span></div></div>
+    <div class="step"><div><b>Жарка и флип</b>
+      <span>готовность — на слух: шипение → пузыри → «суше и звонче»</span></div></div>
+    <div class="step"><div><b>Резка и полив</b>
+      <span>6–9 квадратов, сгущёнка с инерцией, две зубочистки — и паспорт роти</span></div></div>
+  </div>
+</section>
+
+<section id="forks">
+  <div class="sec-label">07 · Развилки</div>
+  <h2>Шесть решений, которые никто не примет за владельца</h2>
+  <details><summary>Экономика: с валютой или без <span class="fork-q">корень метацели</span></summary>
+    <div class="body"><p><b>Спецификация «экономики без валюты» утрачена вместе с addendum v5.</b>
+    Но выбор можно сделать сегодня: при «без валюты» переписываются шесть разделов доков
+    (награда Shift-режима, подсчёт мелочи, путь покупки инструментов…), при «с валютой» —
+    один пункт v6. Довод за «без»: тайские банкноты несут портрет Короля — отказ от наличных
+    снимает риск ст. 112 целиком.</p></div></details>
+  <details><summary>Акселерометр: вырезать или переделать <span class="fork-q">закрывает 2 конфликта</span></summary>
+    <div class="body"><p>В описанном виде не пройдёт ревью Apple (прецедент — Send Me To Heaven).
+    Отказ от него разом закрывает конфликт «пиксель ↔ 3D-реконструкция броска» и тональный
+    (шутки про «жить надоело» в доброй игре). Ревью оценило подсистему сопоставимой по цене
+    со всем ядром.</p></div></details>
+  <details><summary>Нарратив: чей дом и откуда героиня <span class="fork-q">v4 ↔ v6</span></summary>
+    <div class="body"><p>Бабушка героя или чужой дом с книгой рецептов? Плюс слой из фактчека:
+    заметной мусульманской общины на Ко Чанге источники не подтверждают (Трат — 97 % буддистов),
+    так что тайско-мусульманскую идентичность роти честнее объяснять <b>приездом с юга</b>.
+    Это же решает вопрос религии героя (домик духов у дома — буддийский обряд).</p></div></details>
+  <details><summary>Арт: пиксель или нет — теперь «какое разрешение» <span class="fork-q">не блокирует ядро</span></summary>
+    <div class="body"><p>Ревью переформулировало вопрос: 4 из 6 проблем пикселя лечатся повышением
+    логического разрешения. Прототип должен вернуть <b>два числа</b>: минимальное читаемое
+    разрешение и его цену в часах. Пока тактильность в звуке — решение можно не торопить.</p></div></details>
+  <details><summary>Объём первой версии <span class="fork-q">режется 6,4×</span></summary>
+    <div class="body"><p>Минимальная петля: одно роти от кусочка до нарезки, одна начинка,
+    ноль персонажей, ≈150 кадров, 1,5–3 месяца. Всё остальное — сезоны, улица, клиенты,
+    сад с курами — вторая очередь по явному решению, не по инерции.</p></div></details>
+  <details><summary>Доки: один консолидированный или три тематических <span class="fork-q">после развилок</span></summary>
+    <div class="body"><p>Корпус v3+v4+v6 сводится в актуальный дизайн-док только после решений выше —
+    иначе переписывать дважды. Архив не трогается никогда.</p></div></details>
+</section>
+
+<section id="plan">
+  <div class="sec-label">08 · План</div>
+  <h2>До отпуска — решить. В отпуск — собрать вертикаль</h2>
+  <div class="note"><b>Рамка честности.</b> Ревью насчитало 24–41 человеко-месяц на весь корпус —
+  «закончить игру» за 23 дня отпуска нельзя, и это не цель. Цель отпуска — <b>играбельная
+  вертикаль ядра: одно идеальное роти от кусочка до нарезки на iPhone</b>. Минимальная петля
+  оценена в 1,5–3 месяца; вертикаль без полировки в 23 полных дня — амбициозно, но честно.</div>
+  <div class="tl">
+    <div class="ev"><div class="when">сейчас → середина сентября · фоново</div>
+      <h4>Закрыть развилки и жест</h4>
+      <p>Шесть решений из раздела 07 · живой iPhone-тест шлепка по вопросам аудита
+      («похоже на взял-и-шлёпнул, а не на кнопку?») · калибровка порогов маха на живой руке.</p></div>
+    <div class="ev"><div class="when">вторая половина сентября</div>
+      <h4>Консолидация + выбор стека</h4>
+      <p>Свести корпус в один дизайн-док · DECISION.md: варианты Web+Capacitor / Godot 4 (переоценивается честно — GDScript не тянет сетку, нужен GDExtension) / Unity / Swift+SpriteKit ·
+      обязательные замеры до выбора: M1 — Touch.radius на живом iPhone, M3 — атлас 200–400 кадров.</p></div>
+    <div class="ev"><div class="when">3–25 октября · отпуск, 23 дня</div>
+      <h4>Вертикальный срез ядра</h4>
+      <p>Шаги 1–7 на выбранном стеке · одна начинка (банан + яйцо + сгущёнка) · звук: натяжение,
+      шлепок, треск, шипение тавы · рваный узор доживает до жарки и виден в готовом роти ·
+      финал — карточка «паспорт роти». Неделя 1: перенос ядра + шаги 3–4; неделя 2: конверт
+      (доработка модели) + жарка на слух; неделя 3: резка, полив, паспорт, связка в одну смену.</p></div>
+    <div class="ev mut"><div class="when">после отпуска</div>
+      <h4>По результату среза</h4>
+      <p>Плейтесты вертикали → тогда и только тогда: клиенты, улица, сезоны, сюжет книги рецептов.</p></div>
+  </div>
+  <p class="dim">Вне объёма отпуска сознательно: акселерометр, персонажи, мета-слои, порталы,
+  Google Play, полный арт-сет.</p>
+</section>
+
+<section id="culture">
+  <div class="sec-label">09 · Шпаргалка фактчека</div>
+  <h2>Что говорить правильно — и чего не делать</h2>
+  <div class="tblwrap"><table>
+    <tr><th>Тема</th><th>Как верно</th></tr>
+    <tr><td>Роти</td><td>семейство лепёшек <b>с Индийского субконтинента</b>; тайский уличный вариант —
+      тесто семьи roti canai/prata, но сладкий конверт ближе к <b>мартабаку</b>; корни
+      тайско-мусульманские, юг страны</td></tr>
+    <tr><td>Сковорода</td><td><b>กระทะโรตี</b> — толстая сталь 18–20″ с <b>вогнутым дном</b> под лужицу
+      масла; «тава» — индийское слово, тайка его не скажет</td></tr>
+    <tr><td>Жир и порядок</td><td>жарят на <b>маргарине</b>; лист кладут на сковороду <b>до</b> начинки;
+      шарики теста отлёживаются <b>в масле</b>, не под тканью</td></tr>
+    <tr><td>«Макашница»</td><td>русская экспатская калька; тайцы говорят <b>รถเข็น</b> (тележка) или
+      <b>แผงลอย</b> (лоток); แม่ค้า — это сама продавщица</td></tr>
+    <tr><td>Фестивали</td><td>Сонгкран — <b>апрель, конец сухого сезона</b> (в доке было наоборот);
+      Лой Кратонг — полнолуние 12-го лунного месяца, ноябрь</td></tr>
+    <tr><td>Цикады</td><td>сумеречный хор реален, но <b>сезонный</b> и длится <b>минуты</b> —
+      это колокол, а не саундтрек; ночь после него не тихая: сверчки, лягушки, токай</td></tr>
+  </table></div>
+  <h3>Красные линии</h3>
+  <ul class="tight">
+    <li>Никаких изображений <b>Будды как декора</b> (кампания «Buddha is not for decoration», ст. 206 УК).</li>
+    <li>Никаких реалистичных <b>тайских банкнот</b> — на них портрет Короля (ст. 112, экстерриториально).</li>
+    <li><b>Монах-клиент вечером невозможен</b>: монахи Тхеравады не едят после полудня и не берут деньги.</li>
+    <li>Свинины и алкоголя на роти-тележке не бывает; арабскую вязь и аудио-сэмплы — только проверенные
+      (кейс LittleBigPlanet: отзыв тиража за две строки Корана в треке).</li>
+    <li>Nutella — торговая марка: в доках заменить на «шоколадную пасту». Epidemic Sound игры
+      <b>не покрывает вовсе</b> — звук брать на Sonniss GDC / Splice.</li>
+  </ul>
+</section>
+
+<section id="docs">
+  <div class="sec-label">10 · Карта документов</div>
+  <h2>Где что лежит</h2>
+  <p class="dim">Проект: приватный <a href="https://github.com/newYurk/roti-stand">github.com/newYurk/roti-stand</a> ·
+  стенд: публичный <a href="https://github.com/newYurk/roti-dough-proto">roti-dough-proto</a></p>
+  <div class="tblwrap"><table>
+    <tr><th>Файл</th><th>Что внутри</th></tr>
+    <tr><td class="path">STATE.md</td><td>точка входа: с него начинается любой новый чат</td></tr>
+    <tr><td class="path">docs/decisions-log.md</td><td>принятые решения владельца (2) + кандидаты шагов</td></tr>
+    <tr><td class="path">review/review-2026-08-21.md</td><td>разбор ревью: что подтвердилось, что опровергнуто, что решать</td></tr>
+    <tr><td class="path">review/raw/*.json</td><td>175 находок машинно: 9 линз, severity, цитаты, ссылки</td></tr>
+    <tr><td class="path">docs/slap-input-audit.md</td><td>аудит ввода: state machine, псевдокод, три прохода со стоп-правилами</td></tr>
+    <tr><td class="path">prototype/dough-closeup/MECHANICS.md</td><td>устройство модели теста и её честные пределы</td></tr>
+    <tr><td class="path">prototype/…/HYPOTHESIS.md · RESULT.md</td><td>гипотеза замеров до кода · журнал всех опровержений</td></tr>
+    <tr><td class="path">docs/corpus-map.md</td><td>судьба корпуса: что уцелело, что утрачено (v5!), где искали</td></tr>
+    <tr><td class="path">docs/archive/*</td><td>исходные доки v3 · v4 · v6 · бриф — не редактируются никогда</td></tr>
+  </table></div>
+  <div class="note"><b>Открытая рана корпуса:</b> addendum v5 («экономика без валюты», «экран
+  готовки одним жестом») утрачен безвозвратно — на диске его нет, Time Machine не настроен.
+  Единственный шанс — история чатов Perplexity; проверить может только владелец.</div>
+</section>
+
+<footer>
+  Roti Stand · страница-обзор для работы, стилизована под питч · собрано 22.08.2026<br>
+  сборка стенда на момент вёрстки: «дырки только в блине» · один чат — один проект
+</footer>
+</div>
+
+<button id="top" aria-label="Наверх">↑</button>
+<script>
+(function(){
+  var links = Array.prototype.slice.call(document.querySelectorAll('nav.toc a'));
+  var map = {};
+  links.forEach(function(a){ map[a.getAttribute('href').slice(1)] = a; });
+  var obs = new IntersectionObserver(function(es){
+    es.forEach(function(e){
+      if(e.isIntersecting){
+        links.forEach(function(a){ a.classList.remove('cur'); });
+        var a = map[e.target.id]; if(a) a.classList.add('cur');
+      }
+    });
+  }, { rootMargin:'-25% 0px -65% 0px' });
+  document.querySelectorAll('section[id]').forEach(function(s){ obs.observe(s); });
+
+  var top = document.getElementById('top');
+  addEventListener('scroll', function(){
+    top.classList.toggle('show', scrollY > 900);
+  }, { passive:true });
+  top.addEventListener('click', function(){ scrollTo({ top:0, behavior:'smooth' }); });
+})();
+</script>
