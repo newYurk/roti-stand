@@ -49,15 +49,18 @@
 
 <div id="stage">
   <canvas id="cv"></canvas>
-  <div id="hint">возьми край, миг подержи — возьмёшь шире · резкий мах — шлепок · доведи лист до пунктира, не порвав</div>
-  <div id="live">коснись края теста</div>
+  <div id="hint">шаг 1: прижимай кусочек — расплющишь до пунктира · шаг 2: возьми край, миг подержи, резко махни — шлепок. Порвётся — останется рваный узор, так и пожарим</div>
+  <div id="live">прижми кусочек теста</div>
   <div id="flash"></div>
-  <div id="torn">ПОРВАЛОСЬ · новый комок…</div>
   <div id="blind">картинка выключена намеренно<br><span>это режим замера: тяни на слух</span></div>
   <div id="turn">удобнее горизонтально</div>
 </div>
 
 <div id="panel">
+  <div class="grp"><b>шаг</b>
+    <button data-s="1" class="on">1 · расплющить</button>
+    <button data-s="2">2 · растянуть</button>
+  </div>
   <div class="grp measure"><b>замер: вид</b>
     <button data-v="A" class="on">A · пиксель 80</button>
     <button data-v="B">B · пиксель 224</button>
@@ -95,7 +98,7 @@
 // длина окружного ребра там падает до долей пикселя, относительное растяжение скачет
 // до 400%+ и лист «рвётся» в середине от любого движения. Замер это обнаружил сразу.
 // Число узлов сохранено (~1150), однородность рёбер восстановлена.
-const BUILD = "2026-08-22 · шлепок: проход A+B";
+const BUILD = "2026-08-22 · шаги 1–2 · разрыв = узор";
 const GRID = 38;                   // 38x38, в круг попадает ~1130 узлов
 let SUBSTEPS = 8;                  // T2: 8–10 подшагов, 1 итерация
 let COMPLIANCE = 0.000010;         // податливость. Крутилась вслепую, пока не работал тап,
@@ -123,7 +126,9 @@ let startArea = 1;                 // площадь листа при рожд�
 let gestures = [];                 // журнал шлепков (audit §6.6)
 let cons = null;                             // {a,b,rest,broken}
 let edgeNodes = [];                          // граничные узлы — за них берут лист
-let broke = false, breakTime = 0, pressTime = 0, pressed = false;
+// Разрыв — не провал и не перезапуск (решение владельца 22.08.2026): дырка остаётся
+// в листе рваным узором, симуляция не останавливается, тесто не переделывается.
+let tornAt = 0, lastSnap = 0, breakTime = 0, pressTime = 0, pressed = false;
 let runStart = 0, R0 = 1;
 let variant = "A", condition = "both";
 let log = [];
@@ -163,13 +168,22 @@ function zone(name){
 }
 
 // ─────────────────────────── построение листа
-const START_FRAC = 0.17, TARGET_FRAC = 0.40;   // комок теста → лист на всю рабочую зону
-let targetR = 1, startR = 1;
+// Подготовка теста разбита на шаги (решение владельца 22.08.2026):
+// шаг 1 — отрезанный от «колбаски» кусочек расплющивается пальцем до ~42% мишени
+// (ровно та точка, где раньше стенд начинался); шаг 2 — растягивание шлепками.
+const FLAT_START_FRAC = 0.075, START_FRAC = 0.17, TARGET_FRAC = 0.40;
+let stepNo = 1;                                // текущий шаг стенда (step занят функцией физики)
+let targetR = 1, startR = 1, step1R = 1;       // step1R = цель расплющивания (42% мишени)
+let advancedAt = 0;                            // момент авто-перехода на шаг 2 (для баннера)
+let gestureScale = 1;                          // масштаб жеста: фиксирован от экрана, не от роста листа
+let FLAT_RATE = 0.55;                          // скорость расплющивания под пальцем
 function build(){
   const z = zone("work");
-  R0 = Math.min(z.w, z.h) * START_FRAC;
+  R0 = Math.min(z.w, z.h) * (stepNo===1 ? FLAT_START_FRAC : START_FRAC);
   startR = R0;
   targetR = Math.min(z.w, z.h) * TARGET_FRAC;
+  step1R  = Math.min(z.w, z.h) * START_FRAC;
+  gestureScale = step1R;                       // мах меряем в долях «свежего листа шага 2»
   const h = (R0*2)/(GRID-1);                 // шаг решётки — одинаков везде
   const x0 = z.cx - R0, y0 = z.cy - R0;
 
@@ -223,7 +237,7 @@ function build(){
   for(let i=0;i<N;i++) if(deg[i] < 8) edgeNodes.push(i);   // граница круга
 
   clearAction(); plasticT = 0;
-  broke = false; pressed = false; breakTime = pressTime = 0;
+  tornAt = 0; lastSnap = 0; pressed = false; breakTime = pressTime = 0;
   startArea = 0; for(let q=0;q<quads.length;q++) startArea += area(quads[q]);
   runStart = performance.now();
 }
@@ -264,6 +278,12 @@ function step(dt){
     }
   }
   plasticT = Math.max(0, plasticT - dt);
+  if(stepNo===1 && action.state==="ARMED") pressFlatten(dt);
+  if(stepNo===1 && sheetRadius() >= step1R){
+    stepNo = 2; advancedAt = performance.now();          // кусок готов — дальше шлепки, тем же листом
+    try{ localStorage.setItem("dough_step","2"); }catch(e){}
+    syncStepButtons();
+  }
   updateAction(dt);
   creep(dt);
   measureThickness();
@@ -327,7 +347,24 @@ function armAction(pointerId, p){
   action.down = { x:p.x, y:p.y, t: performance.now() };
   action.last = { x:p.x, y:p.y, t: performance.now() };
   action.velocity = {x:0,y:0}; action.impulse = 0;
-  updateGripFromHold();
+  if(stepNo!==1) updateGripFromHold();                 // на шаге 1 дуга хвата не нужна
+}
+
+// Шаг 1: прижатый палец расплющивает кусок — длины покоя растут сильнее всего
+// под пальцем, слабее по всему куску. Толщина падает сама (площадь растёт).
+function pressFlatten(dt){
+  const over = sheetRadius() / step1R;
+  if(over >= 1.0) return;
+  const ease = over > 0.92 ? Math.max(0.15, (1.0-over)/0.08 * 0.5 + 0.15) : 1;
+  const fx = action.last.x, fy = action.last.y;
+  const sigma = Math.max(R0, sheetRadius()*0.55) * 1.15;
+  for(let k2=0;k2<cons.length;k2++){
+    const c2 = cons[k2]; if(c2.broken) continue;
+    const mx = (px[c2.a]+px[c2.b])/2 - fx, my = (py[c2.a]+py[c2.b])/2 - fy;
+    const d2 = (mx*mx + my*my)/(sigma*sigma);
+    const w = Math.exp(-d2)*0.85 + 0.15;
+    c2.rest *= 1 + FLAT_RATE * w * ease * dt;
+  }
 }
 
 function updateGripFromHold(){
@@ -343,6 +380,10 @@ function updateActionMove(p){
     return;
   }
   if(action.state !== "ARMED") return;
+  if(stepNo===1){                                      // шаг 1: палец только ведёт точку прижима
+    action.last = { x:p.x, y:p.y, t: performance.now() };
+    return;
+  }
   const nowT = performance.now();
   const dtm = Math.max(0.008, (nowT - action.last.t)/1000);
   action.velocity = { x:(p.x - action.last.x)/dtm, y:(p.y - action.last.y)/dtm };
@@ -355,9 +396,9 @@ function updateActionMove(p){
   const outward = Math.max(0, action.velocity.x*rx + action.velocity.y*ry);
   const tangent = Math.abs(rx*action.velocity.y - ry*action.velocity.x);
   const speed = Math.hypot(action.velocity.x, action.velocity.y);
-  const drive = (outward + 0.55*tangent) / Math.max(1, R0);   // R0/с
+  const drive = (outward + 0.55*tangent) / Math.max(1, gestureScale);
 
-  if(heldMs() >= HOLD_MIN && speed/Math.max(1,R0) >= V_MIN && drive >= ACTION_MIN){
+  if(heldMs() >= HOLD_MIN && speed/Math.max(1,gestureScale) >= V_MIN && drive >= ACTION_MIN){
     action.state = "LIFTING";
     action.timer = LIFT_MAX;
     action.heldAtLift = Math.round(heldMs());
@@ -395,16 +436,48 @@ function updateAction(dt){
 }
 
 let SLAP_GROW = 0.075;           // пластическое растяжение за удар на единицу силы
+let TEAR_I = 2.9;                // с этой силы шлепок опасен…
+let TEAR_THIN = 0.20;            // …если лист уже истончился ниже этого
+
+// Рваная дырка на дальней стороне по направлению маха: рвём связи небольшого
+// пятна с неровным краем. Дырка остаётся навсегда — это узор, не наказание.
+function punchHole(direction){
+  const c = centerOfSheet(), sr = sheetRadius();
+  const pxT = c.x + direction.x * sr * 0.8, pyT = c.y + direction.y * sr * 0.8;
+  let best = 0, bd = 1e18;
+  for(let i=0;i<N;i++){
+    const d = (px[i]-pxT)**2 + (py[i]-pyT)**2;
+    if(d < bd){ bd = d; best = i; }
+  }
+  const rad = (Math.max(R0, sheetRadius())*2/(GRID-1)) * 2.4;   // пятно в шагах ТЕКУЩЕЙ сетки
+  let torn = 0;
+  for(let k2=0;k2<cons.length;k2++){
+    const c2 = cons[k2]; if(c2.broken) continue;
+    const mx = (px[c2.a]+px[c2.b])/2 - px[best], my = (py[c2.a]+py[c2.b])/2 - py[best];
+    const d = Math.hypot(mx,my);
+    if(d < rad * (0.65 + Math.random()*0.5)){ c2.broken = 1; torn++; }   // неровный край
+  }
+  if(torn) onTear();
+}
 function impactAction(){
   action.state = "IMPACT";
   const c = centerOfSheet();
-  applySlapImpulse(action.impulse * R0, action.direction, c);
+  applySlapImpulse(action.impulse * gestureScale, action.direction, c);
   // Сработал стоп-сигнал audit §6.6: скоростной импульс в одиночку не растил площадь —
   // жёсткий решатель гасил растяжение раньше, чем пластичность его захватывала
   // (замер: diameterRatio 0.99–1.00 при любом ударе). Чиним связь по предписанию
   // аудита: удар даёт одноразовое пластическое растяжение длин покоя с той же
   // пространственной формулой весов, что у импульса. Скорости остаются как рывок и звук.
   plasticStretch(action.impulse, action.direction, c);
+  // Дырка рождается из перестарательности: сильный шлепок по уже тонкому листу
+  // рвёт дальнюю сторону. Глобальный порог толщины стили не разводит — средний и
+  // жёсткий стили приходят к одинаковой толщине (замер: 0.108 против 0.083),
+  // поэтому судим по паре «сила удара × текущая тонкость» (audit: «слабый,
+  // хороший, опасный результат»).
+  if(action.impulse >= TEAR_I){
+    let tmin = 1; for(let i=0;i<N;i++) if(thick[i]<tmin) tmin = thick[i];
+    if(tmin < TEAR_THIN) punchHole(action.direction);
+  }
   audioSlap(action.impulse);
   plasticT = 0.15;
   action.timer = 0.30;             // успокоение = релаксация в новые длины покоя
@@ -455,8 +528,8 @@ function finalizeGesture(){
   let areaNow=0, holes=0;
   for(let q=0;q<quads.length;q++){
     areaNow += area(quads[q]);
-    const [qa,qb,qc,qd] = quads[q];
-    if((thick[qa]+thick[qb]+thick[qc]+thick[qd])/4 < HOLE_THICK) holes++;
+    const qcn = quadCons[q];
+    if(qcn.some(cc=>cc.broken)) holes++;
   }
   const ths = Array.from(thick).sort((x,y)=>x-y);
   gestures.push({
@@ -475,7 +548,7 @@ function finalizeGesture(){
 }
 
 function gripArc(n, mul){
-  const rad = (R0*2/(GRID-1)) * mul;
+  const rad = (Math.max(R0, sheetRadius())*2/(GRID-1)) * mul;   // шаг сетки текущего листа
   const ids=[], ws=[];
   for(const i of edgeNodes){
     const d = Math.hypot(px[i]-px[n], py[i]-py[n]);
@@ -547,7 +620,7 @@ function checkBreak(dt){
   if(quadPrev) for(let q=0;q<quads.length;q++){
     const qq=quads[q]; quadPrev[q]=(thick[qq[0]]+thick[qq[1]]+thick[qq[2]]+thick[qq[3]])/4;
   }
-  if(torn) onBreak();
+  if(torn) onTear();
 }
 
 // Толщина: чем сильнее узел растянут, тем тоньше лист и тем сильнее он просвечивает.
@@ -584,7 +657,7 @@ function measureThickness(){
 }
 
 // ─────────────────────────── звук: три слоя, процедурно, без ассетов
-let AC=null, master=null, tenseGain=null, tenseFilt=null, thinOsc=null, thinGain=null, thinFilt=null, noiseBuf=null;
+let AC=null, master=null, tenseGain=null, tenseFilt=null, noiseBuf=null;
 function audioInit(){
   if(AC) return;
   AC = new (window.AudioContext||window.webkitAudioContext)({ latencyHint:"interactive" });
@@ -601,26 +674,18 @@ function audioInit(){
   tenseGain = AC.createGain(); tenseGain.gain.value=0;
   src.connect(tenseFilt); tenseFilt.connect(tenseGain); tenseGain.connect(master); src.start();
 
-  // слой 2 — утончение: тон, ползёт вверх по мере истончения
-  // Треугольник наверху диапазона резал ухо. Ниже, тише и через мягкий фильтр:
-  // это должно читаться как «тесто на пределе», а не как писк прибора.
-  thinOsc = AC.createOscillator(); thinOsc.type="sine"; thinOsc.frequency.value=120;
-  thinGain = AC.createGain(); thinGain.gain.value=0;
-  thinFilt = AC.createBiquadFilter(); thinFilt.type="lowpass"; thinFilt.frequency.value=900;
-  thinOsc.connect(thinFilt); thinFilt.connect(thinGain); thinGain.connect(master); thinOsc.start();
+  // Слоя «предупреждение об истончении» больше нет — решение владельца 22.08.2026:
+  // разрыв не провал, предупреждать не о чем. Звуки листа: скрип натяжения,
+  // шлепок удара, треск новой дырки.
 }
 function audioFrame(){
-  if(!AC || condition==="sight"){ if(tenseGain){tenseGain.gain.value=0; thinGain.gain.value=0;} return; }
-  // Напряжение по звуку теперь берём от истончения: чем тоньше лист, тем ближе разрыв.
-  let tmin = 1;
-  for(let i=0;i<N;i++) if(thick[i]<tmin) tmin = thick[i];
-  const t = Math.max(0, Math.min(1, 1 - (tmin - THICK_BREAK)/(0.6 - THICK_BREAK)));
+  if(!AC || condition==="sight"){ if(tenseGain) tenseGain.gain.value=0; return; }
+  // Только скрип натяжения от фактической работы — никакой привязки к толщине:
+  // лист не гудит «сейчас порвусь», он просто рвётся, и это слышно треском.
   const now = AC.currentTime;
+  const st = Math.min(1, avgStrain*2.5);
   tenseGain.gain.setTargetAtTime(Math.min(0.22, avgStrain*0.7), now, 0.04);
-  tenseFilt.frequency.setTargetAtTime(260 + t*700, now, 0.05);
-  thinGain.gain.setTargetAtTime(t>0.55 ? (t-0.55)*0.16 : 0, now, 0.05);
-  thinOsc.frequency.setTargetAtTime(120 + t*t*190, now, 0.05);
-  thinFilt.frequency.setTargetAtTime(500 + t*900, now, 0.05);
+  tenseFilt.frequency.setTargetAtTime(260 + st*260, now, 0.05);
 }
 // слой 3 — разрыв
 function audioSnap(){
@@ -644,17 +709,13 @@ function audioSlap(I){
 }
 
 // ─────────────────────────── события разрыва и нажатия
-function onBreak(){
-  if(broke) return;
-  broke = true; breakTime = performance.now();
-  audioSnap();
-  record();
-  // Раньше после разрыва симуляция замирала навсегда: игрок тыкал в мёртвый экран,
-  // пока случайно не попадал в «заново». Теперь тесто само возвращается на стол.
-  setTimeout(()=>{ if(broke) reset(); }, 1400);
+function onTear(){
+  const nowT = performance.now();
+  if(nowT - lastSnap > 150){ lastSnap = nowT; audioSnap(); }   // треск на каждую новую дырку, без пулемёта
+  if(!tornAt){ tornAt = nowT; breakTime = nowT; record(); }    // в журнал — только первый разрыв листа
 }
 function pressNow(){
-  if(pressed || broke) { if(broke && !pressed){ pressed=true; pressTime=performance.now(); record(); } return; }
+  if(pressed) return;
   pressed = true; pressTime = performance.now();
   flash.style.opacity = "0.18";
   setTimeout(()=>flash.style.opacity="0", 90);
@@ -662,7 +723,7 @@ function pressNow(){
 let recorded = false;
 function record(){
   if(recorded) return;
-  if(!broke) return;                       // пишем только законченные попытки
+  if(!tornAt) return;                      // пишем только листы, дожившие до первого разрыва
   recorded = true;
   const lead = pressed ? (breakTime - pressTime)/1000 : null;   // за сколько секунд до разрыва
   log.push({
@@ -703,7 +764,6 @@ let dbgDown = 0, dbgMove = 0, dbgKind = "ждёт";
 
 function onDown(id, cx, cy){
   dbgDown++;
-  if(broke) reset();                                 // порвалось — тап начинает заново и берёт тесто
   if(action.pointerId !== null) return;              // один активный палец; второй игнорируется (audit §5)
   if(action.state === "SETTLING") finalizeGesture(); // быстрый повторный тап не ждёт хвоста успокоения
   if(action.state !== "RESTING") return;             // остальные фазы доигрывают автономно
@@ -785,6 +845,17 @@ addEventListener("keydown", e=>{
 });
 document.getElementById("tear").addEventListener("click", pressNow);
 document.getElementById("reset").addEventListener("click", reset);
+
+function syncStepButtons(){
+  document.querySelectorAll("[data-s]").forEach(b=>b.classList.toggle("on", +b.dataset.s === stepNo));
+}
+document.querySelectorAll("[data-s]").forEach(b=>b.addEventListener("click", ()=>{
+  stepNo = +b.dataset.s;
+  try{ localStorage.setItem("dough_step", String(stepNo)); }catch(e){}
+  syncStepButtons(); reset();
+}));
+try{ const st0 = +(localStorage.getItem("dough_step")||1); if(st0===1||st0===2) stepNo = st0; }catch(e){}
+syncStepButtons();
 
 // Ощущение теста подбирается рукой, а не прогоном: три ползунка меняют
 // упругость, текучесть и запас прочности, значения переживают перезагрузку.
@@ -879,6 +950,9 @@ function draw(){
   if(condition!=="sound"){
     // ячейки решётки; порванные и просвеченные насквозь — дырки
     for(let q=0;q<quads.length;q++){
+      const qc = quadCons[q];
+      if(qc[0].broken || (qc[1]&&qc[1].broken) || (qc[2]&&qc[2].broken) || (qc[3]&&qc[3].broken))
+        continue;                                     // порванная ячейка = дырка, узор остаётся
       const [a,b2,c,d] = quads[q];
       const t=(thick[a]+thick[b2]+thick[c]+thick[d])/4;
       if(t < HOLE_THICK) continue;                    // истончилось до сквозной дыры
@@ -930,10 +1004,11 @@ function drawTable(g, sx, sy, px_){
 
   // мишень: докуда растянуть лист
   const c2 = centerOfSheet();
+  const tR = stepNo===1 ? step1R : targetR;           // мишень текущего шага
   g.strokeStyle = "#4a3a24"; g.lineWidth = Math.max(1, R_(2));
   g.setLineDash([R_(10), R_(8)]);
   g.beginPath();
-  g.ellipse(R_(prX(c2.x,c2.y)), D_(prY(c2.x,c2.y)), R_(targetR), D_(targetR*TILT), 0, 0, Math.PI*2);
+  g.ellipse(R_(prX(c2.x,c2.y)), D_(prY(c2.x,c2.y)), R_(tR), D_(tR*TILT), 0, 0, Math.PI*2);
   g.stroke(); g.setLineDash([]);
 }
 
@@ -945,7 +1020,7 @@ let loopErrs = 0;
 function loop(now){
   const dt = Math.min(0.033, (now-last)/1000); last=now;
   try{
-    if(!broke) step(dt); else measureThickness();
+    step(dt);
     audioFrame();
     draw();
   }catch(err){
@@ -959,24 +1034,29 @@ function loop(now){
   if(acc>0.5){ fps=frames/acc; acc=0; frames=0; }
   const liveEl = document.getElementById("live");
   const pct = Math.round(sheetRadius()/targetR*100);
+  const ragged = tornAt ? " · рваный узор" : "";
   const ready = sheetRadius()>=targetR ? " ✓ готов" : "";
-  liveEl.textContent = broke ? "порвалось — коснись, начнём заново"
+  const banner = advancedAt && performance.now()-advancedAt < 2600;
+  liveEl.textContent =
+    banner ? "✓ расплющено — шаг 2: возьми край и резко махни"
+    : stepNo===1 ? (action.state==="ARMED"
+        ? `расплющиваешь · ${Math.round(sheetRadius()/step1R*100)}%`
+        : `шаг 1 · прижми кусочек и расплющивай · ${Math.round(sheetRadius()/step1R*100)}%`)
     : action.state==="ARMED" ? `держишь край · хват ${Math.round(action.mul||GRIP_MIN)} · смахни!`
     : (action.state==="LIFTING"||action.state==="FLYING") ? "бросок…"
-    : (action.state==="IMPACT"||action.state==="SETTLING") ? `ШЛЕП · лист ${pct}%${ready}`
-    : `коснись края · лист ${pct}%${ready}`;
+    : (action.state==="IMPACT"||action.state==="SETTLING") ? `ШЛЕП · лист ${pct}%${ready}${ragged}`
+    : `коснись края · лист ${pct}%${ready}${ragged}`;
   liveEl.style.color = action.state!=="RESTING" ? "#8fbf6a" : "#d98b3a";
-  document.getElementById("torn").classList.toggle("on", broke);
   document.getElementById("blind").classList.toggle("on", condition === "sound");
   const done = log.filter(l=>l.variant===variant&&l.condition===condition).length;
   const hit  = log.filter(l=>l.variant===variant&&l.condition===condition&&l.predicted).length;
   stats.textContent =
     `сборка: ${BUILD}\n` +
     `${variant}/${condition}  попыток ${done}/30  распознано ${done?Math.round(hit/done*100):0}%\n` +
-    `${action.state!=="RESTING"?"◆ "+action.state:"○ покой"}  ` +
-    `лист ${pct}%${ready}  шлепков ${gestures.length}  ` +
+    `шаг ${stepNo}  ${action.state!=="RESTING"?"◆ "+action.state:"○ покой"}  ` +
+    `лист ${pct}%${ready}${ragged}  шлепков ${gestures.length}  ` +
     `[касаний ${rawTouch} · до теста ↓${dbgDown} ↔${dbgMove} · ${dbgKind}${loopErrs?" · сбоев "+loopErrs:""}]  ` +
-    `${broke?"ПОРВАЛОСЬ":pressed?"нажато":"—"}  ` +
+    `${tornAt?"рваный":pressed?"нажато":"—"}  ` +
     `${fps.toFixed(0)} fps  задержка ${latencies.length?median(latencies).toFixed(0):"—"} мс`;
   requestAnimationFrame(loop);
 }
