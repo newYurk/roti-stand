@@ -1,0 +1,1445 @@
+<title>Растяжка теста роти</title>
+<style>
+  :root{ --bg:#14100c; --ink:#e8ddcc; --dim:#8b7f6e; --line:#2a231b; --hot:#d98b3a; }
+  *{ box-sizing:border-box; -webkit-tap-highlight-color:transparent;
+     -webkit-touch-callout:none; -webkit-user-select:none; user-select:none; }
+  html,body{ margin:0; height:100%; background:var(--bg); color:var(--ink);
+    font:13px/1.45 ui-monospace,SFMono-Regular,Menlo,monospace; overscroll-behavior:none; }
+  body{ display:flex; flex-direction:column; touch-action:none; }
+  #stage{ flex:1; position:relative; min-height:0; }
+  canvas{ position:absolute; inset:0; width:100%; height:100%; display:block; touch-action:none; }
+  #panel{ border-top:1px solid var(--line); padding:8px 10px; display:flex; flex-wrap:wrap;
+    gap:6px 14px; align-items:center; background:#0f0c09; }
+  .grp{ display:flex; gap:4px; align-items:center; }
+  .grp b{ color:var(--dim); font-weight:400; margin-right:2px; }
+  /* Кнопки замера меняют условия эксперимента (вплоть до выключения картинки),
+     поэтому они приглушены и подписаны — иначе читаются как обычные настройки. */
+  .measure{ opacity:.62; }
+  .measure b{ color:#5d5346; font-size:11px; }
+  .tune label{ display:flex; align-items:center; gap:4px; color:var(--dim); font-size:11px; }
+  .tune input[type=range]{ width:74px; accent-color:var(--hot); }
+  button{ font:inherit; color:var(--ink); background:#1c1710; border:1px solid var(--line);
+    padding:4px 9px; cursor:pointer; }
+  button:hover{ border-color:var(--dim); }
+  button.on{ background:var(--hot); color:#14100c; border-color:var(--hot); }
+  #tear{ padding:8px 18px; font-weight:bold; }
+  #stats{ color:var(--dim); margin-left:auto; text-align:right; white-space:pre; }
+  #hint{ position:absolute; left:10px; top:10px; right:10px; color:var(--dim);
+    pointer-events:none; font-size:11px; }
+  /* Крупный индикатор: мелкую строку внизу на телефоне не разглядеть,
+     а без неё непонятно, дошло ли касание вообще. */
+  #live{ position:absolute; left:0; right:0; top:34px; text-align:center;
+    pointer-events:none; font-size:clamp(14px,3.4vw,20px); color:var(--hot); }
+  #flash{ position:absolute; inset:0; pointer-events:none; opacity:0; background:#d98b3a; }
+  #torn{ position:absolute; inset:0; display:none; align-items:center; justify-content:center;
+    color:var(--hot); font-size:clamp(18px,4vw,32px); letter-spacing:.08em;
+    pointer-events:none; z-index:4; }
+  #torn.on{ display:flex; }
+  #blind{ position:absolute; inset:0; display:none; flex-direction:column; gap:6px;
+    align-items:center; justify-content:center; color:var(--dim); text-align:center;
+    pointer-events:none; z-index:3; }
+  #blind span{ color:#5d5346; font-size:12px; }
+  #blind.on{ display:flex; }
+  /* Подсказка про ориентацию перекрывала весь холст и съедала касания:
+     при вертикальном телефоне играть было нельзя вообще. Теперь она сквозная. */
+  #turn{ position:absolute; left:0; right:0; bottom:8px; display:none; justify-content:center;
+    color:var(--dim); text-align:center; padding:8px; z-index:5; pointer-events:none; }
+  @media (orientation:portrait){ #turn{ display:flex; } }
+</style>
+
+<div id="stage">
+  <canvas id="cv"></canvas>
+  <div id="hint">шаг 1: прижимай кусочек — расплющишь до пунктира · шаг 2: возьми край, миг подержи, резко махни — шлепок · шаг 3: возьми край и круговым махом-«запятой» перекинь на таву — полетит, повернётся, зашипит. Порвётся — останется рваный узор, так и пожарим</div>
+  <div id="live">прижми кусочек теста</div>
+  <div id="flash"></div>
+  <div id="blind">картинка выключена намеренно<br><span>это режим замера: тяни на слух</span></div>
+  <div id="turn">удобнее горизонтально</div>
+</div>
+
+<div id="panel">
+  <div class="grp"><b>шаг</b>
+    <button data-s="1" class="on">1 · расплющить</button>
+    <button data-s="2">2 · растянуть</button>
+    <button data-s="3">3 · на таву</button>
+  </div>
+  <div class="grp measure"><b>замер: вид</b>
+    <button data-v="A" class="on">A · пиксель 80</button>
+    <button data-v="B">B · пиксель 224</button>
+    <button data-v="C">C · контроль</button>
+  </div>
+  <div class="grp measure"><b>замер: по чему судишь</b>
+    <button data-c="both" class="on">оба</button>
+    <button data-c="sound">только звук</button>
+    <button data-c="sight">только картинка</button>
+  </div>
+  <button id="tear">СЕЙЧАС ПОРВЁТСЯ (space)</button>
+  <div class="grp tune"><b>ощущение</b>
+    <label>упругость<input id="sCom" type="range" min="0" max="100" value="30"></label>
+    <label>текучесть<input id="sCreep" type="range" min="0" max="100" value="30"></label>
+    <label>прочность<input id="sBreak" type="range" min="0" max="100" value="72"></label>
+  </div>
+  <div class="grp">
+    <button id="reset">заново</button>
+    <button id="dump">скопировать лог</button>
+    <button id="hardReload">обновить (сбросить кеш)</button>
+  </div>
+  <div id="stats"></div>
+</div>
+
+<script>
+"use strict";
+/* Прототип «крупный план теста». Ввод перестроен по docs/slap-input-audit.md:
+   вместо непрерывной тяги — дискретный жест «поднять и шлёпнуть» со state machine
+   RESTING → ARMED → LIFTING → FLYING → IMPACT → SETTLING. Проход A + ядро прохода B.
+   Физика: XPBD, равномерная решётка ~1060 узлов; толщина из площади квадов. */
+
+// ─────────────────────────── параметры модели
+// Топология: РАВНОМЕРНАЯ решётка, обрезанная по кругу.
+// Полярная сетка (24x48 из линзы T2) даёт верное число узлов, но вырождается в центре:
+// длина окружного ребра там падает до долей пикселя, относительное растяжение скачет
+// до 400%+ и лист «рвётся» в середине от любого движения. Замер это обнаружил сразу.
+// Число узлов сохранено (~1150), однородность рёбер восстановлена.
+const BUILD = "2026-08-25 · тава и запятая";
+const GRID = 38;                   // 38x38, в круг попадает ~1130 узлов
+let SUBSTEPS = 8;                  // T2: 8–10 подшагов, 1 итерация
+let COMPLIANCE = 0.000010;         // податливость. Крутилась вслепую, пока не работал тап,
+                                   // и тесто превратилось в сопли: вернул к упругому.
+let DAMP = 0.986;
+let THICK_BREAK = 0.020;           // лист рвётся там, где ИСТОНЧИЛСЯ до этой доли толщины.
+                                   // Комок ~3 см превращается в лист ~1 мм: толщина падает раз в
+                                   // тридцать, и настоящее тесто это выдерживает. Прежние 0.12
+                                   // делали цель физически недостижимой.
+const HOLE_THICK = 0.020;          // ниже этой толщины лист просвечен насквозь
+
+// ─────────────────────────── состояние
+let N = 0;
+let px, py, vx, vy, prx, pry, pinned, thick;
+let gi = new Int32Array(GRID*GRID);          // (i,j) -> node | -1
+let quads = [];                              // ячейки решётки для рендера
+let quadCons = [], quadPrev = null, quadSm = null;
+// Единственный источник истины о жесте (audit §6.1). Не хранить состояние
+// параллельно в grabs, DOM и замыканиях — прежний захват означал четыре вещи разом.
+let action = { state:"RESTING", pointerId:null, edgeNode:-1, gripIds:[], gripWeights:[],
+  down:{x:0,y:0,t:0}, last:{x:0,y:0,t:0}, velocity:{x:0,y:0},
+  impulse:0, direction:{x:0,y:0}, timer:0, mul:0, heldAtLift:0,
+  // перенос «запятой»: накопленный поворот маха, его хвост и параметры полёта
+  sweep:0, lastDir:null, tailDir:{x:1,y:0}, carryFrom:{x:0,y:0}, toss:null };
+let lastDecision = "—";            // как классифицирован последний мах — для строки статистики
+let plasticT = 0;                  // окно пластичности после удара, с
+let startArea = 1;                 // площадь листа при рождении — база для areaRatio
+let gestures = [];                 // журнал шлепков (audit §6.6)
+let cons = null;                             // {a,b,rest,broken}
+let edgeNodes = [];                          // граничные узлы — за них берут лист
+// Разрыв — не провал и не перезапуск (решение владельца 22.08.2026): дырка остаётся
+// в листе рваным узором, симуляция не останавливается, тесто не переделывается.
+let tornAt = 0, lastSnap = 0, breakTime = 0, pressTime = 0, pressed = false;
+let tornNode = null;               // узлы порванных ячеек — для подсветки рваного края
+let conDeg = null;                 // сколько живых связей держит узел; 0 = осколок
+let runStart = 0, R0 = 1;
+let variant = "A", condition = "both";
+let log = [];
+let latencies = [];
+
+const stage = document.getElementById("stage");
+const cv = document.getElementById("cv"), ctx = cv.getContext("2d", { alpha:false });
+const lo = document.createElement("canvas"), lctx = lo.getContext("2d", { alpha:false });
+const stats = document.getElementById("stats"), flash = document.getElementById("flash");
+
+// ─────────────────────────── раскладка стола (v3: тесто слева, начинки по центру, тава справа)
+// Раскладка закрепляется навсегда, чтобы игрок со временем готовил «не глядя».
+// Точные пропорции были в утраченном addendum-v3; здесь рабочее приближение, которое и проверяем.
+// Дошли до жарки: тава вернулась справа. Мостик начинок вернётся с шагом 4 —
+// пока он только отнимал бы место у двух главных жестов: шлепка и переноса.
+// На телефоне в альбоме размер листа задаёт высота сцены, так что рабочая зона
+// в 58 % ширины лист не уменьшает; тава в оставшихся 42 % умещается целиком.
+const ZONES = { work:[0.00,0.58], pan:[0.58,1.00] };
+let panC = { x:0, y:0 }, PAN_R = 1;   // тава: центр и радиус в координатах стола (считаются в build)
+// Где лист: на столе (все жесты растяжки) или на таве (жарится; жесты жарки — следующий этап).
+let phase = "TABLE";
+let cook = null;                   // прожарка узла: 0 сырое → 1 золотистое → >1.2 тёмное
+// Перенос: пока лист в руке (CARRY) и летит (TOSS), узлы физики не двигаются —
+// сдвиг, поворот и подъём применяются к картинке и запекаются в узлы при посадке.
+let xf = null;                     // {cx,cy,ox,oy,th,lift}
+
+// Вид не сверху, а из-за прилавка: стол уходит от игрока, поэтому по вертикали
+// всё сжато, а дальний край ещё и сужен. Симуляция считается в плоскости стола,
+// экранные координаты получаются проекцией — обратное преобразование нужно вводу.
+const TILT = 0.56, PERSP = 0.22;
+function horizon(){ return cv.height * 0.42; }
+function prX(x, y){
+  const h = horizon(), k = 1 + ((y - h)/cv.height) * PERSP;
+  return cv.width*0.5 + (x - cv.width*0.5) * k;
+}
+function prY(x, y){ const h = horizon(); return h + (y - h) * TILT; }
+function unproject(sx, sy){
+  const h = horizon(), wy = h + (sy - h)/TILT;
+  const k = 1 + ((wy - h)/cv.height) * PERSP;
+  return { x: cv.width*0.5 + (sx - cv.width*0.5)/k, y: wy };
+}
+function zone(name){
+  const [a,b] = ZONES[name];
+  return { x:a*cv.width, y:0, w:(b-a)*cv.width, h:cv.height,
+           cx:(a+b)/2*cv.width, cy:cv.height/2 };
+}
+
+// ─────────────────────────── построение листа
+// Подготовка теста разбита на шаги (решение владельца 22.08.2026):
+// шаг 1 — отрезанный от «колбаски» кусочек расплющивается пальцем до ~42% мишени
+// (ровно та точка, где раньше стенд начинался); шаг 2 — растягивание шлепками.
+const FLAT_START_FRAC = 0.075, START_FRAC = 0.17, TARGET_FRAC = 0.40;
+let stepNo = 1;                                // текущий шаг стенда (step занят функцией физики)
+let targetR = 1, startR = 1, step1R = 1;       // step1R = цель расплющивания (42% мишени)
+let advancedAt = 0;                            // момент авто-перехода на шаг 2 (для баннера)
+let gestureScale = 1;                          // масштаб жеста: фиксирован от экрана, не от роста листа
+let FLAT_RATE = 0.55;                          // скорость расплющивания под пальцем
+function build(){
+  const z = zone("work");
+  R0 = Math.min(z.w, z.h) * (stepNo===1 ? FLAT_START_FRAC : START_FRAC);
+  startR = R0;
+  targetR = Math.min(z.w, z.h) * TARGET_FRAC;
+  step1R  = Math.min(z.w, z.h) * START_FRAC;
+  gestureScale = step1R;                       // мах меряем в долях «свежего листа шага 2»
+  const h = (R0*2)/(GRID-1);                 // шаг решётки — одинаков везде
+  const x0 = z.cx - R0, y0 = z.cy - R0;
+
+  gi.fill(-1);
+  const xs=[], ys=[];
+  for(let j=0;j<GRID;j++) for(let i=0;i<GRID;i++){
+    const x = x0 + i*h, y = y0 + j*h;
+    const dx = x - z.cx, dy = y - z.cy;
+    if(dx*dx + dy*dy > R0*R0) continue;      // обрезаем круг
+    gi[j*GRID+i] = xs.length; xs.push(x); ys.push(y);
+  }
+  N = xs.length;
+  px = Float32Array.from(xs); py = Float32Array.from(ys);
+  vx = new Float32Array(N); vy = new Float32Array(N);
+  prx = new Float32Array(N); pry = new Float32Array(N);
+  pinned = new Uint8Array(N); thick = new Float32Array(N).fill(1);
+
+  const c = [];
+  const at = (i,j) => (i<0||j<0||i>=GRID||j>=GRID) ? -1 : gi[j*GRID+i];
+  const add = (a,b) => { if(a<0||b<0) return;
+    c.push({ a, b, rest: Math.hypot(px[a]-px[b], py[a]-py[b]), broken:0, prev:0 }); };
+  quads = [];
+  for(let j=0;j<GRID;j++) for(let i=0;i<GRID;i++){
+    const n = at(i,j); if(n<0) continue;
+    add(n, at(i+1,j));                        // →
+    add(n, at(i,j+1));                        // ↓
+    add(n, at(i+1,j+1));                      // ↘ держит сдвиг
+    add(at(i+1,j), at(i,j+1));                // ↙ держит сдвиг
+    const a=n, b=at(i+1,j), d=at(i+1,j+1), e=at(i,j+1);
+    if(b>=0&&d>=0&&e>=0){ quads.push([a,b,d,e]); }
+  }
+  cons = c;
+
+  // какие связи держат каждую ячейку — чтобы дырка рвала ячейку, а не весь лист
+  const key = (a,b)=> a<b ? a+":"+b : b+":"+a;
+  const byPair = new Map();
+  for(const cc of cons) byPair.set(key(cc.a,cc.b), cc);
+  quadCons = quads.map(([a,b,d,e])=>{
+    const list=[];
+    for(const [x,y] of [[a,b],[b,d],[d,e],[e,a]]){ const cc=byPair.get(key(x,y)); if(cc) list.push(cc); }
+    return list;
+  });
+  quadPrev = new Float32Array(quads.length).fill(1);
+  quadSm = new Float32Array(quads.length).fill(1);
+  quadRest = null;
+  conDeg = new Int32Array(N);
+  for(const cc of c){ conDeg[cc.a]++; conDeg[cc.b]++; }
+
+  // связи, инцидентные узлу — чтобы «дырка» рвала именно ячейку, а не весь лист
+  const deg = new Int32Array(N);
+  for(const cc of cons){ deg[cc.a]++; deg[cc.b]++; }
+  edgeNodes = [];
+  for(let i=0;i<N;i++) if(deg[i] < 8) edgeNodes.push(i);   // граница круга
+
+  // Тава — справа, в своей зоне; радиус такой, чтобы готовый лист (мишень) занимал
+  // ~80 % её диаметра, как настоящий роти на кратхе, но целиком помещался на экране.
+  const pz = zone("pan");
+  PAN_R = Math.min(targetR*1.25, pz.w*0.49, pz.h*0.49);
+  panC = { x: pz.cx - pz.w*0.03, y: pz.cy + pz.h*0.04 };
+  phase = "TABLE"; xf = null;
+  cook = new Float32Array(N);
+  // Площади при рождении и база площади — от маленького комка, до любого масштабирования:
+  // так толщина шага 3 честная, а не «родился большим и толстым».
+  quadRest = new Float32Array(quads.length);
+  for(let q=0;q<quads.length;q++) quadRest[q] = area(quads[q]) || 1;
+  startArea = 0; for(let q=0;q<quads.length;q++) startArea += area(quads[q]);
+  // Шаг 3 «на таву»: лист уже растянут до мишени — переносим сразу, без восьми шлепков.
+  if(stepNo===3){
+    const s = targetR / R0;
+    for(let i=0;i<N;i++){ px[i] = z.cx + (px[i]-z.cx)*s; py[i] = z.cy + (py[i]-z.cy)*s; prx[i]=px[i]; pry[i]=py[i]; }
+    for(const cc of cons) cc.rest *= s;
+  }
+
+  clearAction(); plasticT = 0;
+  tornAt = 0; lastSnap = 0; pressed = false; breakTime = pressTime = 0;
+  runStart = performance.now();
+}
+
+// ─────────────────────────── XPBD
+function step(dt){
+  // В руке и в полёте узлы заморожены: перенос — движение картинки, запекаемое при посадке.
+  // На таве лист схватился и стоит — только жарится.
+  if(action.state==="CARRY" || action.state==="TOSS"){ updateAction(dt); return; }
+  if(phase==="PAN"){ cookStep(dt); return; }
+  const h = dt / SUBSTEPS;
+  // Затухание зависит от фазы: в полёте лист скользит свободнее, после удара,
+  // когда окно пластичности закрылось, — успокаивается быстрее (audit §5).
+  const damp = action.state==="FLYING" ? 0.995
+             : (action.state==="SETTLING" && plasticT<=0) ? 0.94 : DAMP;
+  for(let ss=0; ss<SUBSTEPS; ss++){
+    for(let i=0;i<N;i++){
+      if(pinned[i]){ prx[i]=px[i]; pry[i]=py[i]; continue; }
+      vx[i]*=damp; vy[i]*=damp;
+      prx[i]=px[i]+vx[i]*h; pry[i]=py[i]+vy[i]*h;
+    }
+    if(action.state==="LIFTING") liftPull();
+
+    const alpha = COMPLIANCE/(h*h);
+    for(let k=0;k<cons.length;k++){
+      const c = cons[k]; if(c.broken) continue;
+      const a=c.a, b=c.b;
+      const dx=prx[b]-prx[a], dy=pry[b]-pry[a];
+      const d=Math.hypot(dx,dy); if(d<1e-6) continue;
+      const wa = pinned[a]?0:1, wb = pinned[b]?0:1, w = wa+wb;
+      if(w===0) continue;
+      const lam=-(d-c.rest)/(w+alpha), nx=dx/d, ny=dy/d;
+      prx[a]-=nx*lam*wa; pry[a]-=ny*lam*wa;
+      prx[b]+=nx*lam*wb; pry[b]+=ny*lam*wb;
+    }
+    if(action.state==="LIFTING") liftPull();
+
+    for(let i=0;i<N;i++){
+      if(pinned[i]) continue;
+      vx[i]=(prx[i]-px[i])/h; vy[i]=(pry[i]-py[i])/h;
+      px[i]=prx[i]; py[i]=pry[i];
+    }
+  }
+  plasticT = Math.max(0, plasticT - dt);
+  if(stepNo===1 && action.state==="ARMED") pressFlatten(dt);
+  if(stepNo===1 && sheetRadius() >= step1R){
+    stepNo = 2; advancedAt = performance.now();          // кусок готов — дальше шлепки, тем же листом
+    try{ localStorage.setItem("dough_step","2"); }catch(e){}
+    syncStepButtons();
+  }
+  updateAction(dt);
+  creep(dt);
+  measureThickness();
+  checkBreak(dt);
+}
+
+// Краткая тяга дуги хвата — ТОЛЬКО в LIFTING (≤80 мс). Постоянной буксировки
+// больше нет: она и была источником «липкости» из живого теста. Палец по-прежнему
+// тянет пружиной, а не телепортом, и дугу, а не точку.
+const GRAB_K = 0.30;
+function liftPull(){
+  const dx = action.last.x - prx[action.edgeNode], dy = action.last.y - pry[action.edgeNode];
+  for(let m=0;m<action.gripIds.length;m++){
+    const n = action.gripIds[m], w = action.gripWeights[m];
+    prx[n] += dx * GRAB_K * w;
+    pry[n] += dy * GRAB_K * w;
+  }
+}
+// Ширина хвата решает, получится лист или жгут (замер: 4% тонкой площади при щипке
+// против 76% при широком хвате). Хват растёт от прижима, но насыщается за 100–250 мс,
+// а не за полторы секунды: удержание — удобная замена ширине ладони (audit §6.2).
+const GRIP_MIN = 5, GRIP_MAX = 22;   // шагов решётки
+
+let radBuf = null;
+function sheetRadius(){
+  // Радиус ТЕЛА листа: 92-й перцентиль расстояний живых узлов. Максимум не годится:
+  // после разрывов остаётся бахрома из полудержащихся цепочек, шлепки задирают её
+  // наружу, и по ней процент листа улетал за потолок (живой тест: 5000 %).
+  const c = centerOfSheet();
+  if(!radBuf || radBuf.length !== N) radBuf = new Float32Array(N);
+  let n = 0;
+  for(let i=0;i<N;i++){
+    if(conDeg && conDeg[i] <= 0) continue;
+    radBuf[n++] = Math.hypot(px[i]-c.x, py[i]-c.y);
+  }
+  if(!n) return 0;
+  const a = radBuf.subarray(0, n);
+  Array.prototype.sort.call(a, (x,y)=>x-y);
+  return a[Math.min(n-1, Math.floor(n*0.92))];
+}
+function centerOfSheet(){
+  let sx=0, sy=0, n=0;
+  for(let i=0;i<N;i++){
+    if(conDeg && conDeg[i] <= 0) continue;
+    sx+=px[i]; sy+=py[i]; n++;
+  }
+  n = n || 1;
+  return { x:sx/n, y:sy/n };
+}
+
+// ─── Жест «поднять и шлёпнуть» — ฟาด как единица действия (audit §5–6) ───
+// Скорости в радиусах листа в секунду, чтобы пороги не зависели от экрана.
+// Направление хорошего свайпа НЕ фиксировано до живого iPhone-теста: формула
+// принимает и мах «от центра», и касательный (audit §6.3, оговорка).
+let V_MIN = 1.6;             // минимальная скорость свайпа, R0/с
+let ACTION_MIN = 1.4;        // порог направленной скорости outward + 0.55·tangent, R0/с
+let IMPULSE_K = 0.5;         // сила удара на единицу направленной скорости (в R0)
+let IMPULSE_MAX = 3.5;       // потолок силы, R0/с скорости узлов
+const HOLD_MIN = 80;         // мс: раньше — не жест, а проезд пальца
+const LIFT_MAX = 0.08;       // с: лимит фазы LIFTING
+let PLASTIC_BOOST = 5.0;     // множитель текучести в окне удара
+let SETTLE_SPEED = 12;       // px/с средней скорости листа: «успокоился»
+
+function heldMs(){ return performance.now() - action.down.t; }
+
+function clearAction(){
+  action.state = "RESTING"; action.pointerId = null; action.edgeNode = -1;
+  action.gripIds = []; action.gripWeights = []; action.impulse = 0;
+  action.direction = {x:0,y:0}; action.velocity = {x:0,y:0};
+  action.timer = 0; action.mul = 0; action.heldAtLift = 0;
+  action.sweep = 0; action.lastDir = null; action.tailDir = {x:1,y:0}; action.toss = null;
+}
+
+function armAction(pointerId, p){
+  const n = nodeNear(p.x, p.y);
+  if(n < 0) return;
+  action.state = "ARMED"; action.pointerId = pointerId; action.edgeNode = n;
+  action.down = { x:p.x, y:p.y, t: performance.now() };
+  action.last = { x:p.x, y:p.y, t: performance.now() };
+  action.velocity = {x:0,y:0}; action.impulse = 0;
+  if(stepNo!==1) updateGripFromHold();                 // на шаге 1 дуга хвата не нужна
+}
+
+// Шаг 1: прижатый палец расплющивает кусок — длины покоя растут сильнее всего
+// под пальцем, слабее по всему куску. Толщина падает сама (площадь растёт).
+function pressFlatten(dt){
+  const over = sheetRadius() / step1R;
+  if(over >= 1.0) return;
+  const ease = over > 0.92 ? Math.max(0.15, (1.0-over)/0.08 * 0.5 + 0.15) : 1;
+  const fx = action.last.x, fy = action.last.y;
+  const sigma = Math.max(R0, sheetRadius()*0.55) * 1.15;
+  for(let k2=0;k2<cons.length;k2++){
+    const c2 = cons[k2]; if(c2.broken) continue;
+    const mx = (px[c2.a]+px[c2.b])/2 - fx, my = (py[c2.a]+py[c2.b])/2 - fy;
+    const d2 = (mx*mx + my*my)/(sigma*sigma);
+    const w = Math.exp(-d2)*0.85 + 0.15;
+    c2.rest *= 1 + FLAT_RATE * w * ease * dt;
+  }
+}
+
+function updateGripFromHold(){
+  const t = Math.max(0, Math.min(1, (heldMs() - 100) / 150));
+  const st = t*t*(3-2*t);                            // smoothstep
+  const gp = gripArc(action.edgeNode, GRIP_MIN + (GRIP_MAX - GRIP_MIN) * st);
+  action.gripIds = gp.ids; action.gripWeights = gp.ws; action.mul = gp.mul;
+}
+
+function updateActionMove(p){
+  if(action.state === "LIFTING" || action.state === "CARRY"){   // палец ещё ведёт дугу
+    const nowT = performance.now();
+    const dtm = Math.max(0.008, (nowT - action.last.t)/1000);
+    action.velocity = { x:(p.x - action.last.x)/dtm, y:(p.y - action.last.y)/dtm };
+    action.last = { x:p.x, y:p.y, t:nowT };
+    trackSweep();
+    if(action.state === "CARRY"){ xf.ox = p.x - action.carryFrom.x; xf.oy = p.y - action.carryFrom.y; }
+    return;
+  }
+  if(action.state !== "ARMED") return;
+  if(stepNo===1){                                      // шаг 1: палец только ведёт точку прижима
+    action.last = { x:p.x, y:p.y, t: performance.now() };
+    return;
+  }
+  const nowT = performance.now();
+  const dtm = Math.max(0.008, (nowT - action.last.t)/1000);
+  action.velocity = { x:(p.x - action.last.x)/dtm, y:(p.y - action.last.y)/dtm };
+  action.last = { x:p.x, y:p.y, t:nowT };
+  updateGripFromHold();
+
+  const c = centerOfSheet();
+  const rl = Math.hypot(px[action.edgeNode]-c.x, py[action.edgeNode]-c.y) || 1;
+  const rx = (px[action.edgeNode]-c.x)/rl, ry = (py[action.edgeNode]-c.y)/rl;
+  const outward = Math.max(0, action.velocity.x*rx + action.velocity.y*ry);
+  const tangent = Math.abs(rx*action.velocity.y - ry*action.velocity.x);
+  const speed = Math.hypot(action.velocity.x, action.velocity.y);
+  const drive = (outward + 0.55*tangent) / Math.max(1, gestureScale);
+
+  if(heldMs() >= HOLD_MIN && speed/Math.max(1,gestureScale) >= V_MIN && drive >= ACTION_MIN){
+    action.state = "LIFTING";
+    action.timer = LIFT_MAX;
+    action.heldAtLift = Math.round(heldMs());
+    const sl = speed || 1;
+    action.direction = { x:action.velocity.x/sl, y:action.velocity.y/sl };
+    action.impulse = Math.min(IMPULSE_MAX, IMPULSE_K * drive);   // в R0-единицах
+    action.sweep = 0; action.lastDir = { ...action.direction }; action.tailDir = { ...action.direction };
+  }
+}
+
+function releaseAction(){
+  if(action.state === "ARMED"){ clearAction(); return; }   // медленное отпускание — ничего
+  if(action.state === "LIFTING"){ if(commaLike()) endCarry(); else toFlying(); return; }   // бросок
+  if(action.state === "CARRY"){ endCarry(); return; }      // запятая дописана — решаем, куда летит
+  // FLYING/IMPACT/SETTLING/TOSS: жест автономен; поздний pointerup его не убивает.
+  // (Псевдокод аудита здесь очищал бы состояние — это обрывало бы удар на лету.)
+  action.pointerId = null;
+}
+function toFlying(){
+  action.state = "FLYING";
+  action.timer = 0.08 + Math.random()*0.08;                // 80–160 мс до удара
+}
+
+function updateAction(dt){
+  if(action.state === "LIFTING"){
+    action.timer -= dt;
+    if(action.timer <= 0){
+      // Прямой мах бьёт через 80 мс, не дожидаясь отпускания (аудит). Если за эти
+      // 80 мс палец уже заметно повернул — это запятая: лист поднимается в руку.
+      if(commaLike() && action.pointerId !== null) enterCarry(); else toFlying();
+    }
+  } else if(action.state === "CARRY"){
+    action.timer -= dt;
+    const stalled = performance.now() - action.last.t > 90;   // рука остановилась — дуга кончилась
+    if(action.timer <= 0 || stalled) endCarry();
+  } else if(action.state === "TOSS"){
+    action.timer -= dt;
+    updateToss();
+    if(action.timer <= 0) land();
+  } else if(action.state === "FLYING"){
+    action.timer -= dt;
+    if(action.timer <= 0) impactAction();
+  } else if(action.state === "SETTLING"){
+    action.timer -= dt;
+    // Ранний выход по скорости — только со второй половины окна, иначе метрики
+    // жеста записываются до того, как лист дорос до новых длин покоя.
+    if(action.timer <= 0 || (action.timer < 0.15 && sheetSpeed() < SETTLE_SPEED)) finalizeGesture();
+  }
+}
+
+// ─── Перенос на таву — «запятая» (идея владельца 25.08.2026) ───
+// Тот же глагол «поднять и шлёпнуть», но мах не прямой, а дугой: рука подхватывает лист,
+// ведёт его по кругу, и хвост дуги, смотрящий на таву, отправляет его в полёт. В воздухе
+// лист поворачивается тем сильнее, чем круче была дуга, садится на таву и начинает жариться.
+// Прямой мах к таве переносом НЕ считается — это шлепок; естественно ли это, решает живой тест.
+const COMMA_MIN_SWEEP = 15 * Math.PI/180;   // столько поворота за первые 80 мс уже отличает дугу от прямого маха
+const COMMA_SWEEP     = 40 * Math.PI/180;   // итоговый поворот, чтобы бросок считался запятой
+const COMMA_CONE      = 60 * Math.PI/180;   // хвост запятой должен смотреть на таву в пределах этого угла
+const COMMA_MAX       = 0.45;               // с: дольше вести — это уже не бросок, лист опускается
+
+// Копим знаковый угол между последовательными направлениями скорости (только пока
+// палец движется быстро); «хвост» — сглаженное направление последних ~60 мс.
+function trackSweep(){
+  const sp = Math.hypot(action.velocity.x, action.velocity.y);
+  if(sp < 0.35 * V_MIN * gestureScale) return;
+  const d = { x:action.velocity.x/sp, y:action.velocity.y/sp };
+  if(action.lastDir){
+    const cr = action.lastDir.x*d.y - action.lastDir.y*d.x, dp = action.lastDir.x*d.x + action.lastDir.y*d.y;
+    action.sweep += Math.atan2(cr, dp);
+  }
+  action.lastDir = d;
+  const tx = action.tailDir.x*0.5 + d.x*0.5, ty = action.tailDir.y*0.5 + d.y*0.5;
+  const tl = Math.hypot(tx,ty) || 1;
+  action.tailDir = { x:tx/tl, y:ty/tl };
+}
+function commaLike(){ return Math.abs(action.sweep) >= COMMA_MIN_SWEEP; }
+
+function enterCarry(){
+  const c = centerOfSheet();
+  action.state = "CARRY"; action.timer = COMMA_MAX;
+  action.carryFrom = { x:action.last.x, y:action.last.y };
+  xf = { cx:c.x, cy:c.y, ox:0, oy:0, th:0, lift: sheetRadius()*0.10 };
+}
+function endCarry(){
+  const c = centerOfSheet();
+  if(!xf) xf = { cx:c.x, cy:c.y, ox:0, oy:0, th:0, lift:0 };   // запятая уложилась в 80 мс
+  const hx = c.x + xf.ox, hy = c.y + xf.oy;                     // где лист сейчас, в руке
+  const dir = action.tailDir;
+  const tpx = panC.x - hx, tpy = panC.y - hy, tl = Math.hypot(tpx,tpy) || 1;
+  const cosA = (dir.x*tpx + dir.y*tpy)/tl;
+  const sweepDeg = Math.round(action.sweep*180/Math.PI);
+  const transfer = phase==="TABLE" && Math.abs(action.sweep) >= COMMA_SWEEP && cosA >= Math.cos(COMMA_CONE);
+  if(transfer){ lastDecision = `запятая ${sweepDeg}° → тава`; startToss(hx, hy, dir, tl); return; }
+  // Не к таве: это шлепок с дугой — лист опускается там, где его отпустили, и бьётся.
+  lastDecision = `дуга ${sweepDeg}° → шлепок`;
+  dropCarry();
+  action.direction = { x:dir.x, y:dir.y };
+  toFlying();
+}
+// Опустить лист из руки на стол там, где он сейчас (в пределах рабочей зоны), без удара.
+function dropCarry(){
+  const c = centerOfSheet();
+  if(!xf){ clearAction(); return; }
+  const z = zone("work"), r = sheetRadius();
+  const nx = Math.max(z.x + r*0.6, Math.min(z.x + z.w - r*0.6, c.x + xf.ox));
+  const ny = Math.max(z.y + r*0.4, Math.min(z.y + z.h - r*0.4, c.y + xf.oy));
+  bakeTransform(nx - c.x, ny - c.y, 0);
+  xf = null;
+  if(action.state === "CARRY" && action.pointerId === null) clearAction();
+}
+function startToss(hx, hy, dir, distToPan){
+  // Куда сядет: бросок летит по хвосту запятой ровно на расстояние до тавы; промах
+  // от центра сохраняется, но не дальше 30 % радиуса — мимо тавы лист не пролетит.
+  const ax = hx + dir.x*distToPan - panC.x, ay = hy + dir.y*distToPan - panC.y;
+  const al = Math.hypot(ax,ay) || 1, cap = PAN_R*0.30, k = Math.min(1, cap/al);
+  const spin = Math.max(-1.4, Math.min(1.4, action.sweep*0.55));   // «немножко вращается»
+  action.state = "TOSS"; action.pointerId = null;
+  action.toss = { x0:hx, y0:hy, x1:panC.x + ax*k, y1:panC.y + ay*k, spin,
+    T: 0.34 + 0.16*Math.min(1, distToPan/(cv.width*0.5)), sweep: action.sweep, aim: al/PAN_R };
+  action.timer = action.toss.T;
+}
+function updateToss(){
+  const t = action.toss, u = Math.max(0, Math.min(1, 1 - action.timer/t.T));
+  const e = u*u*(3-2*u);                                        // плавный разгон и посадка
+  xf.ox = t.x0 + (t.x1-t.x0)*e - xf.cx;
+  xf.oy = t.y0 + (t.y1-t.y0)*e - xf.cy;
+  xf.th = t.spin * e;
+  xf.lift = sheetRadius()*(0.10 + 0.38*Math.sin(Math.PI*u));    // подлетает и опускается
+}
+function land(){
+  const t = action.toss;
+  bakeTransform(t.x1 - xf.cx, t.y1 - xf.cy, t.spin);
+  xf = null; phase = "PAN";
+  measureThickness();
+  audioPanLand();
+  gestures.push({ kind:"toss", sweep_deg: Math.round(t.sweep*180/Math.PI),
+    spin_deg: Math.round(t.spin*180/Math.PI), aim: +t.aim.toFixed(2),
+    flight_ms: Math.round(t.T*1000), sheet_pct: Math.round(sheetRadius()/targetR*100),
+    ts: new Date().toISOString() });
+  if(gestures.length>200) gestures.shift();
+  try{ localStorage.setItem("dough_gestures", JSON.stringify(gestures)); }catch(e){}
+  clearAction();
+}
+function bakeTransform(ox, oy, th){
+  const c = Math.cos(th), s = Math.sin(th), cx = xf.cx, cy = xf.cy;
+  for(let i=0;i<N;i++){
+    const dx = px[i]-cx, dy = py[i]-cy;
+    px[i] = cx + ox + dx*c - dy*s; py[i] = cy + oy + dx*s + dy*c;
+    prx[i] = px[i]; pry[i] = py[i]; vx[i] = 0; vy[i] = 0;
+  }
+}
+
+// ─── Жарка — ЗАГЛУШКА, чтобы посадка «начинала жариться» и было что слушать ───
+// Настоящая модель (две стороны, пузыри, маргарин, переворот) — docs/frying-mechanics.md.
+let COOK_RATE = 0.09;   // 1/с: тонкая середина золотится за ~15 с, типичное место — за ~30
+function cookStep(dt){
+  for(let i=0;i<N;i++){
+    if(conDeg[i] <= 0) continue;
+    const r = Math.hypot(px[i]-panC.x, py[i]-panC.y)/PAN_R;
+    const heat = Math.max(0.25, 1 - 0.5*r*r);                       // вогнутое дно: центр с лужицей масла горячее
+    const thin = Math.max(0.15, Math.min(1, (0.30 - thick[i])/0.28)); // тонкое золотится первым
+    cook[i] += dt * COOK_RATE * heat * thin;
+  }
+}
+function meanCook(){
+  if(!cook) return 0;
+  let s=0, n=0;
+  for(let i=0;i<N;i++){ if(conDeg[i]<=0) continue; s+=cook[i]; n++; }
+  return n ? s/n : 0;
+}
+
+let SLAP_GROW = 0.075;           // пластическое растяжение за удар на единицу силы
+let TEAR_I = 2.9;                // с этой силы шлепок опасен…
+let TEAR_THIN = 0.20;            // …если лист уже истончился ниже этого
+
+// Рваная дырка на дальней стороне по направлению маха: рвём связи небольшого
+// пятна с неровным краем. Дырка остаётся навсегда — это узор, не наказание.
+function punchHole(direction){
+  const c = centerOfSheet(), sr = sheetRadius();
+  const pxT = c.x + direction.x * sr * 0.8, pyT = c.y + direction.y * sr * 0.8;
+  let best = 0, bd = 1e18;
+  for(let i=0;i<N;i++){
+    const d = (px[i]-pxT)**2 + (py[i]-pyT)**2;
+    if(d < bd){ bd = d; best = i; }
+  }
+  const rad = (Math.max(R0, sheetRadius())*2/(GRID-1)) * 2.4;   // пятно в шагах ТЕКУЩЕЙ сетки
+  let torn = 0;
+  for(let k2=0;k2<cons.length;k2++){
+    const c2 = cons[k2]; if(c2.broken) continue;
+    const mx = (px[c2.a]+px[c2.b])/2 - px[best], my = (py[c2.a]+py[c2.b])/2 - py[best];
+    const d = Math.hypot(mx,my);
+    if(d < rad * (0.65 + Math.random()*0.5)){ if(breakCon(c2)) torn++; }  // неровный край
+  }
+  if(torn) onTear();
+}
+function impactAction(){
+  action.state = "IMPACT";
+  const c = centerOfSheet();
+  applySlapImpulse(action.impulse * gestureScale, action.direction, c);
+  // Сработал стоп-сигнал audit §6.6: скоростной импульс в одиночку не растил площадь —
+  // жёсткий решатель гасил растяжение раньше, чем пластичность его захватывала
+  // (замер: diameterRatio 0.99–1.00 при любом ударе). Чиним связь по предписанию
+  // аудита: удар даёт одноразовое пластическое растяжение длин покоя с той же
+  // пространственной формулой весов, что у импульса. Скорости остаются как рывок и звук.
+  plasticStretch(action.impulse, action.direction, c);
+  // Дырка рождается из перестарательности: сильный шлепок по уже тонкому листу
+  // рвёт дальнюю сторону. Глобальный порог толщины стили не разводит — средний и
+  // жёсткий стили приходят к одинаковой толщине (замер: 0.108 против 0.083),
+  // поэтому судим по паре «сила удара × текущая тонкость» (audit: «слабый,
+  // хороший, опасный результат»).
+  if(action.impulse >= TEAR_I){
+    let tmin = 1; for(let i=0;i<N;i++) if(thick[i]<tmin) tmin = thick[i];
+    if(tmin < TEAR_THIN) punchHole(action.direction);
+  }
+  audioSlap(action.impulse);
+  plasticT = 0.15;
+  action.timer = 0.30;             // успокоение = релаксация в новые длины покоя
+  action.state = "SETTLING";
+}
+
+function plasticStretch(I, direction, center){
+  const over = sheetRadius() / targetR;
+  if(over > 1.25) return;                            // предел растяжимости — общий для всех путей роста
+  const ease = over > 1.0 ? Math.max(0, 1 - (over-1.0)/0.25) : 1;
+  const sr = Math.max(1, sheetRadius());
+  for(let k2=0;k2<cons.length;k2++){
+    const c2 = cons[k2]; if(c2.broken) continue;
+    const mx = (px[c2.a]+px[c2.b])/2 - center.x, my = (py[c2.a]+py[c2.b])/2 - center.y;
+    const dl = Math.hypot(mx,my) || 1;
+    const radial = Math.max(0, (mx/dl)*direction.x + (my/dl)*direction.y);
+    const edgeBias = Math.max(0, Math.min(1, dl/sr));
+    const w = 0.35 + 0.45*edgeBias + 0.20*radial;
+    c2.rest *= 1 + SLAP_GROW * I * w * ease;
+  }
+}
+
+// audit §6.5 дословно: не симуляция удара, а явная игровая модель —
+// быстрый жест даёт краткое, широкое и наблюдаемое расправление.
+function applySlapImpulse(I, direction, center){
+  const sr = Math.max(1, sheetRadius());
+  for(let i=0;i<N;i++){
+    const ddx = px[i]-center.x, ddy = py[i]-center.y;
+    const dl = Math.hypot(ddx,ddy) || 1;
+    const dx = ddx/dl, dy = ddy/dl;
+    const radial = Math.max(0, dx*direction.x + dy*direction.y);
+    const edgeBias = Math.max(0, Math.min(1, dl/sr));
+    // Рыхлый край (мало живых связей) не хлещет наружу: бахрома у дырок получала
+    // полный импульс и улетала, задирая радиус.
+    const loose = conDeg ? Math.min(1, conDeg[i]/3) : 1;
+    const w = (0.35 + 0.45*edgeBias + 0.20*radial) * loose;
+    vx[i] += dx * I * w;
+    vy[i] += dy * I * w;
+  }
+}
+
+// Связь рвётся только здесь. Узел, потерявший все связи, — осколок: он замирает
+// на месте и выпадает из всех измерений. Иначе шлепки разгоняли свободные узлы
+// в бесконечность, и «радиус листа» (а с ним процент, хват и потолок роста)
+// мерился по улетевшему мусору — живой тест поймал 5000 %.
+function breakCon(c){
+  if(c.broken) return false;
+  c.broken = 1;
+  for(const nn of [c.a, c.b]){
+    if(--conDeg[nn] <= 0){ pinned[nn] = 1; vx[nn] = 0; vy[nn] = 0; }
+  }
+  return true;
+}
+
+function sheetSpeed(){
+  let sum=0; for(let i=0;i<N;i++) sum += Math.hypot(vx[i],vy[i]);
+  return sum/Math.max(1,N);
+}
+
+// Инварианты после каждого удара (audit §6.6). Стоп-сигнал: если медианная толщина
+// падает, а areaRatio почти не растёт — чинить связь пластичности с импульсом,
+// а не маскировать масштабом рендера.
+function finalizeGesture(){
+  let areaNow=0, holes=0;
+  for(let q=0;q<quads.length;q++){
+    areaNow += area(quads[q]);
+    const qcn = quadCons[q];
+    if(qcn.some(cc=>cc.broken)) holes++;
+  }
+  const ths = Array.from(thick).sort((x,y)=>x-y);
+  gestures.push({
+    kind: "slap",
+    sweep_deg: Math.round(action.sweep*180/Math.PI),
+    impulse: +action.impulse.toFixed(2),
+    held_ms: action.heldAtLift,
+    areaRatio: +(areaNow/Math.max(1,startArea)).toFixed(3),
+    diameterRatio: +(sheetRadius()/Math.max(1,startR)).toFixed(3),
+    medianThickness: +(ths[ths.length>>1]||0).toFixed(3),
+    minThickness: +(ths[0]||0).toFixed(3),
+    holeQuads: holes,
+    ts: new Date().toISOString()
+  });
+  if(gestures.length>200) gestures.shift();
+  try{ localStorage.setItem("dough_gestures", JSON.stringify(gestures)); }catch(e){}
+  clearAction();
+}
+
+function gripArc(n, mul){
+  const rad = (Math.max(R0, sheetRadius())*2/(GRID-1)) * mul;   // шаг сетки текущего листа
+  const ids=[], ws=[];
+  for(const i of edgeNodes){
+    const d = Math.hypot(px[i]-px[n], py[i]-py[n]);
+    if(d<=rad){ ids.push(i); ws.push(1 - d/rad*0.75); }
+  }
+  return { ids, ws, mul };
+}
+
+// Разрыв судится по устойчивому натяжению за кадр, а не по шуму отдельного подшага,
+// и распространяется по соседям — дырка рвётся дальше, как в настоящем тесте.
+let RATE_SENS = 0.30;              // насколько рывок снижает предел прочности
+let CREEP = 0.55;                   // текучесть: скорость, с которой длина покоя догоняет текущую
+const CREEP_ON = 0.06;             // порог растяжения, с которого тесто начинает течь
+
+// Тесто ПЛАСТИЧНО: удержанное натяжение оно не возвращает, а запоминает — лист
+// остаётся растянутым и становится тоньше. Чисто упругая модель рвалась на 1,3x
+// и «прозрачного листа» из v3 не давала в принципе.
+let evenBuf = null;
+function evenOut(dt){
+  // Тесто под руками выравнивается: толстые места отдают тонким. Без этого
+  // жёсткий лист рвался у точки захвата на 90% пути, так и не дойдя до цели.
+  const k = Math.min(0.5, 3.2*dt);
+  if(!evenBuf || evenBuf.length !== cons.length) evenBuf = new Float32Array(cons.length);
+  let sum = 0, n = 0;
+  for(let i=0;i<cons.length;i++){ const c=cons[i]; if(c.broken) continue;
+    const d = Math.hypot(px[c.b]-px[c.a], py[c.b]-py[c.a]);
+    evenBuf[i] = d / c.rest; sum += evenBuf[i]; n++; }
+  if(!n) return;
+  const mean = sum/n;
+  for(let i=0;i<cons.length;i++){ const c=cons[i]; if(c.broken) continue;
+    // перетянутые связи слегка удлиняют покой, недотянутые — укорачивают
+    c.rest *= 1 + (evenBuf[i] - mean)/Math.max(0.2, mean) * 0.02 * k;
+  }
+}
+function creep(dt){
+  if(sheetRadius() > targetR*1.25) return;          // предел растяжимости — общий с раскруткой
+  evenOut(dt);
+  // В окне удара тесто на порядок пластичнее: расправление закрепляется в длинах
+  // покоя; вне окна лист упругий (audit, группа B: creep).
+  const k = Math.min(1, CREEP * (plasticT>0 ? PLASTIC_BOOST : 1) * dt);
+  for(let i=0;i<cons.length;i++){
+    const c=cons[i]; if(c.broken) continue;
+    const d=Math.hypot(px[c.b]-px[c.a], py[c.b]-py[c.a]);
+    if((d-c.rest)/c.rest > CREEP_ON) c.rest += (d-c.rest)*k;
+  }
+}
+function checkBreak(dt){
+  // Первые полторы секунды после нового комка тесто прощает: рвать новичка мгновенно
+  // за первое же резкое движение — значит не дать ему вообще ничего понять.
+  const young = (performance.now() - runStart) < 1500;
+  if(young) return;
+  // Тесто рвётся не там, где сильнее натянуто, а там, где стало слишком тонким:
+  // «дырка» из v3 — это следствие истончения. Рывок рвёт раньше, чем терпеливое
+  // растягивание, потому что поднимает эффективный порог толщины.
+  // судим по СГЛАЖЕННОЙ толщине: лист не рвётся от мгновенной дрожи после хлопка
+  let torn = 0;
+  if(!quadSm || quadSm.length!==quads.length) quadSm = new Float32Array(quads.length).fill(1);
+  for(let q=0;q<quads.length;q++){
+    const qq = quads[q];
+    const raw = (thick[qq[0]]+thick[qq[1]]+thick[qq[2]]+thick[qq[3]])/4;
+    quadSm[q] += (raw - quadSm[q]) * 0.12;
+    const t = quadSm[q];
+    if(t > 0.5) continue;
+    const grow = quadPrev ? Math.max(0, (quadPrev[q]-t)/Math.max(1e-4,dt)) : 0;  // скорость истончения
+    if(t < THICK_BREAK * Math.min(1.6, 1 + grow*RATE_SENS)){
+      for(const c of quadCons[q]) if(breakCon(c)) torn++;
+    }
+  }
+  if(quadPrev) for(let q=0;q<quads.length;q++){
+    const qq=quads[q]; quadPrev[q]=(thick[qq[0]]+thick[qq[1]]+thick[qq[2]]+thick[qq[3]])/4;
+  }
+  if(torn) onTear();
+}
+
+// Толщина: чем сильнее узел растянут, тем тоньше лист и тем сильнее он просвечивает.
+let maxStrain = 0, avgStrain = 0;
+let accBuf=null, cntBuf=null, quadRest=null;
+function area(q){
+  const [a,b,c,d]=q;
+  return Math.abs((px[a]*(py[b]-py[d]) + px[b]*(py[c]-py[a]) +
+                   px[c]*(py[d]-py[b]) + px[d]*(py[a]-py[c]))/2);
+}
+// Объём теста сохраняется: во сколько раз выросла площадь, во столько раз лист тоньше.
+// Это и есть «растянуть почти до прозрачности» — толщина падает как 1/площадь.
+function measureThickness(){
+  if(!accBuf || accBuf.length!==N){ accBuf=new Float32Array(N); cntBuf=new Float32Array(N); }
+  if(!quadRest || quadRest.length!==quads.length){
+    quadRest = new Float32Array(quads.length);
+    for(let q=0;q<quads.length;q++) quadRest[q] = area(quads[q]) || 1;
+  }
+  accBuf.fill(0); cntBuf.fill(0);
+  for(let q=0;q<quads.length;q++){
+    const t = Math.min(1, quadRest[q] / Math.max(1e-3, area(quads[q])));
+    for(const n of quads[q]){ accBuf[n]+=t; cntBuf[n]++; }
+  }
+  for(let i=0;i<N;i++) thick[i] = cntBuf[i] ? accBuf[i]/cntBuf[i] : 1;
+
+  let mx=0, sum=0, live=0;
+  for(let k=0;k<cons.length;k++){
+    const c=cons[k]; if(c.broken) continue;
+    const d=Math.hypot(px[c.b]-px[c.a], py[c.b]-py[c.a]);
+    const st=Math.max(0,(d-c.rest)/c.rest);
+    if(st>mx) mx=st; sum+=st; live++;
+  }
+  maxStrain=mx; avgStrain = live? sum/live : 0;
+}
+
+// ─────────────────────────── звук: три слоя, процедурно, без ассетов
+let AC=null, master=null, tenseGain=null, tenseFilt=null, noiseBuf=null;
+let sizzleGain=null, sizzleFilt=null, crackleNext=0;
+function audioInit(){
+  if(AC) return;
+  AC = new (window.AudioContext||window.webkitAudioContext)({ latencyHint:"interactive" });
+  master = AC.createGain(); master.gain.value = 0.9; master.connect(AC.destination);
+
+  const len = AC.sampleRate*2, b = AC.createBuffer(1, len, AC.sampleRate), d = b.getChannelData(0);
+  for(let i=0;i<len;i++) d[i] = Math.random()*2-1;
+  noiseBuf = b;
+
+  // слой 1 — натяжение: полосовой шум, «скрип» волокон
+  const src = AC.createBufferSource(); src.buffer=b; src.loop=true;
+  tenseFilt = AC.createBiquadFilter(); tenseFilt.type="bandpass"; tenseFilt.Q.value=6.5;
+  tenseFilt.frequency.value=340;
+  tenseGain = AC.createGain(); tenseGain.gain.value=0;
+  src.connect(tenseFilt); tenseFilt.connect(tenseGain); tenseGain.connect(master); src.start();
+
+  // слой тавы — шипение: полосовой шум; полоса уезжает вверх, когда тесто сохнет
+  const sz = AC.createBufferSource(); sz.buffer=b; sz.loop=true;
+  sizzleFilt = AC.createBiquadFilter(); sizzleFilt.type="bandpass"; sizzleFilt.Q.value=0.9;
+  sizzleFilt.frequency.value=1800;
+  sizzleGain = AC.createGain(); sizzleGain.gain.value=0;
+  sz.connect(sizzleFilt); sizzleFilt.connect(sizzleGain); sizzleGain.connect(master); sz.start();
+
+  // Слоя «предупреждение об истончении» больше нет — решение владельца 22.08.2026:
+  // разрыв не провал, предупреждать не о чем. Звуки листа: скрип натяжения,
+  // шлепок удара, треск новой дырки.
+}
+function audioFrame(){
+  if(!AC || condition==="sight"){
+    if(tenseGain) tenseGain.gain.value=0;
+    if(sizzleGain) sizzleGain.gain.value=0;
+    return;
+  }
+  const now = AC.currentTime;
+  if(phase==="PAN"){
+    // На таве натяжения нет — только жарка. Готовность ведёт звук, не процент:
+    // шипение громкое, пока в тесте вода, и глохнет к концу; потрескивание редкое
+    // на мокром и частое на сухом; полоса шипения уезжает вверх — «суше и звонче».
+    tenseGain.gain.setTargetAtTime(0, now, 0.05);
+    const dry = Math.max(0, Math.min(1, meanCook())), moist = 1 - dry;
+    const lfo = 0.85 + 0.15*Math.sin(now*6.3);
+    sizzleGain.gain.setTargetAtTime((0.03 + 0.24*moist)*lfo, now, 0.25);
+    sizzleFilt.frequency.setTargetAtTime(1700 + 1600*dry, now, 0.3);
+    if(crackleNext < now - 1) crackleNext = now;
+    while(crackleNext < now + 0.1){
+      if(crackleNext >= now - 0.05) audioCrackle(Math.max(now, crackleNext), dry);
+      crackleNext += (0.9 - 0.75*dry) * (0.4 + Math.random()*1.2);
+    }
+    return;
+  }
+  if(sizzleGain) sizzleGain.gain.setTargetAtTime(0, now, 0.08);
+  // Только скрип натяжения от фактической работы — никакой привязки к толщине:
+  // лист не гудит «сейчас порвусь», он просто рвётся, и это слышно треском.
+  const st = Math.min(1, avgStrain*2.5);
+  tenseGain.gain.setTargetAtTime(Math.min(0.22, avgStrain*0.7), now, 0.04);
+  tenseFilt.frequency.setTargetAtTime(260 + st*260, now, 0.05);
+}
+function audioCrackle(t, dry){
+  const s=AC.createBufferSource(); s.buffer=noiseBuf;
+  const f=AC.createBiquadFilter(); f.type="highpass"; f.frequency.value=2800;
+  const g=AC.createGain(); const dur = 0.012 + Math.random()*0.012;
+  g.gain.setValueAtTime(0.05 + 0.10*dry, t); g.gain.exponentialRampToValueAtTime(0.001, t+dur);
+  s.connect(f); f.connect(g); g.connect(master); s.start(t); s.stop(t+dur+0.01);
+}
+// Посадка на таву: глухой шлепок и сразу волна шипения — маргарин встретил сырое тесто.
+function audioPanLand(){
+  if(!AC || condition==="sight") return;
+  audioSlap(2.2);
+  const now = AC.currentTime;
+  sizzleGain.gain.cancelScheduledValues(now);
+  sizzleGain.gain.setValueAtTime(0.5, now);
+  crackleNext = now + 0.15;
+}
+// слой 3 — разрыв
+function audioSnap(){
+  if(!AC || condition==="sight") return;
+  const s=AC.createBufferSource(); s.buffer=noiseBuf;
+  const f=AC.createBiquadFilter(); f.type="highpass"; f.frequency.value=900;
+  const g=AC.createGain(); const t=AC.currentTime;
+  g.gain.setValueAtTime(0.55,t); g.gain.exponentialRampToValueAtTime(0.001,t+0.18);
+  s.connect(f); f.connect(g); g.connect(master); s.start(t); s.stop(t+0.2);
+}
+
+function audioSlap(I){
+  // Вызывается на переходе FLYING → IMPACT; громкость и яркость — от силы жеста.
+  if(!AC || condition==="sight") return;
+  const k = Math.max(0, Math.min(1, (I||1)/IMPULSE_MAX));
+  const s=AC.createBufferSource(); s.buffer=noiseBuf;
+  const f=AC.createBiquadFilter(); f.type="lowpass"; f.frequency.value=420+420*k; f.Q.value=1.2;
+  const g=AC.createGain(); const t=AC.currentTime;
+  g.gain.setValueAtTime(0.20+0.45*k,t); g.gain.exponentialRampToValueAtTime(0.001,t+0.11+0.06*k);
+  s.connect(f); f.connect(g); g.connect(master); s.start(t); s.stop(t+0.2);
+}
+
+// ─────────────────────────── события разрыва и нажатия
+function onTear(){
+  const nowT = performance.now();
+  if(nowT - lastSnap > 150){ lastSnap = nowT; audioSnap(); }   // треск на каждую новую дырку, без пулемёта
+  if(!tornAt){ tornAt = nowT; breakTime = nowT; record(); }    // в журнал — только первый разрыв листа
+}
+function pressNow(){
+  if(pressed) return;
+  pressed = true; pressTime = performance.now();
+  flash.style.opacity = "0.18";
+  setTimeout(()=>flash.style.opacity="0", 90);
+}
+let recorded = false;
+function record(){
+  if(recorded) return;
+  if(!tornAt) return;                      // пишем только листы, дожившие до первого разрыва
+  recorded = true;
+  const lead = pressed ? (breakTime - pressTime)/1000 : null;   // за сколько секунд до разрыва
+  log.push({
+    variant, condition,
+    lead_s: lead === null ? null : +lead.toFixed(3),
+    predicted: lead !== null && lead >= 0.3,
+    pressed_at_all: pressed,
+    run_ms: Math.round(breakTime - runStart),
+    max_strain: +maxStrain.toFixed(3),
+    audio_latency_ms: latencies.length ? +median(latencies).toFixed(1) : null,
+    ts: new Date().toISOString()
+  });
+  try{ localStorage.setItem("dough_log", JSON.stringify(log)); }catch(e){}
+}
+function median(a){ const b=[...a].sort((x,y)=>x-y); const m=b.length>>1;
+  return b.length%2 ? b[m] : (b[m-1]+b[m])/2; }
+
+// ─────────────────────────── ввод
+function nodeNear(x,y){
+  // Палец толстый, а комок маленький: требовать попадания в край — значит не дать
+  // взять тесто вообще. Любое касание рабочей зоны берёт ближайший край листа.
+  let best=-1, bd=1e9;
+  for(const i of edgeNodes){
+    const d=(px[i]-x)**2+(py[i]-y)**2; if(d<bd){bd=d;best=i;}
+  }
+  return best;
+}
+function toLocal(cx, cy){
+  const r = cv.getBoundingClientRect();
+  const sx=(cx-r.left)*cv.width/r.width, sy=(cy-r.top)*cv.height/r.height;
+  return unproject(sx, sy);
+}
+// ─────────────────────────── ввод
+// На iOS Safari pointer-события на холсте отменяются жестами страницы: pointerdown
+// приходит, а pointermove — уже нет. Поэтому на тач-устройствах слушаем touch-события
+// напрямую и гасим жест через preventDefault; мышь идёт своим путём.
+let dbgDown = 0, dbgMove = 0, dbgKind = "ждёт";
+
+function onDown(id, cx, cy){
+  dbgDown++;
+  if(action.pointerId !== null) return;              // один активный палец; второй игнорируется (audit §5)
+  if(action.state === "SETTLING") finalizeGesture(); // быстрый повторный тап не ждёт хвоста успокоения
+  if(action.state !== "RESTING") return;             // остальные фазы доигрывают автономно
+  const tDown = performance.now();
+  audioInit(); if(AC && AC.state==="suspended") AC.resume();
+  if(AC){
+    const lat = (AC.baseLatency||0)*1000 + (AC.outputLatency||0)*1000 + (performance.now()-tDown);
+    latencies.push(lat); if(latencies.length>60) latencies.shift();
+  }
+  const p = toLocal(cx, cy);
+  const w = zone("work");
+  if(phase !== "TABLE"){ dbgKind = "тава"; return; }   // лист на таве: жесты жарки — следующий этап
+  if(p.x > w.x + w.w) return;
+  armAction(id, p);                                  // только выбор края: тесто НЕ двигается
+}
+function onMove(id, cx, cy){
+  if(action.pointerId !== id) return;
+  dbgMove++;
+  updateActionMove(toLocal(cx, cy));
+}
+function onUp(id){
+  if(action.pointerId !== id) return;
+  releaseAction();
+}
+function onCancel(id){
+  if(action.pointerId !== id) return;
+  // Отмена всегда возвращает покой из ARMED/LIFTING (audit §5);
+  // автономные фазы (FLYING и дальше) доигрывают сами и очистятся за ≤0.4 с.
+  if(action.state === "CARRY"){ action.pointerId = null; dropCarry(); }
+  else if(action.state === "ARMED" || action.state === "LIFTING") clearAction();
+  else action.pointerId = null;
+}
+
+// Слушаем на УРОВНЕ ОКНА в фазе перехвата: любой элемент поверх холста — подсказка,
+// оверлей, что угодно — раньше съедал касание, и до игры не доходило ничего.
+// На окне его не перехватит никто. Панель с кнопками отфильтрована по цели события.
+let rawTouch = 0, rawPointer = 0;
+
+function inPanel(t){ return !!(t && t.closest && t.closest("#panel")); }
+
+window.addEventListener("touchstart", e=>{
+  rawTouch++;
+  if(inPanel(e.target)) return;
+  e.preventDefault(); dbgKind = "touch";
+  for(const t of e.changedTouches) onDown("t"+t.identifier, t.clientX, t.clientY);
+}, {passive:false, capture:true});
+
+window.addEventListener("touchmove", e=>{
+  if(inPanel(e.target)) return;
+  e.preventDefault();
+  for(const t of e.changedTouches) onMove("t"+t.identifier, t.clientX, t.clientY);
+}, {passive:false, capture:true});
+
+window.addEventListener("touchend", e=>{
+  for(const t of e.changedTouches) onUp("t"+t.identifier);
+}, {passive:false, capture:true});
+
+window.addEventListener("touchcancel", e=>{
+  for(const t of e.changedTouches) onCancel("t"+t.identifier);
+}, {passive:false, capture:true});
+
+window.addEventListener("pointerdown", e=>{
+  rawPointer++;
+  if(e.pointerType === "touch" || inPanel(e.target)) return;
+  dbgKind = "мышь"; onDown("p"+e.pointerId, e.clientX, e.clientY);
+}, true);
+window.addEventListener("pointermove", e=>{
+  if(e.pointerType === "touch" || inPanel(e.target)) return;
+  onMove("p"+e.pointerId, e.clientX, e.clientY);
+}, true);
+window.addEventListener("pointerup", e=>{ onUp("p"+e.pointerId); }, true);
+window.addEventListener("pointercancel", e=>{ onCancel("p"+e.pointerId); }, true);
+// Уход в фон — та же отмена: не оставлять взведённый жест (audit §5).
+addEventListener("blur", ()=>{
+  if(action.state==="CARRY"){ action.pointerId = null; dropCarry(); }
+  else if(action.state==="ARMED"||action.state==="LIFTING") clearAction();
+});
+
+addEventListener("keydown", e=>{
+  if(e.code==="Space"){ e.preventDefault(); pressNow(); }
+  if(e.code==="KeyR"){ reset(); }
+});
+document.getElementById("tear").addEventListener("click", pressNow);
+document.getElementById("reset").addEventListener("click", reset);
+
+function syncStepButtons(){
+  document.querySelectorAll("[data-s]").forEach(b=>b.classList.toggle("on", +b.dataset.s === stepNo));
+}
+document.querySelectorAll("[data-s]").forEach(b=>b.addEventListener("click", ()=>{
+  stepNo = +b.dataset.s;
+  try{ localStorage.setItem("dough_step", String(stepNo)); }catch(e){}
+  syncStepButtons(); reset();
+}));
+try{ const st0 = +(localStorage.getItem("dough_step")||1); if(st0===1||st0===2||st0===3) stepNo = st0; }catch(e){}
+syncStepButtons();
+
+// Ощущение теста подбирается рукой, а не прогоном: три ползунка меняют
+// упругость, текучесть и запас прочности, значения переживают перезагрузку.
+const TUNE = { com:30, creep:30, brk:72 };
+function applyTune(){
+  // Диапазоны сдвинуты в упругую сторону: прежние делали тесто тряпкой на любом
+  // положении ползунка. Теперь даже максимум мягкости заметно держит форму.
+  COMPLIANCE  = 0.0000004 * Math.pow(60, TUNE.com/100);    // 4e-7 … 2.4e-5
+  CREEP       = 0.04 + (TUNE.creep/100) * 0.9;             // 0.04 … 0.94
+  THICK_BREAK = 0.045 - (TUNE.brk/100) * 0.042;            // мягче … выносливее
+  try{ localStorage.setItem("dough_tune", JSON.stringify(TUNE)); }catch(e){}
+}
+try{ const t = JSON.parse(localStorage.getItem("dough_tune")||"null");
+     if(t) Object.assign(TUNE, t); }catch(e){}
+[["sCom","com"],["sCreep","creep"],["sBreak","brk"]].forEach(([id,key])=>{
+  const el = document.getElementById(id);
+  el.value = TUNE[key];
+  el.addEventListener("input", ()=>{ TUNE[key] = +el.value; applyTune(); });
+});
+applyTune();
+
+function reset(){ recorded=false; resize(); }
+
+document.querySelectorAll("[data-v]").forEach(b=>b.addEventListener("click",()=>{
+  variant=b.dataset.v;
+  document.querySelectorAll("[data-v]").forEach(x=>x.classList.toggle("on",x===b));
+  reset();
+}));
+document.querySelectorAll("[data-c]").forEach(b=>b.addEventListener("click",()=>{
+  condition=b.dataset.c;
+  document.querySelectorAll("[data-c]").forEach(x=>x.classList.toggle("on",x===b));
+  reset();
+}));
+// Принудительное обновление: страница отдаётся с GitHub Pages и залипает в кеше,
+// поэтому правки иначе не доезжают до телефона. Та же схема, что в «Лягушке».
+document.getElementById("hardReload").addEventListener("click", ()=>{
+  const btn = document.getElementById("hardReload");
+  btn.textContent = "обновляю…";
+  const done = ()=> location.replace(location.origin + location.pathname + "?v=" + Date.now());
+  try{
+    const jobs = [];
+    if(window.caches && caches.keys){
+      jobs.push(caches.keys().then(ks => Promise.all(ks.map(k => caches.delete(k)))));
+    }
+    if(navigator.serviceWorker && navigator.serviceWorker.getRegistrations){
+      jobs.push(navigator.serviceWorker.getRegistrations().then(rs => Promise.all(rs.map(r => r.unregister()))));
+    }
+    if(jobs.length){ Promise.all(jobs).then(done, done); setTimeout(done, 1200); }
+    else done();
+  }catch(e){ done(); }
+});
+
+document.getElementById("dump").addEventListener("click", async ()=>{
+  const txt = JSON.stringify({ tears: log, gestures }, null, 2);
+  const btn = document.getElementById("dump");
+  try{ await navigator.clipboard.writeText(txt); btn.textContent = `скопировано (${log.length}+${gestures.length})`; }
+  catch(e){ console.log(txt); btn.textContent = "лог в консоли"; }
+  setTimeout(()=>btn.textContent = "скопировать лог", 1800);
+});
+
+// ─────────────────────────── рендер
+// Тесто лежит на тёмной столешнице. Толстое — непрозрачное и бежевое; растянутое
+// истончается и НАЧИНАЕТ ПРОСВЕЧИВАТЬ, то есть темнеет к цвету стола.
+// Это и есть «растянуть почти до прозрачности» из v3, и это же — читаемый сигнал «сейчас порвётся».
+const DOUGH = [236, 219, 186], TABLE = [36, 28, 19];
+function mix(t){                                   // t: 1 толстое → 0 тонкое
+  // Пол просвечивания: самое тонкое тесто остаётся чуть светлее стола, иначе
+  // дырка (настоящий стол и тень под ним) неотличима от тонкого места.
+  const k = 0.14 + Math.pow(Math.max(0,Math.min(1,t)), 0.85) * 0.86;
+  return [ Math.round(TABLE[0]+(DOUGH[0]-TABLE[0])*k),
+           Math.round(TABLE[1]+(DOUGH[1]-TABLE[1])*k),
+           Math.round(TABLE[2]+(DOUGH[2]-TABLE[2])*k) ];
+}
+const PAL = Array.from({length:16}, (_,i)=>{ const c = mix(i/15); return `rgb(${c[0]},${c[1]},${c[2]})`; });
+function quant(t){ return PAL[Math.max(0,Math.min(15, Math.round(t*15)))]; }
+
+// На таве тонкое тесто просвечивает уже не столом, а дном тавы, и поверх ложится прожарка:
+// сырое → золотистое → коричневое → тёмное. Тёмное — не провал (см. docs/frying-mechanics.md).
+const PAN_BG = [66, 58, 48];
+const GOLD = [232,196,110], BROWN = [196,128,52], DARK = [122,66,26], CHAR = [62,34,16];
+function lerp3(a, b, k){ return [ a[0]+(b[0]-a[0])*k, a[1]+(b[1]-a[1])*k, a[2]+(b[2]-a[2])*k ]; }
+function mixOn(t, bg){
+  const k = 0.14 + Math.pow(Math.max(0,Math.min(1,t)), 0.85) * 0.86;
+  return lerp3(bg, DOUGH, k);
+}
+function cookColor(base, c){
+  if(c <= 0) return base;
+  if(c < 0.4) return lerp3(base, GOLD, c/0.4);
+  if(c < 0.8) return lerp3(GOLD, BROWN, (c-0.4)/0.4);
+  if(c < 1.2) return lerp3(BROWN, DARK, (c-0.8)/0.4);
+  return lerp3(DARK, CHAR, Math.min(1, (c-1.2)/0.5));
+}
+const rgb = (c)=>`rgb(${Math.round(c[0])},${Math.round(c[1])},${Math.round(c[2])})`;
+const palPan = new Map();   // 16 ступеней толщины × 16 ступеней прожарки — для пиксельных вариантов
+function quantOn(t, c){
+  const tq = Math.max(0,Math.min(15, Math.round(t*15))), cq = Math.max(0,Math.min(15, Math.round(c/1.7*15)));
+  const key = tq*16 + cq;
+  let s = palPan.get(key);
+  if(!s){ s = rgb(cookColor(mixOn(tq/15, PAN_BG), cq/15*1.7)); palPan.set(key, s); }
+  return s;
+}
+function shadeOn(t, c){ return rgb(cookColor(mixOn(t, PAN_BG), c)); }
+
+// Картинка листа в руке и в полёте: узлы физики стоят, а рисуем их со сдвигом,
+// поворотом и подъёмом из xf.
+let vxBuf=null, vyBuf=null;
+function viewX(){
+  if(!vxBuf || vxBuf.length!==N){ vxBuf = new Float32Array(N); vyBuf = new Float32Array(N); }
+  const c = Math.cos(xf.th), s = Math.sin(xf.th);
+  for(let i=0;i<N;i++){
+    const dx = px[i]-xf.cx, dy = py[i]-xf.cy;
+    vxBuf[i] = xf.cx + xf.ox + dx*c - dy*s;
+    vyBuf[i] = xf.cy + xf.oy + dx*s + dy*c - xf.lift;
+  }
+  return vxBuf;
+}
+function viewY(){ return vyBuf; }
+
+function draw(){
+  const pixelated = variant!=="C";
+  const LOGW = variant==="A" ? 80 : 224;
+  let g, W, H, sx, sy, ox, oy;
+
+  if(pixelated){
+    const ar = cv.height/cv.width;
+    W = LOGW; H = Math.max(8, Math.round(LOGW*ar));
+    if(lo.width!==W||lo.height!==H){ lo.width=W; lo.height=H; }
+    g = lctx; sx = W/cv.width; sy = H/cv.height; ox=0; oy=0;
+  } else {
+    g = ctx; W=cv.width; H=cv.height; sx=1; sy=1; ox=0; oy=0;
+  }
+
+  g.fillStyle = "#14100c"; g.fillRect(0,0,W,H);
+  if(condition!=="sound") drawTable(g, sx, sy, pixelated);
+
+  if(condition!=="sound"){
+    // ячейки решётки; порванные и просвеченные насквозь — дырки
+    // порванные ячейки: пометить их узлы, чтобы подсветить рваный край у соседей
+    if(tornAt){
+      if(!tornNode || tornNode.length!==N) tornNode = new Uint8Array(N);
+      tornNode.fill(0);
+      for(let q=0;q<quads.length;q++){
+        if(quadCons[q].some(cc=>cc.broken)){
+          const [a,b2,c,d] = quads[q];
+          tornNode[a]=tornNode[b2]=tornNode[c]=tornNode[d]=1;
+        }
+      }
+    }
+    // тень дырки рисуем только ВНУТРИ тела листа: рваный край — это просто
+    // отсутствие теста (виден стол), а не «дырка вне блина» из замёрзших ошмётков
+    const bodyC = centerOfSheet(), bodyR2 = Math.pow(sheetRadius()*0.96, 2);
+    // В руке и в полёте лист рисуется со сдвигом, поворотом и подъёмом, а под ним — тень:
+    // так видно, что он оторвался от доски и летит, хотя узлы физики стоят.
+    const X = xf ? viewX() : px, Y = xf ? viewY() : py;
+    if(xf){
+      const gx = xf.cx + xf.ox, gy = xf.cy + xf.oy, gr = sheetRadius()*1.03;
+      g.fillStyle = "rgba(6,3,1,0.42)";
+      g.beginPath();
+      g.ellipse(prX(gx,gy)*sx+ox, prY(gx,gy)*sy+oy, gr*sx, gr*TILT*sy, 0, 0, Math.PI*2);
+      g.fill();
+    }
+    const onPan = phase === "PAN";
+    for(let q=0;q<quads.length;q++){
+      const qc = quadCons[q];
+      const [a,b2,c,d] = quads[q];
+      const torn = qc[0].broken || (qc[1]&&qc[1].broken) || (qc[2]&&qc[2].broken) || (qc[3]&&qc[3].broken);
+      let t=(thick[a]+thick[b2]+thick[c]+thick[d])/4;
+      if(torn){
+        const inside =
+          (px[a]-bodyC.x)**2+(py[a]-bodyC.y)**2 < bodyR2 &&
+          (px[b2]-bodyC.x)**2+(py[b2]-bodyC.y)**2 < bodyR2 &&
+          (px[c]-bodyC.x)**2+(py[c]-bodyC.y)**2 < bodyR2 &&
+          (px[d]-bodyC.x)**2+(py[d]-bodyC.y)**2 < bodyR2;
+        if(!inside) continue;                          // выеденный край: теста просто нет
+        // Сквозная дыра — тень ПОД листом, темнее и стола, и любого тонкого теста.
+        g.fillStyle = onPan ? "#1c1712" : "#100a06";
+      } else {
+        if(t < HOLE_THICK) continue;                  // истончилось до сквозной дыры
+        // Рваный край собирается толще — у настоящего теста кромка разрыва скатывается.
+        if(tornAt && (tornNode[a]||tornNode[b2]||tornNode[c]||tornNode[d])) t = Math.min(1, t + 0.28);
+        if(onPan){
+          const ck = (cook[a]+cook[b2]+cook[c]+cook[d])/4;
+          g.fillStyle = pixelated ? quantOn(t, ck) : shadeOn(t, ck);
+        } else g.fillStyle = pixelated ? quant(t) : shade(t);
+      }
+      g.beginPath();
+      g.moveTo(prX(X[a],Y[a])*sx+ox, prY(X[a],Y[a])*sy+oy);
+      g.lineTo(prX(X[b2],Y[b2])*sx+ox, prY(X[b2],Y[b2])*sy+oy);
+      g.lineTo(prX(X[c],Y[c])*sx+ox, prY(X[c],Y[c])*sy+oy);
+      g.lineTo(prX(X[d],Y[d])*sx+ox, prY(X[d],Y[d])*sy+oy);
+      g.closePath(); g.fill();
+    }
+    // дуга хвата и палец видны только пока жест взводится: ARMED подсвечивает
+    // выбранный край (audit, проход A), тесто при этом не двигается.
+    if(action.state==="ARMED" || action.state==="LIFTING"){
+      g.fillStyle="#d98b3a";
+      const S2 = pixelated ? 2 : 6;
+      for(const n of action.gripIds)
+        g.fillRect(prX(px[n],py[n])*sx-S2/2, prY(px[n],py[n])*sy-S2/2, S2, S2);
+      const rr = pixelated ? 4 : 14;
+      g.beginPath();
+      g.ellipse(prX(action.last.x,action.last.y)*sx, prY(action.last.x,action.last.y)*sy,
+                rr, rr*TILT, 0, 0, Math.PI*2);
+      g.fill();
+    }
+  }
+
+  if(pixelated){
+    ctx.imageSmoothingEnabled=false;
+    ctx.fillStyle="#14100c"; ctx.fillRect(0,0,cv.width,cv.height);
+    ctx.drawImage(lo,0,0,W,H,0,0,cv.width,cv.height);
+  }
+}
+// Стол: рабочая зона · мостик начинок · тава.
+// Тава по F1 — กระทะโรตี, толстая сталь 18–20″ с ВОГНУТЫМ дном, удерживающим масло,
+// а не плоская «тава»: лужица жира собирается в центре, отсюда техника подгона масла к краям.
+function drawTable(g, sx, sy, px_){
+  const w = zone("work");
+  const R_ = (x)=>x*sx, D_ = (y)=>y*sy;
+
+  g.fillStyle = "#2b2016";                                    // столешница — на всю ширину, тава стоит на ней
+  g.fillRect(0, D_(w.y), R_(cv.width), D_(w.h));
+  const boards = 7, bh = w.h/boards;
+  for(let i=0;i<boards;i++){
+    g.fillStyle = i%2 ? "#31251a" : "#2b2016";
+    g.fillRect(0, D_(w.y+i*bh), R_(cv.width), D_(bh-1));
+    g.fillStyle = "#1d150e";
+    g.fillRect(0, D_(w.y+(i+1)*bh-1), R_(cv.width), Math.max(1, D_(1)));
+  }
+
+  // Тава (กระทะโรตี): толстая сталь с вогнутым дном — кольца темнеют к борту,
+  // в центре лужица маргарина. Рисуется в координатах стола той же проекцией, что мишень.
+  const pcx = R_(prX(panC.x, panC.y)), pcy = D_(prY(panC.x, panC.y));
+  const ell = (r, fill, dy)=>{
+    g.fillStyle = fill; g.beginPath();
+    g.ellipse(pcx, pcy + D_(dy||0), R_(r), D_(r*TILT), 0, 0, Math.PI*2); g.fill();
+  };
+  ell(PAN_R*1.16, "#0e0a07", PAN_R*0.06);   // тень и горелка под тавой
+  ell(PAN_R*1.08, "#2a2622");               // борт
+  ell(PAN_R*1.00, "#3a342d");
+  ell(PAN_R*0.82, "#433c33");
+  ell(PAN_R*0.62, "#4b4338");
+  ell(PAN_R*0.42, "#544a3c");
+  ell(PAN_R*0.30, "#6b5a2a");               // лужица маргарина в центре вогнутого дна
+  ell(PAN_R*0.16, "#8a7436", -PAN_R*0.02);  // блик на масле
+
+  // мишень: докуда растянуть лист — только пока лист на столе
+  if(phase !== "TABLE") return;
+  const c2 = centerOfSheet();
+  const tR = stepNo===1 ? step1R : targetR;           // мишень текущего шага
+  g.strokeStyle = "#4a3a24"; g.lineWidth = Math.max(1, R_(2));
+  g.setLineDash([R_(10), R_(8)]);
+  g.beginPath();
+  g.ellipse(R_(prX(c2.x,c2.y)), D_(prY(c2.x,c2.y)), R_(tR), D_(tR*TILT), 0, 0, Math.PI*2);
+  g.stroke(); g.setLineDash([]);
+}
+
+function shade(t){ const c = mix(t); return `rgb(${c[0]},${c[1]},${c[2]})`; }
+
+// ─────────────────────────── цикл
+let last=performance.now(), fps=60, acc=0, frames=0;
+let loopErrs = 0;
+function loop(now){
+  const dt = Math.min(0.033, (now-last)/1000); last=now;
+  try{
+    step(dt);
+    audioFrame();
+    draw();
+  }catch(err){
+    // Раньше единственное исключение в кадре останавливало игру насмерть:
+    // requestAnimationFrame больше не вызывался, и экран замирал.
+    loopErrs++;
+    if(loopErrs < 4) console.error("кадр упал:", err);
+  }
+
+  acc+=dt; frames++;
+  if(acc>0.5){ fps=frames/acc; acc=0; frames=0; }
+  const liveEl = document.getElementById("live");
+  const pct = Math.round(sheetRadius()/targetR*100);
+  const ragged = tornAt ? " · рваный узор" : "";
+  const ready = sheetRadius()>=targetR ? " ✓ готов · запятой на таву →" : "";
+  const banner = advancedAt && performance.now()-advancedAt < 2600;
+  const mc = meanCook();
+  liveEl.textContent =
+    phase==="PAN" ? (mc < 0.25 ? "на таве · шипит — слушай" : mc < 0.8 ? "на таве · подсыхает"
+                     : "на таве · суше и звонче — снимать? (жесты жарки — следующий этап, «заново» — новый кусочек)")
+    : action.state==="CARRY" ? "в руке — веди запятую к таве"
+    : action.state==="TOSS" ? "летит…"
+    : banner ? "✓ расплющено — шаг 2: возьми край и резко махни"
+    : stepNo===1 ? (action.state==="ARMED"
+        ? `расплющиваешь · ${Math.round(sheetRadius()/step1R*100)}%`
+        : `шаг 1 · прижми кусочек и расплющивай · ${Math.round(sheetRadius()/step1R*100)}%`)
+    : action.state==="ARMED" ? `держишь край · хват ${Math.round(action.mul||GRIP_MIN)} · смахни!`
+    : (action.state==="LIFTING"||action.state==="FLYING") ? "бросок…"
+    : (action.state==="IMPACT"||action.state==="SETTLING") ? `ШЛЕП · лист ${pct}%${ready}${ragged}`
+    : `коснись края · лист ${pct}%${ready}${ragged}`;
+  liveEl.style.color = action.state!=="RESTING" ? "#8fbf6a" : "#d98b3a";
+  document.getElementById("blind").classList.toggle("on", condition === "sound");
+  const done = log.filter(l=>l.variant===variant&&l.condition===condition).length;
+  const hit  = log.filter(l=>l.variant===variant&&l.condition===condition&&l.predicted).length;
+  stats.textContent =
+    `сборка: ${BUILD}\n` +
+    `${variant}/${condition}  попыток ${done}/30  распознано ${done?Math.round(hit/done*100):0}%\n` +
+    `шаг ${stepNo}  ${action.state!=="RESTING"?"◆ "+action.state:"○ покой"}  ` +
+    `${phase==="PAN" ? "тава · прожарка "+mc.toFixed(2) : "стол"}  мах: ${lastDecision}  ` +
+    `лист ${pct}%${ready}${ragged}  жестов ${gestures.length}  ` +
+    `[касаний ${rawTouch} · до теста ↓${dbgDown} ↔${dbgMove} · ${dbgKind}${loopErrs?" · сбоев "+loopErrs:""}]  ` +
+    `${tornAt?"рваный":pressed?"нажато":"—"}  ` +
+    `${fps.toFixed(0)} fps  задержка ${latencies.length?median(latencies).toFixed(0):"—"} мс`;
+  requestAnimationFrame(loop);
+}
+
+function resize(){
+  const r = stage.getBoundingClientRect(), dpr = Math.min(2, devicePixelRatio||1);
+  cv.width = Math.max(64, Math.round(r.width*dpr));
+  cv.height = Math.max(64, Math.round(r.height*dpr));
+  build();
+}
+addEventListener("resize", resize);
+try{ const s=localStorage.getItem("dough_log"); if(s) log=JSON.parse(s); }catch(e){}
+try{ const s=localStorage.getItem("dough_gestures"); if(s) gestures=JSON.parse(s); }catch(e){}
+resize();
+requestAnimationFrame(loop);
+</script>
+
