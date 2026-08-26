@@ -167,7 +167,9 @@ const ZONES = { work:[0.00,0.58], pan:[0.58,1.00] };
 let panC = { x:0, y:0 }, PAN_R = 1;   // тава: центр и радиус в координатах стола (считаются в build)
 // Где лист: на столе (все жесты растяжки) или на таве (жарится; жесты жарки — следующий этап).
 let phase = "TABLE";
-let cook = null;                   // прожарка узла: 0 сырое → 1 золотистое → >1.2 тёмное
+let cook = null;                   // цвет узла: 0 сырое → 0,4 золотистое → >1,2 тёмное
+let dry = null;                    // сушка узла 0→1: пока не 1, цвета нет вообще
+let contactF = null;               // пятнистость контакта с плитой, 0,6…1,15
 // Перенос: пока лист в руке (CARRY) и летит (TOSS), узлы физики не двигаются —
 // сдвиг, поворот и подъём применяются к картинке и запекаются в узлы при посадке.
 let xf = null;                     // {cx,cy,ox,oy,th,lift}
@@ -270,22 +272,49 @@ function build(){
   PAN_R = Math.min(targetR*1.25, pz.w*0.49, pz.h*0.49);
   panC = { x: pz.cx - pz.w*0.03, y: pz.cy + pz.h*0.04 };
   phase = "TABLE"; xf = null;
-  cook = new Float32Array(N);
+  cook = new Float32Array(N); dry = new Float32Array(N);
+  // Контакт с плитой пятнистый, а не идеальный: под листом микрозазоры, складки, плёнка
+  // жира. Источники в один голос описывают ПЯТНА («some brown spots», «leopard-spotted»),
+  // а не гладкий градиент, — без этого поля никакая радиальная карта картинку не даст.
+  contactF = new Float32Array(N);
+  {
+    const K = [2.4, 4.1], AMP = [1, 0.5];
+    const ph = K.map(()=>Math.random()*Math.PI*2), ph2 = K.map(()=>Math.random()*Math.PI*2);
+    for(let i=0;i<N;i++){
+      let n = 0;
+      for(let m=0;m<K.length;m++)
+        n += AMP[m]*Math.sin(K[m]*(px[i]-z.cx)/targetR+ph[m])*Math.sin(K[m]*(py[i]-z.cy)/targetR+ph2[m]);
+      contactF[i] = Math.max(0.6, Math.min(1.15, 0.9 + 0.25*n/1.5));
+    }
+  }
   // Площади при рождении и база площади — от маленького комка, до любого масштабирования:
   // так толщина шага 3 честная, а не «родился большим и толстым».
   quadRest = new Float32Array(quads.length);
   for(let q=0;q<quads.length;q++) quadRest[q] = area(quads[q]) || 1;
   startArea = 0; for(let q=0;q<quads.length;q++) startArea += area(quads[q]);
   // Шаг 3 «на таву»: лист уже растянут до мишени — переносим сразу, без восьми шлепков.
-  // Профиль настоящего растянутого листа (фактчек 26.08.2026): середина толще, периферия
-  // тонкая («paper-thin and translucent … the center is thicker»). Радиальная карта
-  // r' = R·(0,7ρ + 0,3ρ³): центр ≈ в 3 раза толще края; толщина честная — площади
-  // при рождении уже посчитаны выше от маленького комка.
+  // Профиль листа (перепроверка 26.08.2026, вторая итерация): цель растяжки — РАВНОМЕРНАЯ
+  // просвечивающая тонкость («until the dough becomes paper-thin and translucent»), а не
+  // толстая середина: цитата «the center is thicker» относится к 6-дюймовому диску ДО
+  // подбрасывания, кромочную «губу» в тайском методе срезают ножом. Первая правка 26.08
+  // (радиальная карта 3:1) была таким же домыслом, как прежний «горячий центр», только
+  // с обратным знаком. Здесь: однородная растяжка + ПЯТНИСТАЯ неровность плавным полем
+  // смещений — остаточные толстые места сидят где попало, как у настоящей руки.
   if(stepNo===3){
+    const s = targetR / R0;
+    const K = [2.0, 3.6, 5.4], AMP = [1, 0.5, 0.28], NOISE = 0.02;
+    const ph = K.map(()=>Math.random()*Math.PI*2), ph2 = K.map(()=>Math.random()*Math.PI*2);
     for(let i=0;i<N;i++){
-      const dx = px[i]-z.cx, dy = py[i]-z.cy, r = Math.hypot(dx,dy), rho = Math.min(1, r/R0);
-      const g = 0.7*rho + 0.3*rho*rho*rho, k = r > 1e-6 ? (targetR*g)/r : 0;
-      px[i] = z.cx + dx*k; py[i] = z.cy + dy*k; prx[i]=px[i]; pry[i]=py[i];
+      const dx = (px[i]-z.cx)*s, dy = (py[i]-z.cy)*s;
+      const u = dx/targetR, v = dy/targetR;
+      let gu = 0, gv = 0;
+      for(let m=0;m<K.length;m++){
+        gu += AMP[m]*K[m]*Math.cos(K[m]*u+ph[m])*Math.sin(K[m]*v+ph2[m]);
+        gv += AMP[m]*K[m]*Math.sin(K[m]*u+ph[m])*Math.cos(K[m]*v+ph2[m]);
+      }
+      px[i] = z.cx + dx + targetR*NOISE*gu;
+      py[i] = z.cy + dy + targetR*NOISE*gv;
+      prx[i]=px[i]; pry[i]=py[i];
     }
     for(const cc of cons) cc.rest = Math.hypot(px[cc.a]-px[cc.b], py[cc.a]-py[cc.b]);
   }
@@ -631,26 +660,51 @@ function bakeTransform(ox, oy, th){
 }
 
 // ─── Жарка — ЗАГЛУШКА, чтобы посадка «начинала жариться» и было что слушать ───
-// Настоящая модель (две стороны, пузыри, маргарин, переворот) — docs/frying-mechanics.md.
-// Фактчек 26.08.2026 (frying-mechanics.md §1): открытый лист прожаривается не «из центра
-// наружу», а ПО ТОЛЩИНЕ — тонкая периферия золотится в разы раньше толстой середины;
-// толстая сталь греет широким пятном, не точкой; лужица масла в центре лишь немного
-// ускоряет. Прежняя карта «центр 1,0 → край 0,25» была домыслом без источника.
-let COOK_RATE = 0.035;  // 1/с при толщине ~0,18 в центре: золотится за ~16 с
+// Настоящая модель (две стороны, начинка, пузыри, переворот) — docs/frying-mechanics.md.
+// Фактчек 26.08.2026 + перепроверка скептиками, вторая итерация:
+//  • сначала СУШКА, потом цвет. Пока в тесте есть вода, испарительное охлаждение держит
+//    контактную сторону у 100 °C: цвет требует >120 °C и a_w<0,6. Первая правка красила
+//    лист с первой секунды — это была ошибка, источники дают «схватился, но без цвета»
+//    к 15–30 с и первые золотые точки только к 30–45 с.
+//  • толщина решает СУШКУ (её время ∝ толщине), а не скорость окраски: буреет тонкая
+//    поверхностная ламина, ей всё равно, что под ней.
+//  • тава греет широким пятном; кольцевая горелка даёт лёгкий горб на среднем радиусе,
+//    а не пик в центре (inferred: ИК-замера настоящей кратхи нет).
+//  • масло — скромный +5…15 %, а не ×1,3: жир заполняет микрозазор, но сам зазор не
+//    узкое место, а лужа толще миллиметра уже теплоизолирует.
+//  • контакт пятнистый (см. contactF) — отсюда «leopard spots» вместо гладкого градиента.
+let DRY_RATE = 0.13;    // 1/с: тонкое сохнет ~9 с, толстое ~20–25 с
+let COOK_RATE = 0.008;  // 1/с после сушки: первые точки цвета к ~30 с, золото к ~60 с
+function panHeat(r){
+  if(r < 0.45) return 0.90 + 0.10*(r/0.45);                     // центр внутри кольца пламени — чуть слабее
+  if(r < 0.70) return 1.00 - 0.25*((r-0.45)/0.25);              // горб на среднем радиусе
+  return Math.max(0.5, 0.75 - 0.20*((r-0.70)/0.30));            // прохладный борт
+}
 function cookStep(dt){
   for(let i=0;i<N;i++){
     if(conDeg[i] <= 0) continue;
     const r = Math.hypot(px[i]-panC.x, py[i]-panC.y)/PAN_R;
-    const pan  = r < 0.5 ? 1 : 1 - 0.3*Math.pow((r-0.5)/0.5, 2);          // широкое горячее пятно, борт ≈0,7
-    const oil  = 1 + 0.3*Math.max(0, 1 - r/0.35);                        // масляный контакт в лужице греет лучше сухого
-    const thin = Math.max(0.2, Math.min(2.0, 0.10/Math.max(0.05, thick[i]))); // время до цвета ∝ толщине
-    cook[i] += dt * COOK_RATE * pan * oil * thin;
+    const heat = panHeat(r) * (1.05 + 0.10*Math.max(0, 1 - r/0.35)) * contactF[i];
+    if(dry[i] < 1){
+      const thin = Math.max(0.2, Math.min(2.0, 0.10/Math.max(0.05, thick[i])));
+      dry[i] = Math.min(1, dry[i] + dt * DRY_RATE * heat * thin);
+    } else {
+      cook[i] += dt * COOK_RATE * heat;
+    }
   }
 }
 function meanCook(){
   if(!cook) return 0;
   let s=0, n=0;
   for(let i=0;i<N;i++){ if(conDeg[i]<=0) continue; s+=cook[i]; n++; }
+  return n ? s/n : 0;
+}
+// Звук ведёт вода, а не цвет: шипение и треск идут от сушки и потому ОПЕРЕЖАЮТ окраску —
+// «суше и звонче» слышно раньше, чем видно золото. Это и есть «звук как HUD».
+function meanDry(){
+  if(!dry) return 0;
+  let s=0, n=0;
+  for(let i=0;i<N;i++){ if(conDeg[i]<=0) continue; s+=dry[i]; n++; }
   return n ? s/n : 0;
 }
 
@@ -935,14 +989,14 @@ function audioFrame(){
     // шипение громкое, пока в тесте вода, и глохнет к концу; потрескивание редкое
     // на мокром и частое на сухом; полоса шипения уезжает вверх — «суше и звонче».
     tenseGain.gain.setTargetAtTime(0, now, 0.05);
-    const dry = Math.max(0, Math.min(1, meanCook())), moist = 1 - dry;
+    const d = Math.max(0, Math.min(1, meanDry())), moist = 1 - d;
     const lfo = 0.85 + 0.15*Math.sin(now*6.3);
     sizzleGain.gain.setTargetAtTime((0.03 + 0.24*moist)*lfo, now, 0.25);
-    sizzleFilt.frequency.setTargetAtTime(1700 + 1600*dry, now, 0.3);
+    sizzleFilt.frequency.setTargetAtTime(1700 + 1600*d, now, 0.3);
     if(crackleNext < now - 1) crackleNext = now;
     while(crackleNext < now + 0.1){
-      if(crackleNext >= now - 0.05) audioCrackle(Math.max(now, crackleNext), dry);
-      crackleNext += (0.9 - 0.75*dry) * (0.4 + Math.random()*1.2);
+      if(crackleNext >= now - 0.05) audioCrackle(Math.max(now, crackleNext), d);
+      crackleNext += (0.9 - 0.75*d) * (0.4 + Math.random()*1.2);
     }
     return;
   }
@@ -1423,10 +1477,12 @@ function loop(now){
   const ragged = tornAt ? " · рваный узор" : "";
   const ready = sheetRadius()>=targetR ? " ✓ готов · запятой на таву →" : "";
   const banner = advancedAt && performance.now()-advancedAt < 2600;
-  const mc = meanCook();
+  const mc = meanCook(), md = meanDry();
   liveEl.textContent =
-    phase==="PAN" ? (mc < 0.25 ? "на таве · шипит — слушай" : mc < 0.8 ? "на таве · подсыхает"
-                     : "на таве · суше и звонче — снимать? (жесты жарки — следующий этап, «заново» — новый кусочек)")
+    phase==="PAN" ? (md < 0.35 ? "на таве · шипит — слушай, цвета ещё нет"
+                     : md < 0.9 ? "на таве · подсыхает, звук уходит выше"
+                     : mc < 0.12 ? "на таве · суше и звонче — вот-вот пойдут пятна"
+                     : "на таве · пятна цвета (жесты жарки — следующий этап, «заново» — новый кусочек)")
     : action.state==="CARRY" ? "в руке — веди запятую к таве"
     : action.state==="TOSS" ? "летит…"
     : banner ? "✓ расплющено — шаг 2: возьми край и резко махни"
@@ -1445,7 +1501,7 @@ function loop(now){
     `сборка: ${BUILD}\n` +
     `${variant}/${condition}  попыток ${done}/30  распознано ${done?Math.round(hit/done*100):0}%\n` +
     `шаг ${stepNo}  ${action.state!=="RESTING"?"◆ "+action.state:"○ покой"}  ` +
-    `${phase==="PAN" ? "тава · прожарка "+mc.toFixed(2) : "стол"}  мах: ${lastDecision}  ` +
+    `${phase==="PAN" ? "тава · сушка "+md.toFixed(2)+" · цвет "+mc.toFixed(2) : "стол"}  мах: ${lastDecision}  ` +
     `лист ${pct}%${ready}${ragged}  жестов ${gestures.length}  ` +
     `[касаний ${rawTouch} · до теста ↓${dbgDown} ↔${dbgMove} · ${dbgKind}${loopErrs?" · сбоев "+loopErrs:""}]  ` +
     `${tornAt?"рваный":pressed?"нажато":"—"}  ` +
