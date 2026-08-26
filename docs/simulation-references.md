@@ -64,6 +64,16 @@ pizza dough, and the behavior of ultrasonic motors](https://www.researchgate.net
 вся наука о валках и пузырях. Наш шлепок остаётся без чужого референса; его истина — живая
 рука, как и было.
 
+**г) Прожарка лепёшки на горячей поверхности** (фактчек 26.08.2026, `frying-mechanics.md` §1):
+цвет — только после испарения воды, поверхность >120 °C и активность воды <0,6
+([Purlis & Salvadori, через PMC4571265](https://pmc.ncbi.nlm.nih.gov/articles/PMC4571265/));
+у доса на таве ~98 % тепла идёт кондукцией, а низ держится ниже расчёта из-за испарительного
+охлаждения ([PMC4519496](https://pmc.ncbi.nlm.nih.gov/articles/PMC4519496/)); расслоение
+слоёв паром как причина пузырей ([PubMed 37803653](https://pubmed.ncbi.nlm.nih.gov/37803653/)).
+Практический вывод для модели: время до цвета ∝ толщине, тонкий край первым; тава греет
+широким пятном, не точкой (толстая сталь над кольцевой горелкой); ИК-замера настоящей кратхи
+в литературе нет.
+
 ## Что из найденного соседом относится к Roti напрямую
 
 1. **MPM про выпечку** — [A thermomechanical material point method for baking and cooking](https://www.researchgate.net/publication/337117678_A_thermomechanical_material_point_method_for_baking_and_cooking)

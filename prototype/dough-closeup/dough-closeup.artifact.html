@@ -266,10 +266,17 @@ function build(){
   for(let q=0;q<quads.length;q++) quadRest[q] = area(quads[q]) || 1;
   startArea = 0; for(let q=0;q<quads.length;q++) startArea += area(quads[q]);
   // Шаг 3 «на таву»: лист уже растянут до мишени — переносим сразу, без восьми шлепков.
+  // Профиль настоящего растянутого листа (фактчек 26.08.2026): середина толще, периферия
+  // тонкая («paper-thin and translucent … the center is thicker»). Радиальная карта
+  // r' = R·(0,7ρ + 0,3ρ³): центр ≈ в 3 раза толще края; толщина честная — площади
+  // при рождении уже посчитаны выше от маленького комка.
   if(stepNo===3){
-    const s = targetR / R0;
-    for(let i=0;i<N;i++){ px[i] = z.cx + (px[i]-z.cx)*s; py[i] = z.cy + (py[i]-z.cy)*s; prx[i]=px[i]; pry[i]=py[i]; }
-    for(const cc of cons) cc.rest *= s;
+    for(let i=0;i<N;i++){
+      const dx = px[i]-z.cx, dy = py[i]-z.cy, r = Math.hypot(dx,dy), rho = Math.min(1, r/R0);
+      const g = 0.7*rho + 0.3*rho*rho*rho, k = r > 1e-6 ? (targetR*g)/r : 0;
+      px[i] = z.cx + dx*k; py[i] = z.cy + dy*k; prx[i]=px[i]; pry[i]=py[i];
+    }
+    for(const cc of cons) cc.rest = Math.hypot(px[cc.a]-px[cc.b], py[cc.a]-py[cc.b]);
   }
 
   clearAction(); plasticT = 0;
@@ -614,14 +621,19 @@ function bakeTransform(ox, oy, th){
 
 // ─── Жарка — ЗАГЛУШКА, чтобы посадка «начинала жариться» и было что слушать ───
 // Настоящая модель (две стороны, пузыри, маргарин, переворот) — docs/frying-mechanics.md.
-let COOK_RATE = 0.09;   // 1/с: тонкая середина золотится за ~15 с, типичное место — за ~30
+// Фактчек 26.08.2026 (frying-mechanics.md §1): открытый лист прожаривается не «из центра
+// наружу», а ПО ТОЛЩИНЕ — тонкая периферия золотится в разы раньше толстой середины;
+// толстая сталь греет широким пятном, не точкой; лужица масла в центре лишь немного
+// ускоряет. Прежняя карта «центр 1,0 → край 0,25» была домыслом без источника.
+let COOK_RATE = 0.035;  // 1/с при толщине ~0,18 в центре: золотится за ~16 с
 function cookStep(dt){
   for(let i=0;i<N;i++){
     if(conDeg[i] <= 0) continue;
     const r = Math.hypot(px[i]-panC.x, py[i]-panC.y)/PAN_R;
-    const heat = Math.max(0.25, 1 - 0.5*r*r);                       // вогнутое дно: центр с лужицей масла горячее
-    const thin = Math.max(0.15, Math.min(1, (0.30 - thick[i])/0.28)); // тонкое золотится первым
-    cook[i] += dt * COOK_RATE * heat * thin;
+    const pan  = r < 0.5 ? 1 : 1 - 0.3*Math.pow((r-0.5)/0.5, 2);          // широкое горячее пятно, борт ≈0,7
+    const oil  = 1 + 0.3*Math.max(0, 1 - r/0.35);                        // масляный контакт в лужице греет лучше сухого
+    const thin = Math.max(0.2, Math.min(2.0, 0.10/Math.max(0.05, thick[i]))); // время до цвета ∝ толщине
+    cook[i] += dt * COOK_RATE * pan * oil * thin;
   }
 }
 function meanCook(){
