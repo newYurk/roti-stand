@@ -748,7 +748,11 @@ function cookStep(dt){
   for(let i=0;i<N;i++){
     if(conDeg[i] <= 0) continue;
     const r = Math.hypot(px[i]-panC.x, py[i]-panC.y)/PAN_R;
-    const heat = panHeat(r) * (1.05 + 0.10*Math.max(0, 1 - r/0.35)) * contactF[i];
+    // Масло: скромные +5 % равномерно. Центральной добавки здесь БЫЛА +10 % при r<0.35 —
+    // она гасила весь профиль panHeat: разница между центром и горбом на среднем радиусе
+    // падала с 11 % до 0,3 %, то есть кольцевая горелка переставала быть видна, и лист
+    // румянился ровно — против собственного фактчека строкой выше.
+    const heat = panHeat(r) * 1.05 * contactF[i];
     if(dry[i] < 1){
       const thin = Math.max(0.2, Math.min(2.0, 0.10/Math.max(0.05, thick[i])));
       dry[i] = Math.min(1, dry[i] + dt * DRY_RATE * heat * thin);
