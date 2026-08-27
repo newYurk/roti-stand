@@ -16,7 +16,7 @@
   html,body{ margin:0; height:100%; background:var(--bg); color:var(--ink);
     font:13px/1.45 ui-monospace,SFMono-Regular,Menlo,monospace; overscroll-behavior:none; }
   body{ display:flex; flex-direction:column; touch-action:none; }
-  #stage{ flex:1; position:relative; min-height:0; }
+  #stage{ flex:1; position:relative; min-height:0; min-width:0; }
   canvas{ position:absolute; inset:0; width:100%; height:100%; display:block; touch-action:none; }
   #panel{ border-top:1px solid var(--line); padding:8px 10px; display:flex; flex-wrap:wrap;
     gap:6px 14px; align-items:center; background:#0f0c09; }
@@ -34,6 +34,13 @@
   button.on{ background:var(--hot); color:#14100c; border-color:var(--hot); }
   #tear{ padding:8px 18px; font-weight:bold; }
   #stats{ color:var(--dim); margin-left:auto; text-align:right; white-space:pre; }
+  /* #core и #tools — обёртки для ландшафта телефона. В остальных раскладках они
+     display:contents, то есть в разметке не участвуют вовсе, а order возвращает
+     группам исходный порядок панели: шаг · вид · судишь · порвётся · ощущение · служебные · статистика. */
+  #core, #tools{ display:contents; }
+  #gStep{ order:1 } #gView{ order:2 } #gCond{ order:3 } #tear{ order:4 }
+  #gTune{ order:5 } #gSrv{ order:6 } #stats{ order:7 }
+  #toolsBtn, #mini{ display:none; }
   #hint{ position:absolute; left:10px; top:10px; right:10px; color:var(--dim);
     pointer-events:none; font-size:11px; }
   /* Крупный индикатор: мелкую строку внизу на телефоне не разглядеть,
@@ -55,6 +62,53 @@
   #turn{ position:absolute; left:0; right:0; bottom:8px; display:none; justify-content:center;
     color:var(--dim); text-align:center; padding:8px; z-index:5; pointer-events:none; }
   @media (orientation:portrait){ #turn{ display:flex; } }
+
+  /* ── ТЕЛЕФОН В ЛАНДШАФТЕ: панель уходит В КОЛОНКУ СБОКУ.
+     Внизу она забирала высоту первой (247–282 px из 340–430) и полю оставалась треть
+     экрана — «игровая область в верхней трети» — это буквальный замер, 24,9–37,2 %.
+     В ландшафте дефицит — высота, а ширина избыточна: панель тратит ширину.
+     Порог max-height:640px отсекает iPad (1024) и десктоп (900) — там нижняя панель
+     даёт полю 83–86 % и ломать её незачем. Взят с запасом над телефонами (430): при
+     ширине меньше ~1000 px нижняя панель не даёт 70 % НИ НА КАКОЙ высоте — 247 px
+     при 800 требуют экрана в 823 px, которого в ландшафте не бывает. */
+  @media (orientation:landscape) and (max-height:640px){
+    body{ --rail:clamp(112px,15vw,146px); flex-direction:row; }
+    #panel{ position:relative; flex:0 0 var(--rail); width:var(--rail);
+      flex-direction:column; flex-wrap:nowrap; align-items:stretch; gap:5px;
+      border-top:0; border-left:1px solid var(--line);
+      padding:6px 6px calc(6px + env(safe-area-inset-bottom,0px)); }
+    #core{ display:flex; flex:1; min-height:0; flex-direction:column;
+      align-items:stretch; gap:5px; }
+    /* Порядок панели-строки здесь не действует: в колонке свой — шаг, порвётся, прибор,
+       телеметрия внизу. Без этого #toolsBtn и #mini (order по умолчанию 0) уезжали
+       наверх, а «СЕЙЧАС ПОРВЁТСЯ» уходило под нижний край. */
+    #gStep{ order:1 } #tear{ order:2 } #gTune{ order:3 } #toolsBtn{ order:4 } #mini{ order:5 }
+    #gView{ order:1 } #gCond{ order:2 } #gSrv{ order:3 } #stats{ order:4 }
+    #core .grp{ flex-direction:column; align-items:stretch; gap:3px; }
+    #core .grp b{ margin:0; font-size:10px; }
+    #panel button{ font-size:10px; padding:4px 3px; white-space:normal; line-height:1.15; }
+    #tear{ padding:6px 3px; }
+    #tear .kbd{ display:none; }          /* на телефоне пробела нет */
+    #core .tune label{ flex-direction:column; align-items:stretch; gap:1px; }
+    #core .tune input[type=range]{ width:100%; }
+    #toolsBtn{ display:block; }
+    #mini{ display:block; margin-top:auto; color:var(--dim); font-size:10px;
+      line-height:1.35; white-space:pre; }
+    /* Прибор — отдельный лист ПОВЕРХ поля, а не рядом с ним: во-первых, в 112 px он
+       не помещается; во-вторых, любое изменение размера #stage пересобирает лист,
+       и открыть настройки стоило бы игроку теста. Колоночный перенос раскладывает
+       группы в столько столбцов, сколько нужно, — прокрутки нет ни на одной высоте. */
+    #tools{ display:none; position:fixed; left:0; top:0; bottom:0; right:var(--rail);
+      flex-flow:column wrap; align-content:flex-start; gap:8px 16px;
+      padding:10px 12px calc(10px + env(safe-area-inset-bottom,0px));
+      background:rgba(15,12,9,.99); border-right:1px solid var(--line); z-index:6; }
+    body.tools #tools{ display:flex; }
+    #tools .grp{ width:min(212px,42vw); flex-wrap:wrap; align-items:center; }
+    #tools .grp b{ width:100%; margin:0; }
+    #tools .measure{ opacity:1; }        /* поверх поля приглушать нечего */
+    #stats{ width:min(248px,46vw); margin-left:0; text-align:left;
+      white-space:pre-wrap; font-size:10px; line-height:1.35; }
+  }
 </style>
 </head>
 <body>
@@ -68,33 +122,42 @@
 </div>
 
 <div id="panel">
-  <div class="grp"><b>шаг</b>
-    <button data-s="1" class="on">1 · расплющить</button>
-    <button data-s="2">2 · растянуть</button>
-    <button data-s="3">3 · на таву</button>
+  <!-- В ландшафте телефона #core — это узкая колонка сбоку (то, что нужно в игре),
+       а #tools открывается поверх поля кнопкой «прибор». В портрете и на большом
+       экране обе обёртки display:contents и панель остаётся прежней строкой. -->
+  <div id="core">
+    <div class="grp" id="gStep"><b>шаг</b>
+      <button data-s="1" class="on">1 · расплющить</button>
+      <button data-s="2">2 · растянуть</button>
+      <button data-s="3">3 · на таву</button>
+    </div>
+    <button id="tear">СЕЙЧАС ПОРВЁТСЯ<span class="kbd"> (space)</span></button>
+    <div class="grp tune" id="gTune"><b>ощущение</b>
+      <label>упругость<input id="sCom" type="range" min="0" max="100" value="30"></label>
+      <label>текучесть<input id="sCreep" type="range" min="0" max="100" value="30"></label>
+      <label>прочность<input id="sBreak" type="range" min="0" max="100" value="72"></label>
+    </div>
+    <button id="toolsBtn">прибор ▸</button>
+    <div id="mini"></div>
   </div>
-  <div class="grp measure"><b>замер: вид</b>
-    <button data-v="A" class="on">A · пиксель 80</button>
-    <button data-v="B">B · пиксель 224</button>
-    <button data-v="C">C · контроль</button>
+  <div id="tools">
+    <div class="grp measure" id="gView"><b>замер: вид</b>
+      <button data-v="A" class="on">A · пиксель 80</button>
+      <button data-v="B">B · пиксель 224</button>
+      <button data-v="C">C · контроль</button>
+    </div>
+    <div class="grp measure" id="gCond"><b>замер: по чему судишь</b>
+      <button data-c="both" class="on">оба</button>
+      <button data-c="sound">только звук</button>
+      <button data-c="sight">только картинка</button>
+    </div>
+    <div class="grp" id="gSrv">
+      <button id="reset">заново</button>
+      <button id="dump">скопировать лог</button>
+      <button id="hardReload">обновить (сбросить кеш)</button>
+    </div>
+    <div id="stats"></div>
   </div>
-  <div class="grp measure"><b>замер: по чему судишь</b>
-    <button data-c="both" class="on">оба</button>
-    <button data-c="sound">только звук</button>
-    <button data-c="sight">только картинка</button>
-  </div>
-  <button id="tear">СЕЙЧАС ПОРВЁТСЯ (space)</button>
-  <div class="grp tune"><b>ощущение</b>
-    <label>упругость<input id="sCom" type="range" min="0" max="100" value="30"></label>
-    <label>текучесть<input id="sCreep" type="range" min="0" max="100" value="30"></label>
-    <label>прочность<input id="sBreak" type="range" min="0" max="100" value="72"></label>
-  </div>
-  <div class="grp">
-    <button id="reset">заново</button>
-    <button id="dump">скопировать лог</button>
-    <button id="hardReload">обновить (сбросить кеш)</button>
-  </div>
-  <div id="stats"></div>
 </div>
 
 <script>
@@ -155,6 +218,7 @@ const stage = document.getElementById("stage");
 const cv = document.getElementById("cv"), ctx = cv.getContext("2d", { alpha:false });
 const lo = document.createElement("canvas"), lctx = lo.getContext("2d", { alpha:false });
 const stats = document.getElementById("stats"), flash = document.getElementById("flash");
+const miniEl = document.getElementById("mini"), hintEl = document.getElementById("hint");
 
 // ─────────────────────────── раскладка стола (v3: тесто слева, начинки по центру, тава справа)
 // Раскладка закрепляется навсегда, чтобы игрок со временем готовил «не глядя».
@@ -1184,9 +1248,28 @@ addEventListener("keydown", e=>{
 });
 document.getElementById("tear").addEventListener("click", pressNow);
 document.getElementById("reset").addEventListener("click", reset);
+// «Прибор» — шесть из семи строк панели, которые нужны замеру, а не игре. В ландшафте
+// они уходят на лист поверх поля; лист не меняет размер #stage, поэтому лист теста цел.
+const toolsBtn = document.getElementById("toolsBtn");
+function setTools(on){
+  document.body.classList.toggle("tools", on);
+  toolsBtn.textContent = on ? "✕ закрыть" : "прибор ▸";
+}
+toolsBtn.addEventListener("click", ()=>setTools(!document.body.classList.contains("tools")));
+// Тап по пустому месту листа закрывает его: лист накрывает поле, и искать кнопку,
+// когда хочется просто вернуться к тесту, — лишний шаг.
+document.getElementById("tools").addEventListener("click", e=>{ if(e.target.id==="tools") setTools(false); });
 
+// Подсказка сразу на три шага занимала 2–4 строки и закрывала до 62 % поля в ландшафте
+// (замер: низ #hint приходился на 40–62 % высоты #stage). Показываем только текущий шаг.
+const HINTS = {
+  1: "шаг 1: прижимай кусочек — расплющишь до пунктира",
+  2: "шаг 2: возьми край, миг подержи, резко махни — шлепок. Порвётся — останется рваный узор, так и пожарим",
+  3: "шаг 3: возьми край и круговым махом-«запятой» перекинь на таву — полетит, повернётся, зашипит"
+};
 function syncStepButtons(){
   document.querySelectorAll("[data-s]").forEach(b=>b.classList.toggle("on", +b.dataset.s === stepNo));
+  hintEl.textContent = HINTS[stepNo] || "";
 }
 document.querySelectorAll("[data-s]").forEach(b=>b.addEventListener("click", ()=>{
   stepNo = +b.dataset.s;
@@ -1216,7 +1299,7 @@ try{ const t = JSON.parse(localStorage.getItem("dough_tune")||"null");
 });
 applyTune();
 
-function reset(){ recorded=false; resize(); }
+function reset(){ recorded=false; resize(true); }
 
 document.querySelectorAll("[data-v]").forEach(b=>b.addEventListener("click",()=>{
   variant=b.dataset.v;
@@ -1495,6 +1578,9 @@ function loop(now){
     : `коснись края · лист ${pct}%${ready}${ragged}`;
   liveEl.style.color = action.state!=="RESTING" ? "#8fbf6a" : "#d98b3a";
   document.getElementById("blind").classList.toggle("on", condition === "sound");
+  // В ландшафте полная строка статистики уезжала за правый край (35–212 px) и не
+  // прокручивалась: fps и задержку — те самые числа — на телефоне было не прочитать.
+  miniEl.textContent = `лист ${pct}%\n${fps.toFixed(0)} fps\n${latencies.length?median(latencies).toFixed(0):"—"} мс`;
   const done = log.filter(l=>l.variant===variant&&l.condition===condition).length;
   const hit  = log.filter(l=>l.variant===variant&&l.condition===condition&&l.predicted).length;
   stats.textContent =
@@ -1509,16 +1595,22 @@ function loop(now){
   requestAnimationFrame(loop);
 }
 
-function resize(){
+// Пересборка листа стоит игроку всей работы, поэтому она только при РЕАЛЬНОЙ смене
+// размера: событие resize прилетает и от панели Safari, и от поворота, и от наблюдателя.
+function resize(force){
   const r = stage.getBoundingClientRect(), dpr = Math.min(2, devicePixelRatio||1);
-  cv.width = Math.max(64, Math.round(r.width*dpr));
-  cv.height = Math.max(64, Math.round(r.height*dpr));
+  const w = Math.max(64, Math.round(r.width*dpr)), h = Math.max(64, Math.round(r.height*dpr));
+  if(!force && w===cv.width && h===cv.height) return;
+  cv.width = w; cv.height = h;
   build();
 }
-addEventListener("resize", resize);
+addEventListener("resize", ()=>resize());
+// Поворот телефона меняет раскладку (панель вниз ↔ вбок), а событие resize на iOS
+// приходит раньше, чем пересчитан layout: наблюдатель ловит уже итоговый размер.
+if(window.ResizeObserver) new ResizeObserver(()=>resize()).observe(stage);
 try{ const s=localStorage.getItem("dough_log"); if(s) log=JSON.parse(s); }catch(e){}
 try{ const s=localStorage.getItem("dough_gestures"); if(s) gestures=JSON.parse(s); }catch(e){}
-resize();
+resize(true);
 requestAnimationFrame(loop);
 </script>
 </body>
