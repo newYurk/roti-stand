@@ -1542,10 +1542,16 @@ function drawTable(g, sx, sy, px_){
 function shade(t){ const c = mix(t); return `rgb(${c[0]},${c[1]},${c[2]})`; }
 
 // ─────────────────────────── цикл
-let last=performance.now(), fps=60, acc=0, frames=0;
+let last=performance.now(), fps=60, acc=0, frames=0, worst=0;
 let loopErrs = 0;
 function loop(now){
-  const dt = Math.min(0.033, (now-last)/1000); last=now;
+  // Настоящее время кадра — для измерений; обрезанное — только для устойчивости симуляции.
+  // Раньше счётчик копил обрезанное dt и потому не умел показывать меньше 30 fps:
+  // при кадрах по 50 мс он рисовал 30 вместо 20, то есть был слеп ровно к тем
+  // просадкам, ради которых его и читают на телефоне. Найдено 07.09.2026.
+  const real = (now-last)/1000;
+  const dt = Math.min(0.033, real); last=now;
+  if(real > worst) worst = real;
   try{
     step(dt);
     audioFrame();
@@ -1557,7 +1563,7 @@ function loop(now){
     if(loopErrs < 4) console.error("кадр упал:", err);
   }
 
-  acc+=dt; frames++;
+  acc+=real; frames++;
   if(acc>0.5){ fps=frames/acc; acc=0; frames=0; }
   const liveEl = document.getElementById("live");
   const pct = Math.round(sheetRadius()/targetR*100);
@@ -1584,7 +1590,7 @@ function loop(now){
   document.getElementById("blind").classList.toggle("on", condition === "sound");
   // В ландшафте полная строка статистики уезжала за правый край (35–212 px) и не
   // прокручивалась: fps и задержку — те самые числа — на телефоне было не прочитать.
-  miniEl.textContent = `лист ${pct}%\n${fps.toFixed(0)} fps\n${latencies.length?median(latencies).toFixed(0):"—"} мс`;
+  miniEl.textContent = `лист ${pct}%\n${fps.toFixed(0)} fps · худший ${(worst*1000).toFixed(0)} мс\n${latencies.length?median(latencies).toFixed(0):"—"} мс`;
   const done = log.filter(l=>l.variant===variant&&l.condition===condition).length;
   const hit  = log.filter(l=>l.variant===variant&&l.condition===condition&&l.predicted).length;
   stats.textContent =
@@ -1595,7 +1601,7 @@ function loop(now){
     `лист ${pct}%${ready}${ragged}  жестов ${gestures.length}  ` +
     `[касаний ${rawTouch} · до теста ↓${dbgDown} ↔${dbgMove} · ${dbgKind}${loopErrs?" · сбоев "+loopErrs:""}]  ` +
     `${tornAt?"рваный":pressed?"нажато":"—"}  ` +
-    `${fps.toFixed(0)} fps  задержка ${latencies.length?median(latencies).toFixed(0):"—"} мс`;
+    `${fps.toFixed(0)} fps  худший кадр ${(worst*1000).toFixed(0)} мс  задержка ${latencies.length?median(latencies).toFixed(0):"—"} мс`;
   requestAnimationFrame(loop);
 }
 
