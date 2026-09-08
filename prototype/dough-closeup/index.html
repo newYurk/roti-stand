@@ -91,7 +91,10 @@
      Блок стоит ДО ландшафтного: там своя раскладка, и она должна перебивать эту. */
   @media (max-width:900px){
     .grp{ flex-wrap:wrap; }
-    #panel{ padding:6px 8px; gap:6px 10px; }
+    #panel{ padding:6px 8px; gap:5px 8px; }
+    #panel button{ font-size:12px; padding:7px 8px; }
+    .grp{ gap:5px; }
+    .grp b{ font-size:11px; }
     /* Высота ЗАКРЕПЛЕНА, и это не косметика. С `pre-wrap` первое же касание удлиняло
        строку («задержка —» → «задержка 21 мс»), блок переносился на лишнюю строку,
        панель подрастала, ResizeObserver дёргал resize() → build() → clearAction(),
@@ -102,7 +105,6 @@
     #tear .kbd{ display:none; }          /* пробела нет ни на телефоне, ни на планшете */
     .tune label{ flex-direction:column; align-items:stretch; gap:1px; font-size:10px; }
     .tune input[type=range]{ width:88px; }
-    #panel button{ padding:8px 9px; }
   }
 
   /* ── ТЕЛЕФОН В ЛАНДШАФТЕ: панель уходит В КОЛОНКУ СБОКУ.
@@ -180,14 +182,14 @@
        экране обе обёртки display:contents и панель остаётся прежней строкой. -->
   <div id="core">
     <div class="grp" id="gStep"><b>шаг</b>
-      <button data-s="1" class="on">1 · расплющить</button>
-      <button data-s="2">2 · растянуть</button>
-      <button data-s="3">3 · на таву</button>
+      <button data-s="1" class="on">расплющить</button>
+      <button data-s="2">растянуть</button>
+      <button data-s="3">на таву</button>
     </div>
     <button id="tear">СЕЙЧАС ПОРВЁТСЯ<span class="kbd"> (space)</span></button>
-    <div class="grp measure" id="gView"><b>замер: вид</b>
-      <button data-v="A" class="on">A · пиксель 80</button>
-      <button data-v="B">B · пиксель 224</button>
+    <div class="grp measure" id="gView"><b>вид</b>
+      <button data-v="A" class="on">A · 80</button>
+      <button data-v="B">B · 224</button>
       <button data-v="C">C · контроль</button>
     </div>
     <button id="toolsBtn">прибор ▸</button>
@@ -199,15 +201,15 @@
       <label>текучесть<input id="sCreep" type="range" min="0" max="100" value="30"></label>
       <label>прочность<input id="sBreak" type="range" min="0" max="100" value="72"></label>
     </div>
-    <div class="grp measure" id="gCond"><b>замер: по чему судишь</b>
-      <button data-c="both" class="on">оба</button>
-      <button data-c="sound">только звук</button>
-      <button data-c="sight">только картинка</button>
+    <div class="grp measure" id="gCond"><b>судишь по</b>
+      <button data-c="both" class="on">обоим</button>
+      <button data-c="sound">звуку</button>
+      <button data-c="sight">картинке</button>
     </div>
     <div class="grp" id="gSrv">
       <button id="reset">заново</button>
-      <button id="dump">скопировать лог</button>
-      <button id="hardReload">обновить (сбросить кеш)</button>
+      <button id="dump">лог</button>
+      <button id="hardReload">обновить</button>
     </div>
     <div id="stats"></div>
   </div>
