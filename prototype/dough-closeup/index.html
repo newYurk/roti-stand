@@ -577,6 +577,10 @@ function clearAction(){
 function armAction(pointerId, p){
   const n = nodeNear(p.x, p.y);
   if(n < 0) return;
+  // Решение прошлого маха стирается на входе в новый: иначе после неудачной запятой
+  // в панели продолжает висеть «запятая 154° → тава» от прошлой удачной, и по строке
+  // нельзя судить, что случилось сейчас (найдено проверкой 08.09).
+  lastDecision = "—";
   action.state = "ARMED"; action.pointerId = pointerId; action.edgeNode = n;
   action.down = { x:p.x, y:p.y, t: performance.now() };
   action.last = { x:p.x, y:p.y, t: performance.now() };
@@ -1759,7 +1763,12 @@ function loop(now){
 // Значит любой ресайз посреди запятой убивает её — а ресайз прилетает не только от поворота
 // телефона: тулбар Safari, клавиатура, подросшая строка телеметрии. Откладываем.
 let pendingResize = false;
-function gestureLive(){ return action.state !== "RESTING" || phase === "PAN"; }
+// Отсрочка держится на ДЕЙСТВИИ РУКИ, а не на том, где лежит лист. Была клауза
+// `|| phase === "PAN"` — она истинна всю жарку, и отложенный ресайз не применялся
+// НИКОГДА после удачного броска: холст оставался в старом размере до «заново»
+// (найдено проверкой 08.09, обе формы окна). Полёт при этом всё равно защищён —
+// в нём `action.state === "TOSS"`.
+function gestureLive(){ return action.state !== "RESTING"; }
 function resize(force){
   const r = stage.getBoundingClientRect(), dpr = Math.min(2, devicePixelRatio||1);
   const w = Math.max(64, Math.round(r.width*dpr)), h = Math.max(64, Math.round(r.height*dpr));
