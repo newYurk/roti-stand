@@ -92,8 +92,13 @@
   @media (max-width:900px){
     .grp{ flex-wrap:wrap; }
     #panel{ padding:6px 8px; gap:6px 10px; }
+    /* Высота ЗАКРЕПЛЕНА, и это не косметика. С `pre-wrap` первое же касание удлиняло
+       строку («задержка —» → «задержка 21 мс»), блок переносился на лишнюю строку,
+       панель подрастала, ResizeObserver дёргал resize() → build() → clearAction(),
+       и жест умирал через 9–14 мс после касания — палец дописывал запятую в пустоту.
+       Тот же приём уже применён к листу «прибор» в ландшафте (см. комментарий ниже). */
     #stats{ margin-left:0; width:100%; white-space:pre-wrap; text-align:left;
-      font-size:11px; line-height:1.35; }
+      font-size:11px; line-height:1.35; height:7em; overflow-y:auto; }
     #tear .kbd{ display:none; }          /* пробела нет ни на телефоне, ни на планшете */
     .tune label{ flex-direction:column; align-items:stretch; gap:1px; font-size:10px; }
     .tune input[type=range]{ width:88px; }
@@ -1668,6 +1673,7 @@ function loop(now){
   // вкладки, а не рисование. И то и другое попадало в «худший» и оставалось там навсегда:
   // до 08.09.2026 `worst` не обнуляло ничто, даже смена варианта. Значит A, B и C
   // возвращали одно и то же число — худший кадр первой пересборки.
+  if(pendingResize) flushResize();
   if(warmup > 0) warmup--;
   else if(real < 1 && real > worst) worst = real;
   else if(real >= 1) paused++;   // пауза вкладки не «просадка»: считаем отдельно, но не прячем
@@ -1749,13 +1755,22 @@ function loop(now){
 
 // Пересборка листа стоит игроку всей работы, поэтому она только при РЕАЛЬНОЙ смене
 // размера: событие resize прилетает и от панели Safari, и от поворота, и от наблюдателя.
+// Пересборка холста стирает жест: build() кончается clearAction() и ставит phase="TABLE".
+// Значит любой ресайз посреди запятой убивает её — а ресайз прилетает не только от поворота
+// телефона: тулбар Safari, клавиатура, подросшая строка телеметрии. Откладываем.
+let pendingResize = false;
+function gestureLive(){ return action.state !== "RESTING" || phase === "PAN"; }
 function resize(force){
   const r = stage.getBoundingClientRect(), dpr = Math.min(2, devicePixelRatio||1);
   const w = Math.max(64, Math.round(r.width*dpr)), h = Math.max(64, Math.round(r.height*dpr));
   if(!force && w===cv.width && h===cv.height) return;
+  if(!force && gestureLive()){ pendingResize = true; return; }   // доиграем жест, потом пересоберём
+  pendingResize = false;
   cv.width = w; cv.height = h;
   build();
 }
+// Отложенный ресайз применяется, как только рука отпустила и лист вернулся в покой.
+function flushResize(){ if(pendingResize && !gestureLive()) resize(); }
 addEventListener("resize", ()=>resize());
 // Поворот телефона меняет раскладку (панель вниз ↔ вбок), а событие resize на iOS
 // приходит раньше, чем пересчитан layout: наблюдатель ловит уже итоговый размер.
