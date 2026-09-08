@@ -1290,17 +1290,22 @@ function onCancel(id){
 // На окне его не перехватит никто. Панель с кнопками отфильтрована по цели события.
 let rawTouch = 0, rawPointer = 0;
 
-function inPanel(t){ return !!(t && t.closest && t.closest("#panel")); }
+// Что считается интерфейсом, а не полем. Касание интерфейса нельзя гасить через
+// preventDefault: тогда браузер не синтезирует click, и кнопка мертва. Именно это и
+// случилось 08.09.2026 с «всё равно продолжить» на заглушке #turn: она лежит внутри
+// #stage, проверка была только на #panel, и кнопка не нажималась ни в эмуляторе,
+// ни на живом телефоне. Любой новый слой поверх поля добавлять СЮДА.
+function inUI(t){ return !!(t && t.closest && t.closest("#panel, #turn")); }
 
 window.addEventListener("touchstart", e=>{
   rawTouch++;
-  if(inPanel(e.target)) return;
+  if(inUI(e.target)) return;
   e.preventDefault(); dbgKind = "touch";
   for(const t of e.changedTouches) onDown("t"+t.identifier, t.clientX, t.clientY);
 }, {passive:false, capture:true});
 
 window.addEventListener("touchmove", e=>{
-  if(inPanel(e.target)) return;
+  if(inUI(e.target)) return;
   e.preventDefault();
   for(const t of e.changedTouches) onMove("t"+t.identifier, t.clientX, t.clientY);
 }, {passive:false, capture:true});
@@ -1315,11 +1320,11 @@ window.addEventListener("touchcancel", e=>{
 
 window.addEventListener("pointerdown", e=>{
   rawPointer++;
-  if(e.pointerType === "touch" || inPanel(e.target)) return;
+  if(e.pointerType === "touch" || inUI(e.target)) return;
   dbgKind = "мышь"; onDown("p"+e.pointerId, e.clientX, e.clientY);
 }, true);
 window.addEventListener("pointermove", e=>{
-  if(e.pointerType === "touch" || inPanel(e.target)) return;
+  if(e.pointerType === "touch" || inUI(e.target)) return;
   onMove("p"+e.pointerId, e.clientX, e.clientY);
 }, true);
 window.addEventListener("pointerup", e=>{ onUp("p"+e.pointerId); }, true);
