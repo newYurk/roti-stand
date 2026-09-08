@@ -80,6 +80,22 @@
   body.turnok #turn{ display:none; }
   body.turnok #panel{ display:flex; }
 
+  /* Узкое окно, раскладка-строка. Панель ОБЯЗАНА переноситься: иначе правый край
+     уезжает за экран, а доскроллить нечем — body{touch-action:none}. Видно на скриншоте
+     владельца 08.09.2026: обрезаны «прочность», «скопировать лог» и «обновить».
+     Сюда попадают: портрет после «всё равно продолжить», планшет и узкое окно на десктопе.
+     Блок стоит ДО ландшафтного: там своя раскладка, и она должна перебивать эту. */
+  @media (max-width:900px){
+    .grp{ flex-wrap:wrap; }
+    #panel{ padding:6px 8px; gap:6px 10px; }
+    #stats{ margin-left:0; width:100%; white-space:pre-wrap; text-align:left;
+      font-size:11px; line-height:1.35; }
+    #tear .kbd{ display:none; }          /* пробела нет ни на телефоне, ни на планшете */
+    .tune label{ flex-direction:column; align-items:stretch; gap:1px; font-size:10px; }
+    .tune input[type=range]{ width:88px; }
+    #panel button{ padding:8px 9px; }
+  }
+
   /* ── ТЕЛЕФОН В ЛАНДШАФТЕ: панель уходит В КОЛОНКУ СБОКУ.
      Внизу она забирала высоту первой (247–282 px из 340–430) и полю оставалась треть
      экрана — «игровая область в верхней трети» — это буквальный замер, 24,9–37,2 %.
