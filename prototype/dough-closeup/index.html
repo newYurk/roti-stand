@@ -509,6 +509,16 @@ function step(dt){
     try{ localStorage.setItem("dough_step","2"); }catch(e){}
     syncStepButtons();
   }
+  // Шаг 2 → 3 так же автоматически и ТЕМ ЖЕ ЛИСТОМ. Раньше перехода не было вовсе:
+  // строка говорила «✓ готов · запятой на таву», а шаг оставался вторым, и нажатие
+  // «на таву» вручную ПЕРЕСОБИРАЛО лист — растянутый своими руками уходил в мусор,
+  // и на таву летел свежий. Это спорило с «как порвал, так и пожаришь»: дырки,
+  // заработанные при растяжке, до тавы не доезжали (замечание владельца 08.09.2026).
+  if(stepNo===2 && phase==="TABLE" && sheetRadius() >= targetR){
+    stepNo = 3; advancedAt = performance.now();
+    try{ localStorage.setItem("dough_step","3"); }catch(e){}
+    syncStepButtons();
+  }
   updateAction(dt);
   creep(dt);
   measureThickness();
@@ -1716,7 +1726,8 @@ function loop(now){
                      : "на таве · пятна цвета (жесты жарки — следующий этап, «заново» — новый кусочек)")
     : action.state==="CARRY" ? "в руке — веди запятую к таве"
     : action.state==="TOSS" ? "летит…"
-    : banner ? "✓ расплющено — шаг 2: возьми край и резко махни"
+    : banner ? (stepNo===3 ? "✓ растянуто — теперь круговым махом-«запятой» на таву"
+                           : "✓ расплющено — шаг 2: возьми край и резко махни")
     : stepNo===1 ? (action.state==="ARMED"
         ? `расплющиваешь · ${Math.round(sheetRadius()/step1R*100)}%`
         : `шаг 1 · прижми кусочек и расплющивай · ${Math.round(sheetRadius()/step1R*100)}%`)
