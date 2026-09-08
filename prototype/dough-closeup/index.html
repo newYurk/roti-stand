@@ -1421,7 +1421,7 @@ function draw(){
   }
 
   g.fillStyle = "#14100c"; g.fillRect(0,0,W,H);
-  if(condition!=="sound") drawTable(g, sx, sy, pixelated);
+  if(condition!=="sound") drawTable(g, sx, sy);
 
   if(condition!=="sound"){
     // ячейки решётки; порванные и просвеченные насквозь — дырки
@@ -1504,7 +1504,7 @@ function draw(){
 // Стол: рабочая зона · мостик начинок · тава.
 // Тава по F1 — กระทะโรตี, толстая сталь 18–20″ с ВОГНУТЫМ дном, удерживающим масло,
 // а не плоская «тава»: лужица жира собирается в центре, отсюда техника подгона масла к краям.
-function drawTable(g, sx, sy, px_){
+function drawTable(g, sx, sy){   // пикселизация делается низкоразрешающей канвой, отдельный флаг сюда не нужен
   const w = zone("work");
   const R_ = (x)=>x*sx, D_ = (y)=>y*sy;
 
@@ -1548,7 +1548,7 @@ function drawTable(g, sx, sy, px_){
 function shade(t){ const c = mix(t); return `rgb(${c[0]},${c[1]},${c[2]})`; }
 
 // ─────────────────────────── цикл
-let last=performance.now(), fps=60, acc=0, frames=0, worst=0;
+let last=performance.now(), fps=60, acc=0, frameCount=0, worst=0;   // не `frames`: совпадает с window.frames
 let loopErrs = 0;
 function loop(now){
   // Настоящее время кадра — для измерений; обрезанное — только для устойчивости симуляции.
@@ -1569,8 +1569,8 @@ function loop(now){
     if(loopErrs < 4) console.error("кадр упал:", err);
   }
 
-  acc+=real; frames++;
-  if(acc>0.5){ fps=frames/acc; acc=0; frames=0; }
+  acc+=real; frameCount++;
+  if(acc>0.5){ fps=frameCount/acc; acc=0; frameCount=0; }
   const liveEl = document.getElementById("live");
   const pct = Math.round(sheetRadius()/targetR*100);
   const ragged = tornAt ? " · рваный узор" : "";
@@ -1605,7 +1605,7 @@ function loop(now){
     `шаг ${stepNo}  ${action.state!=="RESTING"?"◆ "+action.state:"○ покой"}  ` +
     `${phase==="PAN" ? "тава · сушка "+md.toFixed(2)+" · цвет "+mc.toFixed(2) : "стол"}  мах: ${lastDecision}  ` +
     `лист ${pct}%${ready}${ragged}  жестов ${gestures.length}  ` +
-    `[касаний ${rawTouch} · до теста ↓${dbgDown} ↔${dbgMove} · ${dbgKind}${loopErrs?" · сбоев "+loopErrs:""}]  ` +
+    `[касаний ${rawTouch} · указателей ${rawPointer} · до теста ↓${dbgDown} ↔${dbgMove} · ${dbgKind}${loopErrs?" · сбоев "+loopErrs:""}]  ` +
     `${tornAt?"рваный":pressed?"нажато":"—"}  ` +
     `${fps.toFixed(0)} fps  худший кадр ${(worst*1000).toFixed(0)} мс  задержка ${latencies.length?median(latencies).toFixed(0):"—"} мс`;
   requestAnimationFrame(loop);
