@@ -1726,7 +1726,11 @@ function loop(now){
     (paused ? `\nпауз ${paused}` : "") +
     // Подмена физики обязана быть видна В КОЛОНКЕ: лист «прибор» во время замера закрыт,
     // а задетый бедром ползунок отравляет все последующие числа молча.
-    (tuneChanged() ? `\n⚙ ощущение своё` : "");
+    (tuneChanged() ? `\n⚙ ощущение своё` : "") +
+    // Что стенд решил про последний мах — «запятая 52° → тава» или «дуга 22° → шлепок».
+    // Жила эта строка только в полной статистике, то есть за закрытой дверью «прибора»,
+    // а именно она объясняет, почему лист не полетел. В колонке она нужнее всего.
+    (lastDecision ? `\n${lastDecision}` : "");
   const done = log.filter(l=>l.variant===variant&&l.condition===condition).length;
   const hit  = log.filter(l=>l.variant===variant&&l.condition===condition&&l.predicted).length;
   stats.textContent =
