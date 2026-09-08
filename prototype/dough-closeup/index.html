@@ -1411,9 +1411,21 @@ function syncStepButtons(){
   hintEl.textContent = HINTS[stepNo] || "";
 }
 document.querySelectorAll("[data-s]").forEach(b=>b.addEventListener("click", ()=>{
-  stepNo = +b.dataset.s;
+  const to = +b.dataset.s;
+  // Кнопка шага значила «дай новый кусочек на этом шаге» и пересобирала лист ВСЕГДА —
+  // даже когда её жали на уже горящем шаге. После автоперехода «на таву» загорается сама,
+  // привычка нажать осталась с тех пор, когда другого пути туда не было, — и растянутый
+  // лист с дырками улетал в мусор (замер 08.09: 25 % экрана перерисовывалось разом,
+  // tornAt 163472 → 0). Теперь пересборка только там, где она осмысленна: назад или
+  // вперёд на лист, который до этого шага ещё не дорос. Свежий кусочек даёт «заново».
+  const ready = to === 1 ? false
+              : to === 2 ? sheetRadius() >= step1R
+              :            sheetRadius() >= targetR;
+  const keep = to === stepNo || (to > stepNo && ready && phase === "TABLE");
+  stepNo = to;
   try{ localStorage.setItem("dough_step", String(stepNo)); }catch(e){}
-  syncStepButtons(); reset();
+  syncStepButtons();
+  if(!keep) reset();
 }));
 try{ const st0 = +(localStorage.getItem("dough_step")||1); if(st0===1||st0===2||st0===3) stepNo = st0; }catch(e){}
 syncStepButtons();
