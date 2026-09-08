@@ -529,6 +529,14 @@ function step(dt){
     try{ localStorage.setItem("dough_step","3"); }catch(e){}
     syncStepButtons();
   }
+  // Лист на таве — значит шаг третий, чем бы он туда ни попал. Владелец 08.09 закинула
+  // недотянутый лист на 85 %: перенос сработал (он размером не ограничен), а шаг остался
+  // вторым, и подсказка сверху продолжала звать шлёпать по листу, которого на столе уже нет.
+  if(stepNo < 3 && phase === "PAN"){
+    stepNo = 3;
+    try{ localStorage.setItem("dough_step","3"); }catch(e){}
+    syncStepButtons();
+  }
   updateAction(dt);
   creep(dt);
   measureThickness();
@@ -762,7 +770,13 @@ function endCarry(){
   const cosA = (dir.x*tpx + dir.y*tpy)/tl;
   const sweepDeg = Math.round(action.sweep*180/Math.PI);
   const transfer = phase==="TABLE" && Math.abs(action.sweep) >= COMMA_SWEEP && cosA >= Math.cos(COMMA_CONE);
-  if(transfer){ lastDecision = `запятая ${sweepDeg}° → тава`; startToss(hx, hy, dir, tl); return; }
+  if(transfer){
+    // Размер листа в самом решении: закинуть недотянутый лист МОЖНО (отказов почти не бывает),
+    // но тогда это должно читаться как выбор, а не как случайность.
+    const pctNow = Math.round(sheetRadius()/targetR*100);
+    lastDecision = `запятая ${sweepDeg}° → тава · лист ${pctNow}%`;
+    startToss(hx, hy, dir, tl); return;
+  }
   // Не к таве: это шлепок с дугой — лист опускается там, где его отпустили, и бьётся.
   lastDecision = `дуга ${sweepDeg}° → шлепок`;
   dropCarry();
