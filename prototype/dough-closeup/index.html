@@ -62,11 +62,23 @@
     pointer-events:none; z-index:3; }
   #blind span{ color:#5d5346; font-size:12px; }
   #blind.on{ display:flex; }
-  /* Подсказка про ориентацию перекрывала весь холст и съедала касания:
-     при вертикальном телефоне играть было нельзя вообще. Теперь она сквозная. */
-  #turn{ position:absolute; left:0; right:0; bottom:8px; display:none; justify-content:center;
-    color:var(--dim); text-align:center; padding:8px; z-index:5; pointer-events:none; }
-  @media (orientation:portrait){ #turn{ display:flex; } }
+  /* Портрет на телефоне закрыт намеренно (08.09.2026, замечание владельца + разбор).
+     Дело не в удобстве: в портрете не видно ни fps, ни худшего кадра, третий ползунок
+     уходит за край, а холст другого размера — 0,78 млн пикселей против 1,14 млн, и для
+     вида A логический буфер 80×101 против 80×43. Это ДРУГОЕ число, а не то же самое хуже,
+     и смешивать его с ландшафтным нельзя. Прежнее решение «в портрете можно хотя бы
+     играть» сохранено кнопкой: заглушка уходит по явному нажатию, а не сама. */
+  #turn{ position:absolute; inset:0; display:none; flex-direction:column; gap:12px;
+    align-items:center; justify-content:center; text-align:center; padding:24px;
+    background:rgba(15,12,9,.97); color:var(--ink); z-index:5;
+    font-size:clamp(15px,4.4vw,20px); }
+  #turn span{ color:var(--dim); font-size:12px; line-height:1.5; max-width:32ch; }
+  #turn button{ padding:10px 16px; font-size:13px; }
+  @media (orientation:portrait) and (max-width:600px){
+    #turn{ display:flex; } #panel{ display:none; }
+  }
+  body.turnok #turn{ display:none; }
+  body.turnok #panel{ display:flex; }
 
   /* ── ТЕЛЕФОН В ЛАНДШАФТЕ: панель уходит В КОЛОНКУ СБОКУ.
      Внизу она забирала высоту первой (247–282 px из 340–430) и полю оставалась треть
@@ -87,12 +99,16 @@
     /* Порядок панели-строки здесь не действует: в колонке свой — шаг, порвётся, прибор,
        телеметрия внизу. Без этого #toolsBtn и #mini (order по умолчанию 0) уезжали
        наверх, а «СЕЙЧАС ПОРВЁТСЯ» уходило под нижний край. */
-    #gStep{ order:1 } #tear{ order:2 } #gTune{ order:3 } #toolsBtn{ order:4 } #mini{ order:5 }
-    #gView{ order:1 } #gCond{ order:2 } #gSrv{ order:3 } #stats{ order:4 }
+    /* В колонке — только то, чем пользуются во время замера: шаг, вид A/B/C, предсказание.
+       Ползунки «ощущение» за весь замер не трогают ни разу, а занимали 134 px из 381 —
+       ровно ту высоту, которой не хватало кнопкам под палец. Они уехали в лист «прибор». */
+    #gStep{ order:1 } #gView{ order:2 } #tear{ order:3 } #toolsBtn{ order:4 } #mini{ order:5 }
+    #gCond{ order:1 } #gTune{ order:2 } #gSrv{ order:3 } #stats{ order:4 }
+    #tools .tune label{ width:100%; }
     #core .grp{ flex-direction:column; align-items:stretch; gap:3px; }
     #core .grp b{ margin:0; font-size:10px; }
-    #panel button{ font-size:10px; padding:4px 3px; white-space:normal; line-height:1.15; }
-    #tear{ padding:6px 3px; }
+    #panel button{ font-size:10px; padding:9px 3px; white-space:normal; line-height:1.15; }
+    #tear{ padding:14px 3px; font-size:11px; }
     #tear .kbd{ display:none; }          /* на телефоне пробела нет */
     #core .tune label{ flex-direction:column; align-items:stretch; gap:1px; }
     #core .tune input[type=range]{ width:100%; }
@@ -123,7 +139,10 @@
   <div id="live">прижми кусочек теста</div>
   <div id="flash"></div>
   <div id="blind">картинка выключена намеренно<br><span>это режим замера: тяни на слух</span></div>
-  <div id="turn">удобнее горизонтально</div>
+  <div id="turn">поверни телефон горизонтально
+    <span>вертикально не видно ни fps, ни худшего кадра, а поле здесь другого размера — эти числа с горизонтальными не сравнить</span>
+    <button id="turnOk">всё равно продолжить</button>
+  </div>
 </div>
 
 <div id="panel">
@@ -137,19 +156,19 @@
       <button data-s="3">3 · на таву</button>
     </div>
     <button id="tear">СЕЙЧАС ПОРВЁТСЯ<span class="kbd"> (space)</span></button>
-    <div class="grp tune" id="gTune"><b>ощущение</b>
-      <label>упругость<input id="sCom" type="range" min="0" max="100" value="30"></label>
-      <label>текучесть<input id="sCreep" type="range" min="0" max="100" value="30"></label>
-      <label>прочность<input id="sBreak" type="range" min="0" max="100" value="72"></label>
+    <div class="grp measure" id="gView"><b>замер: вид</b>
+      <button data-v="A" class="on">A · пиксель 80</button>
+      <button data-v="B">B · пиксель 224</button>
+      <button data-v="C">C · контроль</button>
     </div>
     <button id="toolsBtn">прибор ▸</button>
     <div id="mini"></div>
   </div>
   <div id="tools">
-    <div class="grp measure" id="gView"><b>замер: вид</b>
-      <button data-v="A" class="on">A · пиксель 80</button>
-      <button data-v="B">B · пиксель 224</button>
-      <button data-v="C">C · контроль</button>
+    <div class="grp tune" id="gTune"><b>ощущение</b>
+      <label>упругость<input id="sCom" type="range" min="0" max="100" value="30"></label>
+      <label>текучесть<input id="sCreep" type="range" min="0" max="100" value="30"></label>
+      <label>прочность<input id="sBreak" type="range" min="0" max="100" value="72"></label>
     </div>
     <div class="grp measure" id="gCond"><b>замер: по чему судишь</b>
       <button data-c="both" class="on">оба</button>
@@ -179,7 +198,7 @@
 // до 400%+ и лист «рвётся» в середине от любого движения. Замер это обнаружил сразу.
 // Число узлов сохранено (1 060 после обрезки по кругу; прежняя оценка «~1150» была на глаз,
 // пересчитано 07.09.2026), однородность рёбер восстановлена.
-const BUILD = "2026-08-25 · тава и запятая";
+const BUILD = "2026-09-08 · замер кадра";
 const GRID = 38;                   // 38x38, в круг попадает 1 060 узлов (посчитано, не оценка)
 let SUBSTEPS = 8;                  // T2: 8–10 подшагов, 1 итерация
 let DAMP = 0.986;
@@ -1296,6 +1315,7 @@ document.getElementById("tear").addEventListener("click", pressNow);
 document.getElementById("reset").addEventListener("click", reset);
 // «Прибор» — шесть из семи строк панели, которые нужны замеру, а не игре. В ландшафте
 // они уходят на лист поверх поля; лист не меняет размер #stage, поэтому лист теста цел.
+document.getElementById("turnOk").addEventListener("click", ()=>document.body.classList.add("turnok"));
 const toolsBtn = document.getElementById("toolsBtn");
 function setTools(on){
   document.body.classList.toggle("tools", on);
@@ -1350,17 +1370,19 @@ try{ const t = JSON.parse(localStorage.getItem("dough_tune")||"null");
 });
 applyTune();
 
-function reset(){ recorded=false; resize(true); }
+function reset(){ recorded=false; resetMeters(); resize(true); }
 
+// Вид и условие меняют только draw() и звук — лист от них не зависит. Пересборка теряла
+// растянутый лист (A и B мерились на разных листах) и вбрасывала свой всплеск в «худший».
 document.querySelectorAll("[data-v]").forEach(b=>b.addEventListener("click",()=>{
   variant=b.dataset.v;
   document.querySelectorAll("[data-v]").forEach(x=>x.classList.toggle("on",x===b));
-  reset();
+  resetMeters(); setTools(false);
 }));
 document.querySelectorAll("[data-c]").forEach(b=>b.addEventListener("click",()=>{
   condition=b.dataset.c;
   document.querySelectorAll("[data-c]").forEach(x=>x.classList.toggle("on",x===b));
-  reset();
+  resetMeters(); setTools(false);
 }));
 // Принудительное обновление: страница отдаётся с GitHub Pages и залипает в кеше,
 // поэтому правки иначе не доезжают до телефона. Та же схема, что в «Лягушке».
@@ -1589,8 +1611,11 @@ function drawTable(g, sx, sy){   // пикселизация делается н
 function shade(t){ const c = mix(t); return `rgb(${c[0]},${c[1]},${c[2]})`; }
 
 // ─────────────────────────── цикл
-let last=performance.now(), fps=60, acc=0, frameCount=0, worst=0;   // не `frames`: совпадает с window.frames
-let loopErrs = 0;
+// `fps=null` и `worst=0` означают «ещё не мерили», и печатаются прочерком: ноль в приборе
+// читается как «идеально», а «60 fps» до первого измерения — просто неправда (#89).
+let last=performance.now(), fps=null, acc=0, frameCount=0, worst=0, warmup=0;   // не `frames`: совпадает с window.frames
+function resetMeters(){ worst=0; fps=null; acc=0; frameCount=0; warmup=6; }
+let loopErrs = 0, paused = 0;
 function loop(now){
   // Настоящее время кадра — для измерений; обрезанное — только для устойчивости симуляции.
   // Раньше счётчик копил обрезанное dt и потому не умел показывать меньше 30 fps:
@@ -1598,7 +1623,13 @@ function loop(now){
   // просадкам, ради которых его и читают на телефоне. Найдено 07.09.2026.
   const real = (now-last)/1000;
   const dt = Math.min(0.033, real); last=now;
-  if(real > worst) worst = real;
+  // Первые кадры после пересборки и после возврата из фона — это сборка листа и пауза
+  // вкладки, а не рисование. И то и другое попадало в «худший» и оставалось там навсегда:
+  // до 08.09.2026 `worst` не обнуляло ничто, даже смена варианта. Значит A, B и C
+  // возвращали одно и то же число — худший кадр первой пересборки.
+  if(warmup > 0) warmup--;
+  else if(real < 1 && real > worst) worst = real;
+  else if(real >= 1) paused++;   // пауза вкладки не «просадка»: считаем отдельно, но не прячем
   try{
     step(dt);
     audioFrame();
@@ -1640,7 +1671,18 @@ function loop(now){
   document.getElementById("blind").classList.toggle("on", condition === "sound");
   // В ландшафте полная строка статистики уезжала за правый край (35–212 px) и не
   // прокручивалась: fps и задержку — те самые числа — на телефоне было не прочитать.
-  miniEl.textContent = `лист ${pct}%\n${fps.toFixed(0)} fps · худший ${(worst*1000).toFixed(0)} мс\n${latencies.length?median(latencies).toFixed(0):"—"} мс`;
+  // По одному числу на строку и с именем варианта рядом: колонка даёт 114 px, а прежняя
+  // строка «60 fps · худший 183 мс» требовала ~132 и обрезалась за краем экрана — «1180 мс»
+  // читалось как «118». Три числа за поездку не должны остаться тремя безымянными числами.
+  const condShort = condition==="both" ? "оба" : condition==="sound" ? "звук" : "картинка";
+  miniEl.textContent =
+    `вид ${variant} · ${condShort}\n` +
+    (condition==="sound" ? "кадр не мерим\n"
+       : `худший ${worst ? (worst*1000).toFixed(0)+" мс" : "—"}\n`) +
+    `fps ${fps===null ? "—" : fps.toFixed(0)}\n` +
+    (condition==="sight" ? "звук выключен"
+       : `звук ${latencies.length ? median(latencies).toFixed(0)+" мс" : "—"}`) +
+    (paused ? `\nпауз ${paused}` : "");
   const done = log.filter(l=>l.variant===variant&&l.condition===condition).length;
   const hit  = log.filter(l=>l.variant===variant&&l.condition===condition&&l.predicted).length;
   stats.textContent =
@@ -1652,7 +1694,8 @@ function loop(now){
     `[касаний ${rawTouch} · указателей ${rawPointer} · до теста ↓${dbgDown} ↔${dbgMove} · ${dbgKind}${loopErrs?" · сбоев "+loopErrs:""}]  ` +
     `${tornAt?"рваный":pressed?"нажато":"—"}  ` +
     `${tuneChanged()?`⚙ ощущение своё (${TUNE.com}/${TUNE.creep}/${TUNE.brk}, исходное ${TUNE_DEFAULT.com}/${TUNE_DEFAULT.creep}/${TUNE_DEFAULT.brk})  `:""}` +
-    `${fps.toFixed(0)} fps  худший кадр ${(worst*1000).toFixed(0)} мс  задержка ${latencies.length?median(latencies).toFixed(0):"—"} мс`;
+    `${fps===null?"—":fps.toFixed(0)} fps  худший кадр ${worst?(worst*1000).toFixed(0)+" мс":"—"}  ` +
+    `задержка ${latencies.length?median(latencies).toFixed(0)+" мс":"—"}${paused?"  пауз "+paused:""}`;
   requestAnimationFrame(loop);
 }
 
@@ -1672,6 +1715,8 @@ if(window.ResizeObserver) new ResizeObserver(()=>resize()).observe(stage);
 try{ const s=localStorage.getItem("dough_log"); if(s) log=JSON.parse(s); }catch(e){}
 try{ const s=localStorage.getItem("dough_gestures"); if(s) gestures=JSON.parse(s); }catch(e){}
 resize(true);
+// Возврат из фона: rAF там стоял, и первый кадр после возврата — это секунды, а не просадка.
+addEventListener("visibilitychange", ()=>{ if(!document.hidden){ last = performance.now(); resetMeters(); } });
 requestAnimationFrame(loop);
 </script>
 </body>
