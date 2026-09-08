@@ -408,6 +408,16 @@ function build(){
   const pz = zone("pan");
   PAN_R = Math.min(targetR*1.25, pz.w*0.49, pz.h*0.49);
   panC = { x: pz.cx - pz.w*0.03, y: pz.cy + pz.h*0.04 };
+  // Предел выше считался по ЗОНЕ, а рисуется тава с ободом и тенью в PAN_RIM раз шире
+  // радиуса, да ещё перспектива уводит её вправо множителем k. Правый край уходил за холст
+  // в обеих раскладках — 18 px в портрете, 34 px в ландшафте (замер 08.09.2026). Считаем
+  // предел по НАРИСОВАННОМУ краю: сдвигать влево нельзя, там лист, поэтому ужимаем.
+  const PAN_RIM = 1.16, panEdge = cv.width*0.012;
+  const kPan = 1 + ((panC.y - horizon())/cv.height) * PERSP;
+  const panRight = cv.width*0.5 + (panC.x - cv.width*0.5)*kPan + PAN_R*PAN_RIM;
+  if(panRight > cv.width - panEdge){
+    PAN_R = Math.max(8, PAN_R - (panRight - (cv.width - panEdge))/PAN_RIM);
+  }
   phase = "TABLE"; xf = null;
   cook = new Float32Array(N); dry = new Float32Array(N);
   // Контакт с плитой пятнистый, а не идеальный: под листом микрозазоры, складки, плёнка
