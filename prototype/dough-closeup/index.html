@@ -33,7 +33,11 @@
   button:hover{ border-color:var(--dim); }
   button.on{ background:var(--hot); color:#14100c; border-color:var(--hot); }
   #tear{ padding:8px 18px; font-weight:bold; }
-  #stats{ color:var(--dim); margin-left:auto; text-align:right; white-space:pre; }
+  /* `pre` не переносил строку вовсе, и правый конец уезжал за экран на любой ширине —
+     видно на скриншоте владельца 08.09.2026: обрезаны «сборка» и «худший кадр».
+     `min-width:0` обязателен: без него флекс-элемент не сжимается ниже содержимого. */
+  #stats{ color:var(--dim); margin-left:auto; text-align:right; white-space:pre-wrap;
+    min-width:0; overflow-wrap:anywhere; }
   /* #core и #tools — обёртки для ландшафта телефона. В остальных раскладках они
      display:contents, то есть в разметке не участвуют вовсе, а order возвращает
      группам исходный порядок панели: шаг · вид · судишь · порвётся · ощущение · служебные · статистика. */
@@ -111,14 +115,18 @@
       border-top:0; border-left:1px solid var(--line);
       padding:6px 6px calc(6px + env(safe-area-inset-bottom,0px)); }
     #core{ display:flex; flex:1; min-height:0; flex-direction:column;
-      align-items:stretch; gap:5px; }
+      align-items:stretch; gap:5px; overflow-y:auto; touch-action:pan-y; }
     /* Порядок панели-строки здесь не действует: в колонке свой — шаг, порвётся, прибор,
        телеметрия внизу. Без этого #toolsBtn и #mini (order по умолчанию 0) уезжали
        наверх, а «СЕЙЧАС ПОРВЁТСЯ» уходило под нижний край. */
     /* В колонке — только то, чем пользуются во время замера: шаг, вид A/B/C, предсказание.
        Ползунки «ощущение» за весь замер не трогают ни разу, а занимали 134 px из 381 —
        ровно ту высоту, которой не хватало кнопкам под палец. Они уехали в лист «прибор». */
-    #gStep{ order:1 } #gView{ order:2 } #tear{ order:3 } #toolsBtn{ order:4 } #mini{ order:5 }
+    /* `#mini` выше кнопки «прибор»: если колонка не влезает по высоте, срезается кнопка,
+       которой во время прогона не пользуются, а не числа, ради которых прогон идёт.
+       Проверка 08.09: панели нужно 379 px, а Safari в ландшафте отдаёт меньше 393 —
+       тулбар и home-indicator съедают разницу первыми. */
+    #gStep{ order:1 } #gView{ order:2 } #tear{ order:3 } #mini{ order:4 } #toolsBtn{ order:5 }
     #gCond{ order:1 } #gTune{ order:2 } #gSrv{ order:3 } #stats{ order:4 }
     #tools .tune label{ width:100%; }
     #core .grp{ flex-direction:column; align-items:stretch; gap:3px; }
@@ -129,8 +137,8 @@
     #core .tune label{ flex-direction:column; align-items:stretch; gap:1px; }
     #core .tune input[type=range]{ width:100%; }
     #toolsBtn{ display:block; }
-    #mini{ display:block; margin-top:auto; color:var(--dim); font-size:10px;
-      line-height:1.35; white-space:pre; }
+    #mini{ display:block; margin-top:auto; flex:none; color:var(--dim); font-size:11px;
+      line-height:1.35; white-space:pre-line; overflow-wrap:anywhere; }
     /* Прибор — отдельный лист ПОВЕРХ поля, а не рядом с ним: во-первых, в 112 px он
        не помещается; во-вторых, любое изменение размера #stage пересобирает лист,
        и открыть настройки стоило бы игроку теста. Колоночный перенос раскладывает
@@ -1642,7 +1650,12 @@ function shade(t){ const c = mix(t); return `rgb(${c[0]},${c[1]},${c[2]})`; }
 // `fps=null` и `worst=0` означают «ещё не мерили», и печатаются прочерком: ноль в приборе
 // читается как «идеально», а «60 fps» до первого измерения — просто неправда (#89).
 let last=performance.now(), fps=null, acc=0, frameCount=0, worst=0, warmup=0;   // не `frames`: совпадает с window.frames
-function resetMeters(){ worst=0; fps=null; acc=0; frameCount=0; warmup=6; }
+function resetMeters(){
+  worst=0; fps=null; acc=0; frameCount=0; warmup=6;
+  // `latencies` тоже: без этого «звук N мс» — бегущая медиана за всю сессию и по всем
+  // видам сразу, и как число вида A или B её читать нельзя (найдено проверкой 08.09).
+  latencies.length = 0;
+}
 let loopErrs = 0, paused = 0;
 function loop(now){
   // Настоящее время кадра — для измерений; обрезанное — только для устойчивости симуляции.
@@ -1710,7 +1723,10 @@ function loop(now){
     `fps ${fps===null ? "—" : fps.toFixed(0)}\n` +
     (condition==="sight" ? "звук выключен"
        : `звук ${latencies.length ? median(latencies).toFixed(0)+" мс" : "—"}`) +
-    (paused ? `\nпауз ${paused}` : "");
+    (paused ? `\nпауз ${paused}` : "") +
+    // Подмена физики обязана быть видна В КОЛОНКЕ: лист «прибор» во время замера закрыт,
+    // а задетый бедром ползунок отравляет все последующие числа молча.
+    (tuneChanged() ? `\n⚙ ощущение своё` : "");
   const done = log.filter(l=>l.variant===variant&&l.condition===condition).length;
   const hit  = log.filter(l=>l.variant===variant&&l.condition===condition&&l.predicted).length;
   stats.textContent =
