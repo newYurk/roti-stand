@@ -61,11 +61,6 @@
     color:var(--hot); font-size:clamp(18px,4vw,32px); letter-spacing:.08em;
     pointer-events:none; z-index:4; }
   #torn.on{ display:flex; }
-  #blind{ position:absolute; inset:0; display:none; flex-direction:column; gap:6px;
-    align-items:center; justify-content:center; color:var(--dim); text-align:center;
-    pointer-events:none; z-index:3; }
-  #blind span{ color:#5d5346; font-size:12px; }
-  #blind.on{ display:flex; }
   /* Портрет на телефоне закрыт намеренно (08.09.2026, замечание владельца + разбор).
      Дело не в удобстве: в портрете не видно ни fps, ни худшего кадра, третий ползунок
      уходит за край, а холст другого размера — 0,78 млн пикселей против 1,14 млн, и для
@@ -169,7 +164,6 @@
   <div id="hint">шаг 1: прижимай кусочек — расплющишь до пунктира · шаг 2: возьми край, миг подержи, резко махни — шлепок · шаг 3: возьми край и круговым махом-«запятой» перекинь на таву — полетит, повернётся, зашипит. Порвётся — останется рваный узор, так и пожарим</div>
   <div id="live">прижми кусочек теста</div>
   <div id="flash"></div>
-  <div id="blind">картинка выключена намеренно<br><span>это режим замера: тяни на слух</span></div>
   <div id="turn">поверни телефон горизонтально
     <span>вертикально не видно ни fps, ни худшего кадра, а поле здесь другого размера — эти числа с горизонтальными не сравнить</span>
     <button id="turnOk">всё равно продолжить</button>
@@ -203,7 +197,6 @@
     </div>
     <div class="grp measure" id="gCond"><b>судишь по</b>
       <button data-c="both" class="on">обоим</button>
-      <button data-c="sound">звуку</button>
       <button data-c="sight">картинке</button>
     </div>
     <div class="grp" id="gSrv">
@@ -1531,9 +1524,9 @@ function draw(){
   }
 
   g.fillStyle = "#14100c"; g.fillRect(0,0,W,H);
-  if(condition!=="sound") drawTable(g, sx, sy);
+  drawTable(g, sx, sy);
 
-  if(condition!=="sound"){
+  {   // режим «только звук», в котором поле не рисовалось вовсе, снят 08.09.2026
     // ячейки решётки; порванные и просвеченные насквозь — дырки
     // порванные ячейки: пометить их узлы, чтобы подсветить рваный край у соседей
     if(tornAt){
@@ -1721,17 +1714,15 @@ function loop(now){
   // Ответ на предсказание отличается цветом, иначе он теряется среди обычных подсказок.
   liveEl.style.color = verdictAge < 3500 ? (verdict.startsWith("угадала") ? "#8fbf6a" : "#f0c674")
                      : action.state!=="RESTING" ? "#8fbf6a" : "#d98b3a";
-  document.getElementById("blind").classList.toggle("on", condition === "sound");
   // В ландшафте полная строка статистики уезжала за правый край (35–212 px) и не
   // прокручивалась: fps и задержку — те самые числа — на телефоне было не прочитать.
   // По одному числу на строку и с именем варианта рядом: колонка даёт 114 px, а прежняя
   // строка «60 fps · худший 183 мс» требовала ~132 и обрезалась за краем экрана — «1180 мс»
   // читалось как «118». Три числа за поездку не должны остаться тремя безымянными числами.
-  const condShort = condition==="both" ? "оба" : condition==="sound" ? "звук" : "картинка";
+  const condShort = condition==="both" ? "оба" : "без звука";
   miniEl.textContent =
     `вид ${variant} · ${condShort}\n` +
-    (condition==="sound" ? "кадр не мерим\n"
-       : `худший ${worst ? (worst*1000).toFixed(0)+" мс" : "—"}\n`) +
+    `худший ${worst ? (worst*1000).toFixed(0)+" мс" : "—"}\n` +
     `fps ${fps===null ? "—" : fps.toFixed(0)}\n` +
     (condition==="sight" ? "звук выключен"
        : `звук ${latencies.length ? median(latencies).toFixed(0)+" мс" : "—"}`) +
