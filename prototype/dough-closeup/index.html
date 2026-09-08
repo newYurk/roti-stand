@@ -47,7 +47,12 @@
      а без неё непонятно, дошло ли касание вообще. */
   #live{ position:absolute; left:0; right:0; top:34px; text-align:center;
     pointer-events:none; font-size:clamp(14px,3.4vw,20px); color:var(--hot); }
-  #flash{ position:absolute; inset:0; pointer-events:none; opacity:0; background:#d98b3a; }
+  /* Вспышка на предсказание. Было 0,18 за 90 мс — на телефоне не видно вовсе
+     (замечание владельца 08.09.2026). Стало заметно и с затуханием, чтобы читалось
+     как ответ прибора, а не как рывок кадра. */
+  #flash{ position:absolute; inset:0; pointer-events:none; opacity:0; background:#d98b3a;
+    transition:opacity .28s ease-out; }
+  #tear.armed{ background:var(--hot); color:#14100c; border-color:var(--hot); }
   #torn{ position:absolute; inset:0; display:none; align-items:center; justify-content:center;
     color:var(--hot); font-size:clamp(18px,4vw,32px); letter-spacing:.08em;
     pointer-events:none; z-index:4; }
@@ -217,6 +222,8 @@ let edgeNodes = [];                          // граничные узлы — 
 // Разрыв — не провал и не перезапуск (решение владельца 22.08.2026): дырка остаётся
 // в листе рваным узором, симуляция не останавливается, тесто не переделывается.
 let tornAt = 0, lastSnap = 0, breakTime = 0, pressTime = 0, pressed = false;
+// Ответ прибора на предсказание: что показать крупной строкой и с какого момента.
+let verdict = "", verdictAt = 0;
 let tornNode = null;               // узлы порванных ячеек — для подсветки рваного края
 let conDeg = null;                 // сколько живых связей держит узел; 0 = осколок
 let runStart = 0, R0 = 1;
@@ -395,6 +402,8 @@ function build(){
 
   clearAction(); plasticT = 0;
   tornAt = 0; lastSnap = 0; pressed = false; breakTime = pressTime = 0;
+  verdict = ""; verdictAt = 0;
+  { const b = document.getElementById("tear"); if(b) b.classList.remove("armed"); }
   runStart = performance.now();
 }
 
@@ -1131,13 +1140,31 @@ function audioSlap(I){
 function onTear(){
   const nowT = performance.now();
   if(nowT - lastSnap > 150){ lastSnap = nowT; audioSnap(); }   // треск на каждую новую дырку, без пулемёта
-  if(!tornAt){ tornAt = nowT; breakTime = nowT; record(); }    // в журнал — только первый разрыв листа
+  if(!tornAt){
+    tornAt = nowT; breakTime = nowT; record();                 // в журнал — только первый разрыв листа
+    // Предсказание получает ответ по существу, а не только вспышку: за сколько секунд угадала.
+    // Порог 0,3 с — тот же, по которому пишется `predicted` в журнале, чтобы экран и лог совпадали.
+    const lead = pressed ? (nowT - pressTime)/1000 : null;
+    verdict = lead === null ? "порвался без предсказания — жми «сейчас порвётся», пока тянешь"
+            : lead >= 0.3   ? `угадала: нажала за ${lead.toFixed(1)} с до разрыва`
+                            : `почти: нажала за ${lead.toFixed(1)} с — засчитывается от 0,3 с`;
+    verdictAt = nowT;
+    const b = document.getElementById("tear"); if(b) b.classList.remove("armed");
+  }
 }
 function pressNow(){
   if(pressed) return;
   pressed = true; pressTime = performance.now();
-  flash.style.opacity = "0.18";
-  setTimeout(()=>flash.style.opacity="0", 90);
+  // Вспышка заметная: 0,5 сразу, затем затухание по CSS-переходу. Она рисуется поверх
+  // холста слоем композитора — на замере худшего кадра нажатие может стоить кадра,
+  // поэтому во время прогона fps лучше не жать.
+  flash.style.opacity = "0.5";
+  setTimeout(()=>flash.style.opacity = "0", 150);
+  const b = document.getElementById("tear");
+  if(b && !tornAt) b.classList.add("armed");
+  verdict = tornAt ? "лист уже порван — предсказывать нечего, жми «заново»"
+                   : "предсказание записано · жду разрыва";
+  verdictAt = performance.now();
 }
 let recorded = false;
 function record(){
@@ -1591,7 +1618,8 @@ function loop(now){
   const ready = sheetRadius()>=targetR ? " ✓ готов · запятой на таву →" : "";
   const banner = advancedAt && performance.now()-advancedAt < 2600;
   const mc = meanCook(), md = meanDry();
-  liveEl.textContent =
+  const verdictAge = verdictAt ? performance.now() - verdictAt : Infinity;
+  liveEl.textContent = verdictAge < 3500 ? verdict :
     phase==="PAN" ? (md < 0.35 ? "на таве · шипит — слушай, цвета ещё нет"
                      : md < 0.9 ? "на таве · подсыхает, звук уходит выше"
                      : mc < 0.12 ? "на таве · суше и звонче — вот-вот пойдут пятна"
@@ -1606,7 +1634,9 @@ function loop(now){
     : (action.state==="LIFTING"||action.state==="FLYING") ? "бросок…"
     : (action.state==="IMPACT"||action.state==="SETTLING") ? `ШЛЕП · лист ${pct}%${ready}${ragged}`
     : `коснись края · лист ${pct}%${ready}${ragged}`;
-  liveEl.style.color = action.state!=="RESTING" ? "#8fbf6a" : "#d98b3a";
+  // Ответ на предсказание отличается цветом, иначе он теряется среди обычных подсказок.
+  liveEl.style.color = verdictAge < 3500 ? (verdict.startsWith("угадала") ? "#8fbf6a" : "#f0c674")
+                     : action.state!=="RESTING" ? "#8fbf6a" : "#d98b3a";
   document.getElementById("blind").classList.toggle("on", condition === "sound");
   // В ландшафте полная строка статистики уезжала за правый край (35–212 px) и не
   // прокручивалась: fps и задержку — те самые числа — на телефоне было не прочитать.
