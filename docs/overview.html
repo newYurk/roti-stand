@@ -190,7 +190,8 @@
   в тонкую золотистую вещь руками.</p>
   <div class="hero-meta">
     <a class="chip hot" href="https://newyurk.github.io/roti-stand/prototype/dough-closeup/">▶ живой стенд теста</a>
-    <span class="chip ok">развилки закрыты · мета-слой принят 25.08 · арт ждёт замеров</span>
+    <span class="chip ok">направление выбрано 07.09: веб · ворота A закрыты</span>
+    <span class="chip">доска: 64 открытых, срок стека — 15.09</span>
     <span class="chip">ревью: 175 находок</span>
     <span class="chip">отпуск-спринт: 3–25 октября</span>
   </div>
@@ -273,14 +274,18 @@
   <div class="sec-label">01 · Что это</div>
   <h2>Одна тележка, одна тава, один прекрасный глагол</h2>
   <p class="lead">Остров, деревня, тележка. Утром — остатки и тесто; днём — карта из семи точек,
-  где дорога и разговор стоят минут; за прилавком — расплющить кусочек, растянуть лист шлепками,
+  и день ограничивают не минуты, а тесто; за прилавком — расплющить кусочек, растянуть лист шлепками,
   на таву, начинка, конверт, перевернуть и дожарить на слух, резка, полив сгущёнкой. Гость платит
   не деньгами, а тем, что может дать. Скрытая география для нас — <b>Ко Чанг</b>; для игрока —
   просто узнаваемый островной Таиланд.</p>
   <h3>Несущие принципы (из корпуса, подтверждены ревью)</h3>
   <ul class="tight">
     <li><b>Звук — это HUD.</b> Готовность блюда слышно: шипение, пузыри, «суше и звонче». Ревью
-      измерило: из 18 позиций тактильного контракта арт-стиль влияет на 2 — тактильность живёт в звуке.</li>
+      насчитало: из 18 позиций тактильного контракта арт-стиль влияет на 2 — но вывод «тактильность
+      держится на звуке» остаётся <b>ожиданием</b>: проверить его стендом больше нечем. 08.09.2026
+      владелец ⚑ сняла режим «только на слух», и замер #14 теперь отвечает на другой вопрос —
+      достаточно ли картинки без звука, к которой ещё добавятся визуальные отклики. Сам принцип
+      «готовность ведёт звук, а не индикатор» в силе: снята проверка, а не принцип.</li>
     <li><b>Дырка — не наказание.</b> Порвал — жаришь с рваным узором. Ни перезапуска, ни штрафа.</li>
     <li><b>Без чисел в интерфейсе.</b> Тесто «капризное» или «покладистое» — рукой, не шкалой.</li>
     <li><b>Культурная добросовестность.</b> Реальные блюда отделены от авторских; корни роти —
@@ -290,11 +295,14 @@
       Игрок должен ловить себя на «ого, так можно?!» — и всё это прописано системно, потому
       что тесто у нас симуляция, а не анимация.</li>
   </ul>
-  <h3>Мета-слой — из дизайн-ядра владельца (25.08)</h3>
+  <h3>Мета-слой — из дизайн-ядра владельца (25.08, часть снята 07.09)</h3>
   <ul class="tight">
-    <li><b>Время — единственная валюта.</b> Ни монет, ни ценников, ни кошелька: дорога между
-      точками, жарка и разговор стоят минут; нельзя быть у школы утром и на рынке днём. Давление —
-      упущенная встреча, а не потеря еды.</li>
+    <li><b>Тесто — единственный предел дня.</b> Ни монет, ни ценников, ни кошелька — и бюджета
+      игровых минут тоже нет (⚑ 07.09.2026): сколько шариков заготовили, столько роти и сделали.
+      Тесто восполняется реальным временем: кончилось — следующее готово через столько-то, ориентир
+      владельца — следующие реальные сутки, и ускорить это за деньги нельзя. Давление — упущенная
+      встреча, а не потеря еды; «нельзя быть у школы утром и на рынке днём» остаётся в силе, но чем
+      теперь исключена одновременность точек и по каким часам идёт отсчёт — открыто (#67).</li>
     <li><b>Еда вместо денег.</b> Мельник платит мукой, рыбак — рыбой, дети — слухами и рисунками,
       монах — благословением; обменная лавка меняет излишки на сахар, масло, сгущёнку.</li>
     <li><b>Обещания вместо квестов.</b> «Мельнику — 2 роти до пятницы». Невыполненное не блокирует —
@@ -321,12 +329,16 @@
   <div class="sec-label">02 · Что уже решено</div>
   <h2>Решения владельца — в стенде и в дизайн-доке</h2>
   <div class="cards">
-    <div class="card"><span class="tag hot">принято 25.08 · в доке</span>
-      <h4>Дизайн-ядро мета-слоя: тележка, день, время</h4>
-      <p>Не вечерняя точка, а тележка и карта деревни; день от утра дома до закрытия; время —
-      единственная валюта; обмен едой, обещания, каталог, тележка-музей. Впитано в дизайн-док v2
-      целиком; исходник — <span class="path">docs/archive/design-core-roti-cart.md</span>. Сверка
-      с прежними решениями — семь пунктов ⚑ в журнале, главный: v0 «одно роти» не меняется.</p></div>
+    <div class="card"><span class="tag hot">принято 25.08, часть снята 07.09 · в доке</span>
+      <h4>Дизайн-ядро мета-слоя: тележка, день, тесто</h4>
+      <p>Не вечерняя точка, а тележка и карта деревни; день от утра дома до закрытия; обмен едой,
+      обещания, каталог, тележка-музей. <b>Время как валюта снято</b> (⚑ 07.09.2026): бюджета
+      игровых минут нет — ни поездка, ни жарка, ни разговор минут дня не тратят. Предел дня —
+      тесто: сколько шариков заготовили, столько роти и сделали, а восполняется оно реальным
+      временем. Чем оплачивается переход и чем исключена одновременность точек — открыто (#67).
+      Впитано в дизайн-док v2 целиком; исходник —
+      <span class="path">docs/archive/design-core-roti-cart.md</span>. Сверка с прежними решениями —
+      семь пунктов ⚑ в журнале, главный: v0 «одно роти» не меняется.</p></div>
     <div class="card"><span class="tag ok">реализовано</span>
       <h4>Разрыв — узор, не провал</h4>
       <p>Переделать тесто нельзя: «как сделал, так и пожаришь. Так сопли, так сопли».
@@ -340,7 +352,12 @@
     <div class="card"><span class="tag ok">живой тест 25.08</span>
       <h4>Шлепок принят живой рукой</h4>
       <p>«Тест ручной OK»: единица ввода — поднять и шлёпнуть, непрерывная тяга не возвращается.
-      Дальше — только калибровки на живом iPhone: пороги маха, прочность разрыва, задержка звука.</p></div>
+      Дальше — калибровки на живом iPhone: пороги маха (#1), прочность разрыва (#42), задержка
+      жест→звук. Две поправки к списку от 08.09.2026: раскладка стенда переделана под ориентацию
+      экрана, рабочая зона в альбоме сузилась с 58 % до 50 % ширины и пороги маха стали примерно
+      на 8 % легче; у прочности разрыва снято физическое обоснование — константа переименована в
+      <code>TEAR_RATE_BIAS</code> и объявлена игровой условностью (величина 0,30 и формула не
+      тронуты), её калибруют рукой, а не физикой теста.</p></div>
   </div>
 </section>
 
@@ -386,8 +403,11 @@
 <section id="proto">
   <div class="sec-label">04 · Прототип · живой</div>
   <h2>Стенд шагов 1–3: от кусочка до тавы</h2>
-  <p><a class="chip hot" href="https://newyurk.github.io/roti-stand/prototype/dough-closeup/">▶ newyurk.github.io/roti-dough-proto</a>
-  <span class="dim"> · телефон, горизонтально; сборка пишется в правом нижнем углу</span></p>
+  <p><a class="chip hot" href="https://newyurk.github.io/roti-stand/prototype/dough-closeup/">▶ newyurk.github.io/roti-stand/prototype/dough-closeup</a>
+  <span class="dim"> · телефон, в любой ориентации: в альбоме тесто слева и тава справа,
+  в портрете тесто внизу и тава вверху, лист закидывается снизу вверх. Сборка и вся телеметрия —
+  в панели; на телефоне в ландшафте панель стоит колонкой справа, а полные числа открываются
+  кнопкой «прибор».</span></p>
   <p>Каждый шаг этой цепочки — опровержение, добытое замером или живой рукой, и в этом главная
   ценность стенда: он <b>убивает красивые неверные идеи дёшево</b>.</p>
   <div class="tl">
@@ -404,14 +424,29 @@
     <div class="ev"><div class="when">в стенде</div>
       <h4>«Поднять и шлёпнуть» + расплющивание</h4>
       <p>Шаг 1: прижал — кусочек расползается. Шаг 2: взял край, миг подержал (хват шире),
-      резкий мах — бросок, ШЛЕП, лист шире. Слабый / средний / сильный мах: +6 / +11 / +21 %
-      диаметра. До мишени — ~8 хороших шлепков. Сильный шлепок по тонкому листу пробивает
-      рваную дырку — навсегда.</p></div>
+      резкий мах — бросок, ШЛЕП, лист шире. Слабый / средний / сильный мах: +6 / +11 / +21 % диаметра
+      (синтетический прогон на десктопе; сами пороги скорости, попадающие в каждую категорию,
+      с тех пор сдвигались дважды — поле выросло втрое 27.08 и пороги стали примерно на 8 % легче
+      08.09; живой калибровки не было — <a href="https://github.com/newYurk/roti-stand/issues/1">#1</a>). До мишени — ~8 хороших шлепков. Сильный шлепок по тонкому листу пробивает
+      рваную дырку — навсегда; правило есть в коде (сила ≥ 2,9 из 3,5 по листу тоньше 0,20),
+      но в шлепковом режиме оно пока почти недостижимо: потолок растяжимости 125 % останавливает
+      лист на minThickness ≈ 0,26. Прочность перекалибруют после живого теста
+      (<a href="https://github.com/newYurk/roti-stand/issues/1">#1</a>).</p></div>
     <div class="ev"><div class="when">в стенде · 25.08 вечер</div>
       <h4>Тава и перенос-«запятая» (шаг 3)</h4>
-      <p>Тава с вогнутым дном вернулась направо. Перенос — не новый жест, а продолжение того же:
+      <p>Тава с вогнутым дном стоит по длинной стороне кадра: в альбоме справа от теста, в портрете —
+      сверху, и лист закидывается снизу вверх (⚑ 08.09). Тава теперь считается по свободному месту
+      в кадре и шире роти — в 1,26 раза в портрете и в 1,16 в альбоме; до 08.09 отношение
+      тава/роти держалось 0,76 на любом экране, и роти был шире тавы, на которую садился.
+      Перенос — не новый жест, а продолжение того же:
       прямой мах — шлепок, а мах <b>дугой-«запятой»</b> подхватывает лист, хвост дуги бросает его
-      к таве — летит с поворотом, садится, шипит. Жарка пока заглушка: цвет темнеет, шипение
+      к таве — летит с поворотом, садится, шипит. Честная оговорка: гейт «дуга или прямой мах»
+      сейчас решается частотой событий, а не рукой — один и тот же путь доходит до тавы пять раз
+      из восьми, потому что порог 15° приходится ровно на разрыв между пятой и шестой выборкой
+      в окне 80 мс (<a href="https://github.com/newYurk/roti-stand/issues/91">#91</a>, открыт 08.09;
+      чинить — только вместе с живой калибровкой
+      <a href="https://github.com/newYurk/roti-stand/issues/1">#1</a>).
+      Жарка пока заглушка: цвет темнеет, шипение
       глохнет и звенит выше — «суше и звонче».</p></div>
     <div class="ev"><div class="when">сейчас в стенде · 26.08</div>
       <h4>Сначала сушка, потом пятна цвета</h4>
@@ -421,13 +456,30 @@
       цвет — «суше и звонче» слышно раньше, чем видно золото. Ровно тот случай, ради которого звук
       назначен HUD-ом. Разбор — <span class="path">docs/frying-mechanics.md</span>.</p></div>
   </div>
-  <div class="flow" aria-label="Машина состояний жеста">
+
+  <h3>Что именно считается закидыванием на таву</h3>
+  <figure class="scene" aria-label="Схема жеста «запятая»: путь пальца от кромки листа дугой к таве, с порогами и состояниями стенда">
+  <svg viewBox="0 0 880 408" role="img"><rect width="880" height="408" fill="#100c09"/><clipPath id="gcScr"><rect x="14" y="14" width="524.0" height="284.4" rx="8"/></clipPath><radialGradient id="gcDough" cx="38%" cy="30%" r="78%"><stop offset="0" stop-color="#ecdbba"/><stop offset="0.62" stop-color="#d5c29a"/><stop offset="1" stop-color="#a89676"/></radialGradient><g clip-path="url(#gcScr)"><rect x="14" y="14" width="524.0" height="284.4" fill="#14100c"/><rect x="14" y="14.0" width="524.0" height="39.8" fill="#2b2016"/><rect x="14" y="53.8" width="524.0" height="0.8" fill="#1d150e"/><rect x="14" y="54.6" width="524.0" height="39.8" fill="#31251a"/><rect x="14" y="94.5" width="524.0" height="0.8" fill="#1d150e"/><rect x="14" y="95.3" width="524.0" height="39.8" fill="#2b2016"/><rect x="14" y="135.1" width="524.0" height="0.8" fill="#1d150e"/><rect x="14" y="135.9" width="524.0" height="39.8" fill="#31251a"/><rect x="14" y="175.7" width="524.0" height="0.8" fill="#1d150e"/><rect x="14" y="176.5" width="524.0" height="39.8" fill="#2b2016"/><rect x="14" y="216.4" width="524.0" height="0.8" fill="#1d150e"/><rect x="14" y="217.2" width="524.0" height="39.8" fill="#31251a"/><rect x="14" y="257.0" width="524.0" height="0.8" fill="#1d150e"/><rect x="14" y="257.8" width="524.0" height="39.8" fill="#2b2016"/><rect x="14" y="297.6" width="524.0" height="0.8" fill="#1d150e"/><ellipse cx="396.3" cy="160.4" rx="146.1" ry="81.8" fill="#0e0a07"/><ellipse cx="396.3" cy="156.2" rx="136.0" ry="76.1" fill="#2a2622"/><ellipse cx="396.3" cy="156.2" rx="125.9" ry="70.5" fill="#3a342d"/><ellipse cx="396.3" cy="156.2" rx="103.2" ry="57.8" fill="#433c33"/><ellipse cx="396.3" cy="156.2" rx="78.1" ry="43.7" fill="#4b4338"/><ellipse cx="396.3" cy="156.2" rx="52.9" ry="29.6" fill="#544a3c"/><ellipse cx="396.3" cy="156.2" rx="37.8" ry="21.2" fill="#6b5a2a"/><ellipse cx="396.3" cy="154.8" rx="20.1" ry="11.3" fill="#8a7436"/><ellipse cx="140.9" cy="156.2" rx="104.8" ry="58.7" fill="none" stroke="#4a3a24" stroke-width="1" stroke-dasharray="5 4"/><ellipse cx="140.9" cy="156.2" rx="104.9" ry="56.9" fill="url(#gcDough)"/><ellipse cx="238.5" cy="104.3" rx="104.9" ry="56.9" fill="#ecdbba" fill-opacity="0.10" stroke="#ecdbba" stroke-width="1.2" stroke-dasharray="6 5" opacity="0.85"/><ellipse cx="396.3" cy="156.2" rx="104.9" ry="56.9" fill="url(#gcDough)" opacity="0.45"/><path d="M 238.5 104.3 L 382.1 54.8 L 391.3 64.3 L 399.1 74.2 L 405.3 84.5 L 409.9 95.1 L 412.7 105.7 L 413.6 116.3 L 412.4 126.7 L 409.2 137.0 L 403.8 146.8 L 396.3 156.2 L 386.8 165.0 L 375.2 173.2 L 361.6 180.6 L 346.4 187.2 L 329.5 192.9 L 311.3 197.6 L 292.0 201.2 L 271.9 203.8 L 251.3 205.4 L 230.4 205.8 Z" fill="#c9a227" opacity="0.14"/><line x1="238.5" y1="104.3" x2="402.7" y2="99.8" stroke="#c9a227" stroke-width="1.8"/><g transform="translate(402.7 99.8) rotate(-1.6)"><path d="M -5 -4 L 6 0 L -5 4 Z" fill="#c9a227"/></g><path d="M 32.8 156.2 L 33.2 149.8 L 34.3 143.4 L 36.1 137.1 L 38.7 130.9 L 41.9 124.9 L 45.9 119.1 L 50.5 113.5 L 55.7 108.3 L 61.5 103.4 L 67.9 98.8 L 74.7 94.7 L 82.0 90.9 L 89.7 87.7 L 97.8 84.8 L 106.1 82.5 L 114.7 80.7 L 123.5 79.4 L 132.4 78.6 L 141.4 78.4 L 150.3 78.7" fill="none" stroke="#000" stroke-width="5.5" opacity="0.5" stroke-linecap="round"/><path d="M 32.8 156.2 L 33.2 149.8 L 34.3 143.4" fill="none" stroke="#6d6154" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M 34.3 143.4 L 36.1 137.1 L 38.7 130.9 L 41.9 124.9 L 45.9 119.1 L 50.5 113.5" fill="none" stroke="#c9a227" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M 50.5 113.5 L 55.7 108.3 L 61.5 103.4 L 67.9 98.8 L 74.7 94.7 L 82.0 90.9 L 89.7 87.7 L 97.8 84.8 L 106.1 82.5 L 114.7 80.7 L 123.5 79.4 L 132.4 78.6 L 141.4 78.4 L 150.3 78.7" fill="none" stroke="#fff0d0" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/><ellipse cx="32.8" cy="156.2" rx="10.0" ry="5.6" fill="#d98b3a"/><rect x="44.2" y="182.8" width="2.4" height="2" fill="#d98b3a"/><rect x="38.8" y="176.3" width="2.4" height="2" fill="#d98b3a"/><rect x="34.8" y="169.4" width="2.4" height="2" fill="#d98b3a"/><rect x="32.4" y="162.4" width="2.4" height="2" fill="#d98b3a"/><rect x="31.6" y="155.2" width="2.4" height="2" fill="#d98b3a"/><rect x="32.4" y="148.1" width="2.4" height="2" fill="#d98b3a"/><rect x="34.8" y="141.0" width="2.4" height="2" fill="#d98b3a"/><rect x="38.8" y="134.2" width="2.4" height="2" fill="#d98b3a"/><rect x="44.2" y="127.7" width="2.4" height="2" fill="#d98b3a"/><circle cx="32.8" cy="156.2" r="9" fill="#fff0d0" stroke="#100c09" stroke-width="1.5"/><text x="32.8" y="159.5" font-family="-apple-system, BlinkMacSystemFont, 'Helvetica Neue', Arial, sans-serif" font-size="10.0" fill="#100c09" font-weight="700" text-anchor="middle">1</text><circle cx="45.9" cy="119.1" r="9" fill="#fff0d0" stroke="#100c09" stroke-width="1.5"/><text x="45.9" y="122.4" font-family="-apple-system, BlinkMacSystemFont, 'Helvetica Neue', Arial, sans-serif" font-size="10.0" fill="#100c09" font-weight="700" text-anchor="middle">2</text><circle cx="238.5" cy="104.3" r="9" fill="#fff0d0" stroke="#100c09" stroke-width="1.5"/><text x="238.5" y="107.6" font-family="-apple-system, BlinkMacSystemFont, 'Helvetica Neue', Arial, sans-serif" font-size="10.0" fill="#100c09" font-weight="700" text-anchor="middle">3</text><circle cx="396.3" cy="156.2" r="9" fill="#c9a227" stroke="#100c09" stroke-width="1.5"/><text x="396.3" y="159.5" font-family="-apple-system, BlinkMacSystemFont, 'Helvetica Neue', Arial, sans-serif" font-size="10.0" fill="#100c09" font-weight="700" text-anchor="middle">4</text></g><rect x="14" y="14" width="524.0" height="284.4" rx="8" fill="none" stroke="#3a3025"/><text x="556.0" y="26.0" font-family="-apple-system, BlinkMacSystemFont, 'Helvetica Neue', Arial, sans-serif" font-size="9.5" fill="#c9a227" font-weight="700" text-anchor="start" letter-spacing="1.8">ЧТО ДЕЛАЕТ ПАЛЕЦ</text><circle cx="564" cy="44.5" r="8" fill="none" stroke="#c9a227" stroke-width="1.2"/><text x="564.0" y="48.0" font-family="-apple-system, BlinkMacSystemFont, 'Helvetica Neue', Arial, sans-serif" font-size="9.5" fill="#c9a227" font-weight="700" text-anchor="middle">1</text><text x="580.0" y="48.0" font-family="-apple-system, BlinkMacSystemFont, 'Helvetica Neue', Arial, sans-serif" font-size="11.5" fill="#e9dcc6" font-weight="600" text-anchor="start">Взять за кромку и придержать</text><text x="580.0" y="63.0" font-family="-apple-system, BlinkMacSystemFont, 'Helvetica Neue', Arial, sans-serif" font-size="10.3" fill="#9a8b76" font-weight="400" text-anchor="start">палец на КРАЙ листа, не на середину,</text><text x="580.0" y="76.0" font-family="-apple-system, BlinkMacSystemFont, 'Helvetica Neue', Arial, sans-serif" font-size="10.3" fill="#9a8b76" font-weight="400" text-anchor="start">и стоит не меньше 80 мс</text><circle cx="564" cy="96.5" r="8" fill="none" stroke="#c9a227" stroke-width="1.2"/><text x="564.0" y="100.0" font-family="-apple-system, BlinkMacSystemFont, 'Helvetica Neue', Arial, sans-serif" font-size="9.5" fill="#c9a227" font-weight="700" text-anchor="middle">2</text><text x="580.0" y="100.0" font-family="-apple-system, BlinkMacSystemFont, 'Helvetica Neue', Arial, sans-serif" font-size="11.5" fill="#e9dcc6" font-weight="600" text-anchor="start">Повести дугой, а не прямо</text><text x="580.0" y="115.0" font-family="-apple-system, BlinkMacSystemFont, 'Helvetica Neue', Arial, sans-serif" font-size="10.3" fill="#9a8b76" font-weight="400" text-anchor="start">за окно в 80 мс набрать 15° поворота —</text><text x="580.0" y="128.0" font-family="-apple-system, BlinkMacSystemFont, 'Helvetica Neue', Arial, sans-serif" font-size="10.3" fill="#9a8b76" font-weight="400" text-anchor="start">иначе это прямой мах и просто шлепок</text><circle cx="564" cy="148.5" r="8" fill="none" stroke="#c9a227" stroke-width="1.2"/><text x="564.0" y="152.0" font-family="-apple-system, BlinkMacSystemFont, 'Helvetica Neue', Arial, sans-serif" font-size="9.5" fill="#c9a227" font-weight="700" text-anchor="middle">3</text><text x="580.0" y="152.0" font-family="-apple-system, BlinkMacSystemFont, 'Helvetica Neue', Arial, sans-serif" font-size="11.5" fill="#e9dcc6" font-weight="600" text-anchor="start">Отпустить, глядя на таву</text><text x="580.0" y="167.0" font-family="-apple-system, BlinkMacSystemFont, 'Helvetica Neue', Arial, sans-serif" font-size="10.3" fill="#9a8b76" font-weight="400" text-anchor="start">накоплено ≥ 40° И хвост дуги смотрит</text><text x="580.0" y="180.0" font-family="-apple-system, BlinkMacSystemFont, 'Helvetica Neue', Arial, sans-serif" font-size="10.3" fill="#9a8b76" font-weight="400" text-anchor="start">на таву в конусе 60°; меряют от листа</text><text x="580.0" y="193.0" font-family="-apple-system, BlinkMacSystemFont, 'Helvetica Neue', Arial, sans-serif" font-size="10.3" fill="#9a8b76" font-weight="400" text-anchor="start">в руке, а не от пальца</text><circle cx="564" cy="213.5" r="8" fill="none" stroke="#c9a227" stroke-width="1.2"/><text x="564.0" y="217.0" font-family="-apple-system, BlinkMacSystemFont, 'Helvetica Neue', Arial, sans-serif" font-size="9.5" fill="#c9a227" font-weight="700" text-anchor="middle">4</text><text x="580.0" y="217.0" font-family="-apple-system, BlinkMacSystemFont, 'Helvetica Neue', Arial, sans-serif" font-size="11.5" fill="#e9dcc6" font-weight="600" text-anchor="start">Дальше лист сам</text><text x="580.0" y="232.0" font-family="-apple-system, BlinkMacSystemFont, 'Helvetica Neue', Arial, sans-serif" font-size="10.3" fill="#9a8b76" font-weight="400" text-anchor="start">полёт 340–500 мс, промах обрезан</text><text x="580.0" y="245.0" font-family="-apple-system, BlinkMacSystemFont, 'Helvetica Neue', Arial, sans-serif" font-size="10.3" fill="#9a8b76" font-weight="400" text-anchor="start">до 30 % радиуса тавы</text><text x="556.0" y="277.0" font-family="-apple-system, BlinkMacSystemFont, 'Helvetica Neue', Arial, sans-serif" font-size="9.5" fill="#c9a227" font-weight="700" text-anchor="start" letter-spacing="1.8">ЦВЕТ ПУТИ — СОСТОЯНИЕ СТЕНДА</text><rect x="556" y="293.0" width="16" height="3" rx="1.5" fill="#6d6154"/><text x="580.0" y="296.0" font-family="-apple-system, BlinkMacSystemFont, 'Helvetica Neue', Arial, sans-serif" font-size="10.3" fill="#9a8b76" font-weight="400" text-anchor="start">ARMED — держит кромку</text><rect x="556" y="308.0" width="16" height="3" rx="1.5" fill="#c9a227"/><text x="580.0" y="311.0" font-family="-apple-system, BlinkMacSystemFont, 'Helvetica Neue', Arial, sans-serif" font-size="10.3" fill="#9a8b76" font-weight="400" text-anchor="start">LIFTING — окно 80 мс</text><rect x="556" y="323.0" width="16" height="3" rx="1.5" fill="#fff0d0"/><text x="580.0" y="326.0" font-family="-apple-system, BlinkMacSystemFont, 'Helvetica Neue', Arial, sans-serif" font-size="10.3" fill="#9a8b76" font-weight="400" text-anchor="start">CARRY — лист в руке</text><text x="14.0" y="346.0" font-family="-apple-system, BlinkMacSystemFont, 'Helvetica Neue', Arial, sans-serif" font-size="9.5" fill="#c9a227" font-weight="700" text-anchor="start" letter-spacing="1.8">ПЯТЬ ПУТЕЙ ЧЕРЕЗ ЖИВОЙ СТЕНД</text><rect x="14.0" y="356.0" width="106.0" height="22" rx="11" fill="#8fb26a" opacity="0.16"/><text x="28.0" y="371.0" font-family="-apple-system, BlinkMacSystemFont, 'Helvetica Neue', Arial, sans-serif" font-size="11.0" fill="#8fb26a" font-weight="700" text-anchor="middle">✓</text><text x="38.0" y="371.0" font-family="-apple-system, BlinkMacSystemFont, 'Helvetica Neue', Arial, sans-serif" font-size="10.5" fill="#e9dcc6" font-weight="400" text-anchor="start">через верх</text><rect x="128.0" y="356.0" width="98.8" height="22" rx="11" fill="#8fb26a" opacity="0.16"/><text x="142.0" y="371.0" font-family="-apple-system, BlinkMacSystemFont, 'Helvetica Neue', Arial, sans-serif" font-size="11.0" fill="#8fb26a" font-weight="700" text-anchor="middle">✓</text><text x="152.0" y="371.0" font-family="-apple-system, BlinkMacSystemFont, 'Helvetica Neue', Arial, sans-serif" font-size="10.5" fill="#e9dcc6" font-weight="400" text-anchor="start">через низ</text><rect x="234.8" y="356.0" width="127.6" height="22" rx="11" fill="#8fb26a" opacity="0.16"/><text x="248.8" y="371.0" font-family="-apple-system, BlinkMacSystemFont, 'Helvetica Neue', Arial, sans-serif" font-size="11.0" fill="#8fb26a" font-weight="700" text-anchor="middle">✓</text><text x="258.8" y="371.0" font-family="-apple-system, BlinkMacSystemFont, 'Helvetica Neue', Arial, sans-serif" font-size="10.5" fill="#e9dcc6" font-weight="400" text-anchor="start">тугой завиток</text><rect x="370.4" y="356.0" width="106.0" height="22" rx="11" fill="#b25f3f" opacity="0.16"/><text x="384.4" y="371.0" font-family="-apple-system, BlinkMacSystemFont, 'Helvetica Neue', Arial, sans-serif" font-size="11.0" fill="#b25f3f" font-weight="700" text-anchor="middle">✗</text><text x="394.4" y="371.0" font-family="-apple-system, BlinkMacSystemFont, 'Helvetica Neue', Arial, sans-serif" font-size="10.5" fill="#9a8b76" font-weight="400" text-anchor="start">прямой мах</text><rect x="484.4" y="356.0" width="120.4" height="22" rx="11" fill="#b25f3f" opacity="0.16"/><text x="498.4" y="371.0" font-family="-apple-system, BlinkMacSystemFont, 'Helvetica Neue', Arial, sans-serif" font-size="11.0" fill="#b25f3f" font-weight="700" text-anchor="middle">✗</text><text x="508.4" y="371.0" font-family="-apple-system, BlinkMacSystemFont, 'Helvetica Neue', Arial, sans-serif" font-size="10.5" fill="#9a8b76" font-weight="400" text-anchor="start">дуга не туда</text><rect x="620.8" y="348.0" width="245.2" height="44" rx="8" fill="#1c1713" stroke="#b25f3f"/><text x="632.8" y="365.0" font-family="-apple-system, BlinkMacSystemFont, 'Helvetica Neue', Arial, sans-serif" font-size="10.0" fill="#9a8b76" font-weight="400" text-anchor="start">один и тот же путь, восемь прогонов:</text><text x="633.8" y="383.0" font-family="-apple-system, BlinkMacSystemFont, 'Helvetica Neue', Arial, sans-serif" font-size="12.0" fill="#8fb26a" font-weight="700" text-anchor="start">✓</text><text x="651.8" y="383.0" font-family="-apple-system, BlinkMacSystemFont, 'Helvetica Neue', Arial, sans-serif" font-size="12.0" fill="#b25f3f" font-weight="700" text-anchor="start">✗</text><text x="669.8" y="383.0" font-family="-apple-system, BlinkMacSystemFont, 'Helvetica Neue', Arial, sans-serif" font-size="12.0" fill="#8fb26a" font-weight="700" text-anchor="start">✓</text><text x="687.8" y="383.0" font-family="-apple-system, BlinkMacSystemFont, 'Helvetica Neue', Arial, sans-serif" font-size="12.0" fill="#8fb26a" font-weight="700" text-anchor="start">✓</text><text x="705.8" y="383.0" font-family="-apple-system, BlinkMacSystemFont, 'Helvetica Neue', Arial, sans-serif" font-size="12.0" fill="#b25f3f" font-weight="700" text-anchor="start">✗</text><text x="723.8" y="383.0" font-family="-apple-system, BlinkMacSystemFont, 'Helvetica Neue', Arial, sans-serif" font-size="12.0" fill="#8fb26a" font-weight="700" text-anchor="start">✓</text><text x="741.8" y="383.0" font-family="-apple-system, BlinkMacSystemFont, 'Helvetica Neue', Arial, sans-serif" font-size="12.0" fill="#b25f3f" font-weight="700" text-anchor="start">✗</text><text x="759.8" y="383.0" font-family="-apple-system, BlinkMacSystemFont, 'Helvetica Neue', Arial, sans-serif" font-size="12.0" fill="#8fb26a" font-weight="700" text-anchor="start">✓</text><text x="785.8" y="383.0" font-family="-apple-system, BlinkMacSystemFont, 'Helvetica Neue', Arial, sans-serif" font-size="10.5" fill="#b25f3f" font-weight="700" text-anchor="start">5 из 8</text></svg>
+  <figcaption class="scene-cap">не рисунок от руки: путь прогнан через живой стенд синтетическими касаниями, вердикт под каждым — тот, что вынес сам стенд. Оранжевое — единственное, что видит игрок: дуга хвата и кружок пальца, и только пока жест взводится; следа, прицела и конуса на экране нет. Справа внизу — находка: тот же путь, восемь прогонов подряд, доходит до тавы пять раз из восьми (<a href="https://github.com/newYurk/roti-stand/issues/91">#91</a>)</figcaption>
+  </figure>
+
+  <div class="flow" aria-label="Машина состояний жеста: шлепок">
     <span class="st">RESTING</span><span class="ar">→</span>
     <span class="st">ARMED</span><span class="ar">→</span>
     <span class="st">LIFTING</span><span class="ar">→</span>
     <span class="st">FLYING</span><span class="ar">→</span>
     <span class="st">IMPACT</span><span class="ar">→</span>
     <span class="st">SETTLING</span>
+  </div>
+  <p class="dim">Из <b>LIFTING</b> есть вторая ветка — перенос на таву; если условия не набраны,
+  лист опускается, и это обычный шлепок:</p>
+  <div class="flow" aria-label="Машина состояний жеста: вторая ветка — перенос на таву">
+    <span class="st">LIFTING</span>
+    <span class="ar">→ дуга ≥ 15° за 80 мс →</span>
+    <span class="st">CARRY</span>
+    <span class="ar">→ дуга ≥ 40° и хвост на таву в конусе 60° →</span>
+    <span class="st">TOSS</span>
+    <span class="ar">→ посадка на таву</span>
   </div>
   <p class="dim">Касание только выбирает край и ничего не двигает; медленное отпускание — ничего;
   жест автономен после броска. Ноль «липкости» по замеру: 0 px сдвига без завершённого жеста.</p>
@@ -524,7 +576,11 @@
       <text x="398" y="118" fill="#6b5f4e" font-size="11">банан · яйцо · сгущёнка · сахар</text>
     </g>
   </svg>
-  <figcaption class="scene-cap">макет раскладки из v3: зоны привязаны к руке — для левшей раскладка зеркалится (тава слева), и в пределах выбранной руки закреплена навсегда, чтобы готовить «не глядя»; интерфейса нет — только стол, горизонтальный экран</figcaption>
+  <figcaption class="scene-cap">макет раскладки из v3: зоны привязаны к руке — для левшей раскладка зеркалится (тава слева), и в пределах выбранной руки и ориентации закреплена навсегда, чтобы готовить «не глядя»;
+  интерфейса нет — только стол. Здесь показан альбомный случай; с 08.09 (⚑) раскладка идёт по длинной
+  стороне кадра, и в портрете тесто внизу, тава вверху, лист закидывается снизу вверх (заглушка
+  «поверни телефон» снята). Хватит ли в портрете места вокруг тавы жестам жарки — пока неизвестно,
+  этих жестов ещё нет.</figcaption>
   </figure>
 
 
@@ -685,11 +741,14 @@
       <i>до</i> растяжки, цель растяжки — равномерная просвечивающая тонкость, а кромочную губу
       срезают. Как на самом деле: <b>сначала лист сохнет весь и цвета нет вовсе</b> (пока есть вода,
       поверхность держится у 100 °C, а цвет требует 120 °C), потом цвет идёт <b>пятнами</b> там,
-      где тоньше и плотнее прижато. Основной цвет и хруст — уже на конверте, в жире.</p></div>
+      где тоньше и плотнее прижато. Основной цвет и хруст — уже на конверте, в жире.
+      Оговорка к нынешней карте: горб на среднем радиусе (0,90 в центре, 0,55 у борта) — тоже
+      допущение, помеченное в коде как <code>inferred</code>; ИК-замера кратхи не было, задача
+      открыта (<a href="https://github.com/newYurk/roti-stand/issues/41">#41</a>).</p></div>
   </div>
   <div class="tblwrap"><table>
     <tr><th>Что</th><th>Было</th><th>Утром 26.08</th><th>После перепроверки</th></tr>
-    <tr><td>Карта жара</td><td>центр 1,0 → край 0,25</td><td>плато → борт 0,7</td><td>горб на среднем радиусе, центр 0,90</td></tr>
+    <tr><td>Карта жара</td><td>центр 1,0 → край 0,25</td><td>плато → борт 0,7</td><td>горб на среднем радиусе, центр 0,90 <i>(допущение, #41)</i></td></tr>
     <tr><td>Толщина листа</td><td>однородная</td><td>радиальная 3:1 <i>(домысел)</i></td><td>однородная ~0,19 + пятна ±33 %</td></tr>
     <tr><td>Цвет</td><td>сразу</td><td>сразу, ∝ 1/толщина</td><td><b>только после сушки</b>; сушка ∝ толщине</td></tr>
     <tr><td>Контакт</td><td>—</td><td>—</td><td>пятнистое поле 0,6…1,15</td></tr>
@@ -734,6 +793,15 @@
   <h2>Как это может выглядеть — и где мы ещё не выбрали</h2>
   <p class="lead">Ниже — не решения, а варианты, положенные рядом, чтобы сравнивать глазами.
   Всё нарисовано в палитре стенда и в масштабе.</p>
+
+  <div class="note"><b>Одобренное уже есть — но это ещё не выбор направления.</b> 06.09.2026
+  владелец принёс <b>три одобренных экрана локаций</b> — набережная, ночной рынок, школа —
+  и дословные промпты к ним; всё лежит в <span class="path">mockups/</span>. Одобрены
+  <b>манера рисунка и раскладка кухни</b>: чернильный слегка неровный контур, сдержанная матовая
+  палитра, широкие простые тени. Пиксель-арт это одобрение <b>не отменяет</b> — владелец
+  07.09.2026: «какой стиль будет — пиксель-арт или рисованный, я ещё не знаю», развилка #15
+  открыта. Вытекающее из одобрения решение «снять пиксель-арт как направление» помечено ⚑
+  и <b>ждёт подтверждения владельца в #47</b>. Схемы ниже — по-прежнему схемы, а не эти экраны.</div>
 
   <h3>Итоговый роти в трёх арт-направлениях</h3>
   <figure class="scene" aria-label="Один и тот же готовый роти в трёх стилях: пиксель 80, пиксель 224, без пикселя">
@@ -1213,8 +1281,17 @@
       <text x="590" y="290">C · без пикселя — блеск масла</text>
     </g>
   </svg>
-  <figcaption class="scene-cap">та же развилка, что в ревью: вопрос не «пиксели или нет», а какое логическое разрешение и сколько оно стоит в часах; A и B растрированы честно, по клеткам — так это и будет выглядеть</figcaption>
+  <figcaption class="scene-cap">та же развилка, что в ревью: вопрос не «пиксели или нет», а какое логическое разрешение и сколько оно стоит в часах; A и B растрированы честно, по клеткам — так это и будет выглядеть. C — не третье арт-направление, а непиксельный контроль: в стенде он так и подписан, «C · контроль» — мягкий градиент, база сравнения, без которой числа A и B не с чем сопоставить. Блеск масла на этой карточке — свойство схемы, а не кандидат в стиль: одобренные 06.09 промпты требуют матовых цветов и чернильного контура и прямым текстом запрещают «photorealistic reflections, glossy 3D rendering»</figcaption>
   </figure>
+  <p class="dim">Развилка меряется, а не выбирается глазами: три варианта переключаются кнопкой
+  прямо в стенде поверх одной и той же физики и одного звука (A · 80 / B · 224 / C · контроль).
+  08.09.2026 записано, где арт вообще цепляет технику, и мест этих ровно три: <b>эффект
+  распада</b> (единственная жёсткая связь — процедурный требует WebGL; в v0 распада нет вовсе,
+  дырка рисуется геометрией рваных ячеек), <b>заполнение экрана</b> (пиксельный вариант рисует
+  ~80×45 логических пикселей против 2,5 Мпикс — разница в два порядка, и отвечает на неё замер
+  всех трёх вариантов на одном железе, а не решение) и <b>кадровая цена ассетов ×2,5–4</b>
+  (#74) — это объём v1, в v0 персонажей нет. Значит вертикальный срез октября развилка
+  не блокирует.</p>
 
   <h3>Три камеры — из-за прилавка, изометрия, вид сверху</h3>
   <figure class="scene" aria-label="Три варианта ракурса стола: перспектива из-за прилавка, изометрия и плоский вид сверху">
@@ -1262,7 +1339,7 @@
       <text x="590" y="236" fill="#6b5f4e">3 · сверху — отклонён</text>
     </g>
   </svg>
-  <figcaption class="scene-cap">вероятный ответ — две камеры: готовка из-за прилавка (интимный крупный план, где живёт тактильность), а деревня, карта точек и тележка — в изометрии, когда до них дойдёт (v1); вид сверху владелец отверг сразу</figcaption>
+  <figcaption class="scene-cap">камера готовки — из-за прилавка, так в стенде и так на трёх одобренных 06.09 экранах: формат 16:9, локация приходит фоном за тележкой (набережная, ночной рынок, школа), раскладка кухни одна и та же, меняются фон, покупатель, заказ и цвет борта, а карта на всех трёх — кнопка «folded map» на передней стенке (что за ней открывается — не описано нигде). Отдельного вида деревни — изометрического или любого другого — в корпусе не решено: слово «изометрия» не встречается ни в одном действующем доке, кроме этой страницы. Это не «вероятный ответ», а незаведённая развилка v1. Вид сверху владелец отверг сразу</figcaption>
   </figure>
 
   <h3>Телефон и iPad — зоны у углов, середина дышит</h3>
@@ -1378,35 +1455,54 @@
   <p class="dim">Обе на одной физике: разница только в том, что рисуется сверх геометрии. Аудит запрещает
   полировку, пока жест не читается, — поэтому в стенде сейчас «сухая»; «сочная» — кандидат на
   вертикальный срез, если живой тест скажет, что удару не хватает веса.</p>
+  <p class="dim">08.09.2026 владелец снял условие «только звук» ⚑ и сказал, что визуальные отклики
+  всё равно добавит; в стенде осталось два условия — «обоим» и «без звука». Значит «сочная» ветка
+  теперь ждёт не только суда о весе удара, а замера #14 в новом смысле: достаточно ли картинки
+  без звука. Цена решения записана прямо: довод «тактильность держится на звуке, значит арт может
+  быть дешевле» остаётся в корпусе ожиданием, которое этим стендом уже нечем проверить — если
+  в него упрётся арт-развилка #15, ответа не будет.</p>
 </section>
 
 <section id="forks">
   <div class="sec-label">08 · Развилки → решения</div>
-  <h2>Закрыты 25.08 — все, кроме арта</h2>
+  <h2>Закрыты 25.08 — а к сентябрю открылись новые</h2>
   <div class="note"><b>Как закрыты:</b> владелец поручил ответить на оставшиеся вопросы ассистенту
   («на остальные вопросы ответь сам»). Решения помечены ⚑, живут в
   <span class="path">docs/decisions-log.md</span> и пересматриваются одной строкой несогласия;
-  сводный результат — <span class="path">docs/roti-design-doc.md</span>.</div>
+  сводный результат — <span class="path">docs/roti-design-doc.md</span>.
+  <b>Арт давно не единственная открытая.</b> Одобренные 06.09.2026 экраны локаций и каталог
+  действий открыли пять новых развилок, среди них #44 форма сковороды, #45 управление жаром,
+  #46 табличка заказа, #48 экран жарки; 07.09.2026 ворота A закрыты владельцем семью решениями ⚑,
+  а разбор дневного слоя открыл #63–#65. На доске сейчас 34 задачи «ждёт решения», 11 из них
+  дизайнерские (gate:A): #15, #16, #40, #50, #63, #64, #65, #66, #67, #68, #71.</div>
   <details><summary>Рамка — тележка и день, не вечерняя точка <span class="fork-q">ядро владельца 25.08</span></summary>
-    <div class="body"><p>Игрок приезжает с тележкой в небогатую прибрежную деревню. День — от утра
-    дома до закрытия: карта из семи точек (дом, рынок, обменная лавка, школа, храм, пристань,
-    вечерний рынок), переход — выбор на карте с ценой в минутах, ездить по улицам не нужно.
-    Тележка закрывается, когда кончается время, независимо от того, всё ли приготовлено;
-    вечером игра показывает, что принесли люди и что осталось на завтра. Ошибка — новая история,
-    не проигрыш.</p></div></details>
-  <details><summary>Экономика — время единственная валюта <span class="fork-q">ядро владельца 25.08</span></summary>
-    <div class="body"><p>Ни монет, ни ценников, ни кошелька. Дорога, жарка, разговоры и обмены
-    стоят минут; нельзя быть у школы утром и на рынке днём. Гость платит тем, что может дать:
-    мука, яйца, рыба, рис и кокос, камешки и слухи, благословение, новая специя. Обменная лавка
-    меняет излишки на сахар, масло, сгущёнку, специи. Заодно снят риск ст. 112: тайских банкнот
-    в игре нет. Разделы экономики v3/v4 недействующие; утраченный v5 не реконструируется —
-    ядро закрывает его тему новым решением.</p></div></details>
-  <details><summary>Метацель — тележка-музей вместо «улицы» <span class="fork-q">сверка ⚑</span></summary>
+    <div class="body"><p>Игрок приезжает с тележкой в прибрежную деревню, где бабушкина улица уже
+    угасла. День — от утра дома до закрытия: карта из семи точек (дом, рынок, обменная лавка,
+    школа, храм, пристань, вечерний рынок), переход — выбор на карте, ездить по улицам не нужно,
+    и <b>минут поездка не стоит</b> (⚑ 07.09.2026). Чем оплачивается переход и чем исключена
+    одновременность точек — открыто (#67). День кончается вместе с тестом: сколько шариков
+    заготовили, столько роти и сделали; вечером игра показывает, что принесли люди и что осталось
+    на завтра. Ошибка — новая история, не проигрыш.</p></div></details>
+  <details><summary>Экономика — без денег и без минут <span class="fork-q">⚑ 07.09.2026</span></summary>
+    <div class="body"><p>Ни монет, ни ценников, ни кошелька; бюджета игровых минут тоже нет
+    (⚑ 07.09.2026): дорога, жарка, разговоры и обмены минут дня не тратят. День ограничивает
+    тесто: сколько шариков заготовили, столько роти и сделали, а тесто восполняется реальным
+    временем — ориентир владельца «следующие реальные сутки», по каким часам идёт отсчёт,
+    открыто (#67). Запрет быть одновременно у школы утром и на рынке днём остаётся в силе, но его
+    носителем была трата минут, и чем он станет — открыто (#67). Гость платит тем, что может
+    дать: мука, яйца, рыба, рис и кокос, камешки и слухи, благословение, новая специя. Обменная
+    лавка меняет излишки на сахар, масло, сгущёнку, специи. Заодно снят риск ст. 112: тайских
+    банкнот в игре нет. Разделы экономики v3/v4 недействующие; утраченный v5
+    не реконструируется.</p></div></details>
+  <details><summary>Метацель — тележка-музей вместо «улицы» <span class="fork-q">сверка ⚑ · ждёт подтверждения</span></summary>
     <div class="body"><p>Улучшения не покупаются: зонт шьёт швея, звонок дарят дети, вторую горелку
     чинит мастер, столик отдаёт рыбак — предмет меняет возможности и напоминает, от кого он.
-    «Обустройство улицы» из v4 снято: деревня небогата с первого дня, это условие, а не состояние
-    «хуже» (ревью L2 как раз замечало, что упадок вводит наказание в игру, его отменившую).
-    Арка бабушкиной точки остаётся предысторией.</p></div></details>
+    «Обустройство улицы» из v4 снято как механизм: улица не объект роста (ревью L2 замечало, что
+    упадок вводит наказание в игру, его отменившую). Постоянная бедность деревни каноном
+    не является (владелец 07.09.2026: «это не постоянное условие… это не утверждено»): деревня
+    небогата в начале, а будет ли так всегда — не решено, и арка возрождения снова живой кандидат
+    на окончание игры (#66). Само «растёт тележка, а не улица» — ⚑ и ждёт подтверждения
+    владельца (#40). Арка бабушкиной точки остаётся предысторией.</p></div></details>
   <details><summary>Обещания и каталог вместо заказов и шкалы <span class="fork-q">ядро владельца 25.08</span></summary>
     <div class="body"><p>Обещания — короткие договорённости («мельнику — 2 роти до пятницы»),
     не квесты с галочками; долг — повод вернуться, не штраф. Каталог на тележке: ингредиенты,
@@ -1418,63 +1514,89 @@
     Send Me To Heaven показал, что дисклеймер не спасает, а полный отказ — единственное решение,
     закрывающее конфликты «пиксель ↔ 3D» и тональный разом. Трюковость уже живёт в механике:
     сильный шлепок с риском дырки — и есть трюк.</p></div></details>
-  <details><summary>Герой — с юга, дом и книга бабушкины <span class="fork-q">решено ⚑</span></summary>
+  <details><summary>Герой — с юга, дом и книга бабушкины <span class="fork-q">решено ⚑ · поправка 07.09</span></summary>
     <div class="body"><p>Бабушка — с юга (роти-пояс: Сатун/Транг), молодой перебралась на остров
-    и держала точку; герой вырос на юге, в тайско-мусульманской семье, и приезжает с тележкой
+    и держала точку; герой вырос на юге, в семье, где роти пекли всегда, и приезжает с тележкой
     в её дом и к её книге, когда улица уже угасла (сверка с ядром ⚑: «приезжает» и «наследует» —
-    одно и то же, дом — точка «утро дома»). Община на острове не нужна — одна семья, фактчеку
-    не противоречит; храм и монах на карте — мир соседей-буддистов.
-    Домик духов уходит к соседям как фоновая деталь; утренний ритуал героя — постановка теста
-    в масло. <b>Халяльность — теперь требование</b>, а не случайность.</p></div></details>
+    одно и то же, дом — точка «утро дома»). <b>Национальных и религиозных ограничений в игре
+    нет</b> (⚑ 07.09.2026): ни у героя, ни у соседей нет техник, запретов или историй,
+    завязанных на происхождении — халяльность как требование снята, пёс живёт в доме. Храм,
+    монах и домик духов — фоновые детали места, а не ритуалы героя; утренний ритуал героя —
+    постановка теста в масло. <b>Боёв животных в игре нет вообще</b> (⚑ 07.09.2026): во дворе
+    обычные деревенские куры, ни клеток, ни привязей. Историческое происхождение блюда фактом
+    остаётся — решение про правила внутри игры, а не про историю роти.</p></div></details>
   <details><summary>Объём v0 — минимальная петля <span class="fork-q">решено ⚑</span></summary>
     <div class="body"><p>Одно роти целиком в Zen: семь шагов, одна начинка, ноль персонажей,
     без сюжета и календаря. Единственная крупная технология — слои (конверт + песочница);
     сорвёт срок — v0 выходит с открытым роти, конверт переносится. <b>Ядро 25.08 этого
     не меняет</b> (сверка ⚑): его «минимальная первая версия» — это <b>v1 «первый день»</b>:
-    карта из 5 точек, время и цена переходов, 8 ингредиентов, 3 состояния теста, 6 постоянных
-    и 2 редких гостя, каталог, 3 предмета тележки, один сезон и погода. Объём v1 не оценён;
-    персонажи — самая дорогая статья корпуса, резать первыми — их число, не карту.</p></div></details>
+    карта из 5 точек, 8 ингредиентов, 3 состояния теста, 6 постоянных и 2 редких гостя, каталог,
+    3 предмета тележки, один сезон и погода. <b>Цены переходов в минутах в этом списке больше
+    нет</b> (⚑ 07.09.2026): бюджета игровых минут не существует, чем оплачивается переход —
+    открыто (#67). Объём v1 не оценён; персонажи — самая дорогая статья корпуса, резать
+    первыми — их число, не карту. <b>v0 и Zen гейта ожидания не получают</b>: стенд и вертикальный
+    срез не наследуют восполнение теста реальным временем.</p></div></details>
   <details><summary>Доки — один дизайн-док <span class="fork-q">решено ⚑</span></summary>
-    <div class="body"><p><span class="path">docs/roti-design-doc.md</span> (v1, 25.08) — единственный
+    <div class="body"><p><span class="path">docs/roti-design-doc.md</span> (<b>v2, 25.08</b>) — единственный
     действующий; старшинство: он &gt; ревью &gt; архив. Корпус уже пострадал от фрагментации
     на пять файлов — три тематических дока повторили бы ту же ошибку. Архив не трогается никогда.</p></div></details>
   <details><summary>Цикады — сезонность как фича <span class="fork-q">решено ⚑</span></summary>
     <div class="body"><p>Хор цикад — звонок открытия только в свой сезон и одновременно маркер
     смены сезона, которого календарю не хватало; в остальное время года смену открывают другие
     сумеречные голоса (гекконы, сверчки, прямокрылые).</p></div></details>
-  <details><summary>Жарка — пять развилок закрыты <span class="fork-q">решено 25.08</span></summary>
+  <details><summary>Жарка — шесть развилок закрыты <span class="fork-q">решено 25.08 и 07.09</span></summary>
     <div class="body"><p>Чёрное допускается (тёмный — стиль, чёрный — псу) · пузыри прижимаются пальцем ·
-    дотяжка на таве щипками, условно до живой проверки на «липкость» · переворот доступен всегда,
-    обязателен только конверту · маргарин в v0 бесконечен, в v1 — ресурс дня с обменной лавки.
-    Спецификация — <span class="path">docs/frying-mechanics.md</span>; там же фактчек 26.08:
+    дотяжка на таве щипками, принята условно, до живой руки (#19) · переворот доступен всегда,
+    обязателен только конверту · маргарин в v0 бесконечен, в v1 — ресурс дня с обменной лавки ·
+    <b>горелка — включено/выключено, а не уровень</b> (⚑ 07.09.2026): ползунок под тавой —
+    выключатель, момент включения даёт жарке собственный звук, при выключенной горелке можно
+    протирать и убирать; на что она влияет ещё — открыто (#62), газ может кончаться, как маргарин
+    в v1. Спецификация — <span class="path">docs/frying-mechanics.md</span>; там же фактчек 26.08:
     лист не прожаривается из центра — сначала сохнет весь, потом цвет идёт пятнами.</p></div></details>
-  <details><summary>Арт — единственная открытая <span class="fork-q">ждёт замеров</span></summary>
+  <details><summary>Арт — открытая развилка <span class="fork-q">ждёт замеров</span></summary>
     <div class="body"><p>Вопрос не «пиксели или нет», а минимальное читаемое логическое разрешение
     и его цена в часах — прототип должен вернуть <b>два числа</b> замерами 2–5 с людьми.
-    Ядро не блокирует: тактильность в звуке, звуковой прототип идёт сейчас.</p></div></details>
+    Ядро не блокирует: тактильность держится на звуке. Но <b>звукового прототипа нет</b> — ни
+    в проекте, ни в плане, ни на доске; замер «снимать на слух» (#14) не проводился, а 08.09.2026
+    условие «только звук» из него убрано решением владельца ⚑: сам довод, что тактильность держится
+    на звуке, этим стендом больше не проверить.</p></div></details>
 </section>
 
 <section id="stack">
   <div class="sec-label">09 · Технологии</div>
-  <h2>Стек сознательно не выбран — и это решение</h2>
-  <p class="lead">Самая тяжёлая гиря прошлого выбора исчезла: у «Лягушки» стек держался на
-  стоимости миграции готового кода, а у Roti кода нет — <b>мигрировать нечего, выбирать
-  можно честно</b>. Решение принимается после замеров, не умозрительно; стенд на HTML5 —
-  аргумент скорости проверки, а не выбора стека (так записано в гипотезе до первой строки кода).</p>
+  <h2>Направление выбрано — веб; конфигурация ещё нет</h2>
+  <p class="lead">07.09.2026 решением владельца ⚑ принято семейство <b>A — веб-реализация</b>;
+  кандидаты B (Godot), C (Unity) и D (Swift + SpriteKit) сняты. Открытыми остаются рендер,
+  язык симуляции, аудиопуть и упаковка (#30), срок — до середины сентября. Самая тяжёлая гиря
+  прошлого выбора и здесь не мешала: у «Лягушки» стек держался на стоимости миграции готового
+  кода, а у Roti кода не было — <b>мигрировать было нечего, выбирать можно было честно</b>.
+  Сравнение при этом сокращено сознательно: сравнивающих замеров (M2, M5) не будет, направление
+  выбрано решением владельца, а не числами. Критерий записан её словами: «Полная пригодность
+  конкретной конфигурации подтверждается проверками, а не престижностью языка или названием
+  движка». Подтверждает направление не сравнение, а проверка одной показательной сцены в
+  iOS-сборке на живом iPhone SE 2: она даёт «прошло / не прошло», а не числа для сравнения.
+  Стенд на HTML5 остаётся аргументом скорости проверки, а не выбора стека (так записано
+  в гипотезе до первой строки кода).</p>
 
-  <h3>Четыре кандидата на столе</h3>
+  <h3>Как отсеялись кандидаты — ретроспектива</h3>
+  <p class="dim">Разбор ниже — история выбора, а не открытая развилка: B, C и D сняты решением
+  владельца 07.09.2026 ⚑ (<span class="path">DECISION.md</span>,
+  <span class="path">docs/decisions-log.md</span>), на столе остаётся семейство A. Главная
+  развилка раздела теперь не «какой кандидат», а конфигурация внутри A: рендер (Canvas 2D или
+  WebGL — шейдерный «распад» доступен только на WebGL, но в v0 его нет), язык симуляции,
+  аудиопуть, упаковка (#30).</p>
   <div class="tblwrap"><table>
     <tr><th>Вариант</th><th>За</th><th>Против</th></tr>
-    <tr><td><b>A · Web + Capacitor</b><br><span class="dim">Canvas2D/WebGL2</span></td>
+    <tr><td><b>A · Web + Capacitor</b><br><span class="dim">Canvas2D/WebGL2 · принят 07.09.2026 ⚑</span></td>
       <td>одна текстовая кодовая база, идеальная для агента, самый быстрый цикл правки; оценка T2 по симуляции — ~1,2 мс/кадр, но только для строки «C++/Rust→wasm»</td>
-      <td><b>два требования звука веб не выполняет</b> — контроль DSP-буфера ≤ 256 сэмплов и измеримая выходная задержка; память WebContent при ASMR-наборе — главный риск; softbody и пиксельная дезинтеграция руками; нет пути на Steam без второй обёртки; Core Haptics только нативно</td></tr>
-    <tr><td><b>B · Godot 4 (2D)</b></td>
+      <td><b>одно требование звука веб не выполняет</b> — контроль DSP-буфера ≤ 256 сэмплов. Второе, «измеримая выходная задержка», снято 07.09.2026: <code>AudioContext.outputLatency</code> есть в Safari и WebView iOS с 18.4 (чтение документации, запуском не проверено). Память WebContent при ASMR-наборе остаётся главным риском по корпусу, но посчитанная от дизайна она меньше аналогии: ≈7,5 МБ сжатым и ≈33 МБ в пике одной сцены вместо 460 МБ. Softbody и пиксельная дезинтеграция руками. Пути на Steam нет без второй обёртки, и у обёртки свой дефект — Steam Overlay не работает с браузерными движками: ни Shift+Tab, ни скриншотов, ни всплывающих достижений, ни Steam Input. Гаптика фактически закрыта: Core Haptics недоступен, Vibration API на iOS Safari игнорировался</td></tr>
+    <tr><td><b>B · Godot 4 (2D)</b><br><span class="dim">снят 07.09.2026 ⚑</span></td>
       <td>бесплатно навсегда, MIT, без роялти; первоклассный пиксельный 2D-конвейер, атласы, тайлмапы; сцены — текст, агент правит</td>
-      <td>вердикт «Лягушки» <b>не наследуется</b>, но своя беда нашлась: по оценке T2 GDScript даёт ~200 узлов против целевых 1 000–1 200 — оценка, не замер, и по ней симуляция только через GDExtension/C++; статус C# на мобилках не перепроверен</td></tr>
-    <tr><td><b>C · Unity 2D</b></td>
+      <td>вердикт «Лягушки» <b>не наследуется</b>, но своя беда нашлась: по оценке T2 GDScript даёт ~200 узлов против целевых 1 000–1 200 — оценка, не замер, и по ней симуляция только через GDExtension/C++. Статус C# перепроверен 06.09.2026: на iOS поддерживается с 4.2 через NativeAOT, но официально помечен экспериментальным — пометку ни разу не снимали, она стоит и в доках 4.7; экспорт только с macOS, штатного тримминга нет, с февраля 2026 открыт баг с установкой C#-сборки на iOS. Задача стала беспредметной 07.09: кандидат снят вместе с рамкой сравнения</td></tr>
+    <tr><td><b>C · Unity 6</b><br><span class="dim">снят 07.09.2026 ⚑</span></td>
       <td>наименьшие трудозатраты по сторовой обвязке, нативного кода ноль; <b>C# владельцу знаком</b> — движок не чёрный ящик; с Burst линза ставит Unity в один класс с нативом</td>
-      <td>оценка T2 без Burst — ~4 мс/кадр против ~1,2 у WASM, то есть обход обязателен; самый тяжёлый цикл сборки, бинарные сцены хуже для git и агента; бесплатно до $200K, дальше $2310/год за место</td></tr>
-    <tr><td><b>D · Swift + SpriteKit</b><br><span class="dim">+ Metal, AVAudioEngine</span></td>
+      <td>оценка T2 без Burst — ~4 мс/кадр против ~1,2 у WASM, то есть обход обязателен; самый тяжёлый цикл сборки. Минус «бинарные сцены хуже для git и агента» требует правки: в Unity 6 текстовый YAML значится в документации как вариант по умолчанию. Зато при оценке по требованиям нашёлся другой: документация прямо запрещает то, чего от неё ждут по доставке данных — в собранном плеере данные ScriptableObject можно только читать, а обход через Addressables требует включить Build Remote Catalog до первой публикации в стор. Бесплатно до $200K, дальше $2310/год за место</td></tr>
+    <tr><td><b>D · Swift + SpriteKit</b><br><span class="dim">+ Metal, AVAudioEngine · снят 07.09.2026 ⚑</span></td>
       <td>при iOS-first кодовая база не удваивается; полный доступ к нативным API, Swift читается агентом отлично; DSP-буфер до 128 сэмплов против 256 у Unity, Core Haptics только здесь; оценка T2 для натива — ~0,7 мс/кадр</td>
       <td><b>платформенный тупик</b>: закрыты и Android, и Steam, без полного переписывания; SpriteKit развивается вяло, редактора уровня Godot/Unity нет; владелец языка не знает</td></tr>
   </table></div>
@@ -1488,37 +1610,83 @@
   <div class="cards">
     <div class="card"><span class="tag ok">переносится</span>
       <h4>Порядок и дисциплина</h4>
-      <p>App Store первым, Android потом или никогда · без рекламы и веб-порталов ·
-      «замер прежде решения» · цены и даты сторов · Capacitor как обёртка, если победит A.</p></div>
+      <p>Порядок площадок: <b>iPhone (App Store) → Android (Google Play) → Steam</b> — решение
+      владельца 07.09.2026 ⚑; «или никогда» не относится ни к одной из трёх, версия ревью
+      «iOS → Steam → Google Play» снята (#32 закрыт). Без рекламы и без веб-порталов как канала:
+      поставка — устанавливаемое приложение, веб-технологии не означают сайта. «Замер прежде
+      решения» · цены и даты сторов. Capacitor как оснастка сборки — условие «если победит A»
+      наступило 07.09.2026, и Capacitor стал основным кандидатом упаковки; сборки проекта не
+      существовало ни разу — первая iOS-сборка (#84, открыта) и есть работа, после которой
+      направление перестанет быть бумажным.</p></div>
     <div class="card"><span class="tag warn">не переносится</span>
       <h4>Архитектура и вердикты</h4>
       <p>«Один HTML-файл» — для ассетной игры самоубийство · процедурный звук вместо сэмплов ·
-      дисквалификация Godot целиком (её причины тайминговые) · прежний вес риска
+      дисквалификация Godot целиком — но не потому, что её причины тайминговые: из шести
+      оснований четыре не действуют, одно верно как факт без опоры на механику, одно требовало
+      перепроверки (статус C#) · прежний вес риска
       «WebKit роняет 60 fps» — для не-тайминговой игры это косметика.</p></div>
   </div>
 
   <h3>Что сама игра требует от стека</h3>
   <ul class="tight">
-    <li><b>Симуляция:</b> сетка 1 000–1 200 узлов при 60 fps на слабом iPhone (опора — A13; в стенде 1 060 узлов). Бюджет кадра в вебе — 16,7 мс, поднять нельзя.</li>
+    <li><b>Симуляция:</b> 1 060 узлов при 60 fps на минимальном устройстве — <b>iPhone SE 2 (A13),
+      минимальная iOS 26</b> (решение владельца 08.09.2026 ⚑). Целевая сетка записана как
+      действующая: столько узлов остаётся от сетки 38×38 после обрезки по кругу в стенде — и
+      подтверждается замером на SE 2, а не влезет, так режется сетка и подшаги, а не требование.
+      Разработка идёт на iPhone 15 Pro, но его результаты за минимальное устройство не отвечают,
+      и 120 Гц у него игре не достаются. Диапазон линзы T2 «1 000–1 200» остаётся рекомендацией,
+      посчитанной для того же A13, а не требованием. Бюджет кадра — 16,7 мс:
+      <code>requestAnimationFrame</code> в WKWebView ограничен 60 Гц даже на ProMotion, поднять
+      нельзя. Оговорка: единицу «узлы» оспаривает #69 — узким местом телефона может оказаться
+      заливка, а не счёт.</li>
     <li><b>Звук:</b> задержка жест→звук ≤ 20 мс (цель 10–12), джиттер ≤ ±3 мс; бесшовные лупы
-      дождя и цикад; сэмплы, не только синтез. Из двух «невыполнимых в вебе» требований осталось одно — контроль DSP-буфера.</li>
-    <li><b>Арт-пайплайн:</b> атласы, nearest без артефактов, «эффект распада» шейдером.</li>
+      дождя и цикад; сэмплы, не только синтез. Из двух «невыполнимых в вебе» требований осталось
+      одно — контроль DSP-буфера ≤ 256 сэмплов; измеримая выходная задержка выполнима
+      (<code>AudioContext.outputLatency</code>, Safari и WebView iOS 18.4+, чтение документации
+      07.09.2026, запуском не проверено). Дописано 07–08.09.2026, потому что без этого ломается
+      «готовность ведёт звук»: звук триггерится из обработчика ввода, а не из игрового цикла;
+      игра сама читает канал вывода и записывает его вместе с любым замером задержки — при выводе
+      в Bluetooth механика отказывает (#70), а величина этой задержки нигде не опубликована,
+      поэтому меряется, а не цитируется; поведение при переключателе «Звонок/Бесшумно» назначается
+      явно (#80) — нативный путь ненадёжен (WKWebView игнорирует настройки AVAudioSession, баг
+      WebKit 167788 открыт с 03.02.2017 и до сих пор NEW), а веб-рычаг есть, и он
+      WebKit-специфичный: <code>navigator.audioSession.type</code> (Safari 16.4+). Честная дыра:
+      звук пока не умеет локальность — прожарка пятнистая, а звук ведут средние по листу, так что
+      услышать, какое место готово, нельзя.</li>
+    <li><b>Арт-пайплайн:</b> атласы — общее требование. Развилка #15 открыта (подтверждено
+      владельцем 07.09.2026), поэтому стек обязан выдержать обе ветви: пиксельную (целочисленный
+      масштаб и NEAREST без сглаживания, плюс #18 — апскейл сходится не на всех экранах) и
+      рисованную (непрерывная деформация текстурированного листа, кадровая цена ×2,5–4).
+      «Эффект распада» шейдером — единственная жёсткая связь арта с техникой, но в v0 распада нет
+      вовсе: дырка рисуется геометрией рваных ячеек, и вертикальный срез октября её не трогает,
+      так что выбирать ветвь ради шейдера не нужно. Что решает влезание в кадр — заполнение
+      экрана: ~80×45 логических пикселей против 2,5 Мпикс, и это меряется, а не решается; стенд
+      уже переключает три варианта вида поверх одной физики и одного звука.</li>
     <li><b>Ввод:</b> без Touch.force — его не существует; расстояние, скорость, длительность.</li>
   </ul>
+  <p class="dim">Список здесь сокращённый: раздел «Что игра требует от стека» переехал из
+  <span class="path">DECISION.md</span> целиком в <span class="path">docs/requirements.md</span> —
+  там он и полный.</p>
 
   <h3>Замеры серии M</h3>
   <div class="tblwrap"><table>
     <tr><th>№</th><th>Что меряем</th><th>Статус</th></tr>
     <tr><td><b>M1</b></td><td>Touch.radiusX на живом iPhone — Safari и WKWebView: осмысленные значения или константа</td><td><b>сделан 06.09.2026</b> — константа, радиус как вход отвергнут. Снято одно устройство и четыре поля вместо трёх и восьми; WKWebView не проверялся</td></tr>
     <tr><td><b>M3</b></td><td>атлас 200–400 пиксельных кадров: вес бандла, загрузка, память</td><td><b>сделан 06.09.2026</b> — PNG 3,93 МБ, декодирование 5 мс. Память не замерена, рендер в прогоне только Canvas 2D</td></tr>
-    <tr><td>M2</td><td>30–60 с ASMR-сцены в 2–3 стеках: CPU, пиковая память процесса, батарея, шов в лупе</td><td><b>отменён</b> 07.09.2026 вместе со сравнением стеков. Пиковая память на слабом iPhone — главный риск веба — переезжает в протокол проверки, а не пропадает</td></tr>
+    <tr><td>M2</td><td>30–60 с ASMR-сцены в 2–3 стеках: CPU, пиковая память процесса, батарея, шов в лупе</td><td><b>отменён</b> 07.09.2026 вместе со сравнением стеков. Пиковая память процесса — «главный риск варианта A», и с 08.09.2026 аппарат назван поимённо: минимальное устройство — iPhone SE 2 (iOS 26). Посчитанная от дизайна величина риска меньше, чем предполагала аналогия (#38, 07.09): ≈7,5 минуты уникального материала для v1, ≈7,5 МБ сжатым и ≈33 МБ в пике одной сцены вместо 460 МБ — при этом длительности отдельных позиций назначены разбором, а не дизайном, и это допущение. Долг не исчезает вместе с отменённым замером: он переезжает в протокол проверки веб-направления (#85)</td></tr>
     <tr><td>M4</td><td>DeviceMotion на iOS</td><td><b>отменён</b> — подброс вырезан целиком (⚑ 25.08)</td></tr>
     <tr><td>M5</td><td>одна микросцена в двух стеках, замер часов работы</td><td><b>отменён</b> 07.09.2026: вторым стеком никто не занимается</td></tr>
   </table></div>
   <div class="note"><b>Направление выбрано 07.09.2026:</b> «пока разрабатываем веб-реализацию»,
   площадки — <b>iPhone → Android → Steam</b>, сохранение обязательно, поставка — устанавливаемое
   приложение. Сравнение сокращено сознательно: M2 и M5 отменены. <b>Конфигурация не выбрана</b> —
-  рендер, язык, аудиопуть, упаковка (#30), срок прежний, до середины сентября. Цена решения названа
+  рендер, язык симуляции, аудиопуть, упаковка (#30), срок прежний, до середины сентября.
+  <b>Язык кодовой базы решён 08.09.2026: TypeScript</b> (⚑ делегировано ассистенту, пересматривается
+  одной строкой владельца; отмена TS→JS стоит один вечер и наступит в тот же день, если при разборе
+  стенда на модули (#86) типы начнут отнимать больше времени, чем возвращать ошибок). Развилки
+  «какой линтер» не существует: ESLint и oxlint на скрипте стенда дали побуквенно одинаковые
+  находки и от версии TypeScript не зависят — oxlint ставится по событию, подавления пишутся как
+  <code>// eslint-disable-next-line</code>. Цена решения названа
   прямо: тактильного канала не будет, бюджет кадра на iPhone — 16,7 мс (60 Гц в WKWebView),
   контроль DSP-буфера ≤ 256 сэмплов веб не даёт. Рамка — <span class="path">DECISION.md</span>.</div>
 </section>
@@ -1529,31 +1697,52 @@
   <div class="note"><b>Рамка честности.</b> Ревью насчитало 24–41 человеко-месяц на весь корпус —
   «закончить игру» за 23 дня отпуска нельзя, и это не цель. Цель отпуска — <b>играбельная
   вертикаль ядра: одно идеальное роти от кусочка до нарезки на iPhone</b>. Минимальная петля
-  оценена в 1,5–3 месяца; вертикаль без полировки в 23 полных дня — амбициозно, но честно.</div>
+  оценена в 1,5–3 месяца; вертикаль без полировки в 23 полных дня — амбициозно, но честно.
+  У самих чисел с 07.09.2026 две записанные оговорки. Вся кадровая раскладка ревью посчитана в
+  допущении «стиль — пиксель-арт», а арт-развилка открыта (#15): при развороте в рисованную манеру
+  та же линза ставит множитель ×2,5–4, и нигде он не учтён (#74). И строка ИТОГО в той же таблице
+  не сходится со своими слагаемыми: сумма строк даёт 39–61 и 26–43, а в ИТОГО стоят 33–58 и 24–41
+  (#79). То есть 24–41 — нижняя граница, а не оценка сверху.</div>
   <div class="tl">
     <div class="ev mut"><div class="when">✓ сделано 25.08</div>
       <h4>Развилки закрыты, жест принят, корпус сведён, мета-слой принят</h4>
       <p>Живой тест шлепка — «тест ручной OK» · решения по всем развилкам, кроме арта
       (⚑ делегированы) · дизайн-док <span class="path">docs/roti-design-doc.md</span> v1, тем же
-      вечером v2: дизайн-ядро владельца (тележка, день, время-валюта, обмен, обещания, каталог)
-      впитано, сверка с v1 — семь пунктов ⚑.</p></div>
+      вечером v2: дизайн-ядро владельца (тележка, день, обмен, обещания, каталог) впитано,
+      сверка с v1 — семь пунктов ⚑. Время как валюта снято владельцем 07.09.2026 ⚑: минут нет,
+      предел дня один — тесто, и восполняется оно реальным временем (ориентир — следующие
+      реальные сутки); по каким часам — открытый блокер #67.</p></div>
     <div class="ev"><div class="when">до середины сентября</div>
-      <h4>Рамка DECISION.md и выбор стека</h4>
-      <p>Четыре кандидата из раздела 09. Рамка написана, обязательные M1 и M3 сняты 06.09.2026 —
-      но стек ими не выбирается: стеки между собой сравнивают только M2 и M5, и они не делались.
-      Развилка — мерить или сознательно сократить сравнение. Попутно на том же живом iPhone:
-      пороги маха и перекалибровка прочности разрыва в стенде.</p></div>
+      <h4>Направление выбрано — осталась конфигурация</h4>
+      <p>Четыре кандидата из раздела 09 разобраны, обязательные M1 и M3 сняты 06.09.2026.
+      Направление выбрано 07.09.2026: веб, площадки iPhone → Android → Steam (#8 закрыт).
+      Сравнение сокращено сознательно — M2 и M5 отменены. До середины сентября остаётся
+      конфигурация внутри веба (#30: рендер, аудиопуть, упаковка); язык кодовой базы уже назван —
+      TypeScript (⚑ 08.09.2026). Подтверждать направление будет не сравнение, а проверка на живом
+      телефоне: первая в проекте сборка под iOS через Capacitor (#84) по протоколу проверки (#85).
+      Попутно на том же живом iPhone: пороги маха и перекалибровка прочности разрыва в стенде.</p></div>
     <div class="ev"><div class="when">3–25 октября · отпуск, 23 дня</div>
       <h4>Вертикальный срез ядра</h4>
-      <p>Шаги 1–7 на выбранном стеке · одна начинка (банан + яйцо + сгущёнка) · звук: натяжение,
+      <p>Шаги 1–7 в вебе · одна начинка (банан + яйцо + сгущёнка) · звук: натяжение,
       шлепок, треск, шипение тавы · рваный узор доживает до жарки и виден в готовом роти ·
       финал — карточка «след роти». Неделя 1: перенос ядра + шаги 3–4; неделя 2: конверт
-      (доработка модели) + жарка на слух; неделя 3: резка, полив, карточка, связка в одно роти.</p></div>
+      (доработка модели) + жарка на слух; неделя 3: резка, полив, карточка, связка в одно роти.
+      Цель среза названа устройством: 60 Гц на минимальном iPhone SE 2 / iOS 26 при сетке
+      1 060 узлов (⚑ 08.09.2026, #9 закрыт), бюджет кадра — 16,7 мс. Разработка идёт на
+      iPhone 15 Pro, но за минимальное устройство он не отвечает — в отпуске под рукой будет
+      именно SE 2.</p></div>
     <div class="ev mut"><div class="when">после отпуска</div>
       <h4>По результату среза — v1 «первый день»</h4>
-      <p>Плейтесты вертикали → тогда и только тогда: петля дня из ядра — карта из 5 точек, время,
+      <p>Плейтесты вертикали → тогда и только тогда: петля дня из ядра — карта из 5 точек,
       6 + 2 соседа, обмен, обещания, каталог, 3 предмета тележки. Перед стартом — оценка объёма
       (персонажи дороже всей готовки) и фактчек мира дня: мельник, монах, окна школы и пристани.
+      «Времени» в перечне больше нет: минут нет с 07.09.2026, день ограничивает тесто.</p>
+      <p>Списком v1 не начинается: разбор 07.09.2026 показал, что петля дня не спроектирована, а
+      требований к NPC, каталогу и петле дня нет вовсе. Открыты #63 (кто приходит в точку — правило
+      «точка × время суток → кто придёт» потерялось при смене рамки 25.08), #64 (что помнит день:
+      понятия «событие дня» нет в действующем дизайне ни термином, ни носителем), #65 (четыре
+      дневные механики с одобренных экранов, которых нет ни в доках, ни на доске), #66 (есть ли у
+      игры окончание — срок владельца до середины сентября), #71 (книга рецептов против сезонов).
       Сезоны и сюжет книги рецептов — после v1.</p></div>
   </div>
   <p class="dim">Вне объёма отпуска сознательно: акселерометр, персонажи и весь мета-слой (день,
@@ -1569,7 +1758,11 @@
       тесто семьи roti canai/prata, но сладкий конверт ближе к <b>мартабаку</b>; корни
       тайско-мусульманские, юг страны</td></tr>
     <tr><td>Сковорода</td><td><b>กระทะโรตี</b> — толстая сталь 18–20″ с <b>вогнутым дном</b> под лужицу
-      масла; «тава» — индийское слово, тайка его не скажет</td></tr>
+      масла; «тава» — индийское слово, тайка его не скажет.<br>
+      <b>Открытая развилка <a href="https://github.com/newYurk/roti-stand/issues/44">#44</a>:</b>
+      одобренные экраны локаций (06.09.2026) рисуют плоскую сковороду с тонким краем, доки и стенд —
+      вогнутую กระทะโรตี. Пока развилка не закрыта, вогнутость — позиция доков, а не согласованный
+      факт; от неё зависит карта жира в модели жарки.</td></tr>
     <tr><td>Жир и порядок</td><td>жарят на <b>маргарине</b>; лист кладут на сковороду <b>до</b> начинки;
       шарики теста отлёживаются <b>в масле</b>, не под тканью</td></tr>
     <tr><td>Мука и соседи</td><td>мука для роти — <b>пшеничная и покупная</b> (мешок из лавки); деревенская
@@ -1587,9 +1780,21 @@
     <li>Никаких изображений <b>Будды как декора</b> (кампания «Buddha is not for decoration», ст. 206 УК).</li>
     <li>Никаких реалистичных <b>тайских банкнот</b> — на них портрет Короля (ст. 112, экстерриториально).</li>
     <li><b>Монах-клиент вечером невозможен</b>: монахи Тхеравады не едят после полудня и не берут деньги —
-      в петле дня «простой роти монаху» живёт только в утреннем окне, и это работает на механику времени.</li>
-    <li>Свинины и алкоголя на роти-тележке не бывает; арабскую вязь и аудио-сэмплы — только проверенные
-      (кейс LittleBigPlanet: отзыв тиража за две строки Корана в треке).</li>
+      в петле дня «простой роти монаху» живёт только в утреннем окне. На механику времени это больше
+      не работает: минут нет с 07.09.2026 ⚑, предел дня — тесто, восполняемое реальным временем.
+      Сама несовместимость точек в силе, но чем она теперь исключена — фазами дня, тестом или реальным
+      временем суток игрока — не решено (<a href="https://github.com/newYurk/roti-stand/issues/67">#67</a>,
+      блокирует архитектуру).</li>
+    <li><b>Национальных и религиозных ограничений в игре нет</b> — ⚑ 07.09.2026 владелец сняла их
+      целиком: «у нас не будет вообще никаких национальных ограничений, или техник, завязанных на
+      национальности, или историй, завязанных на национальности». Прежняя красная линия «свинины и
+      алкоголя — ни в одной начинке, навсегда» вычеркнута из действующих доков вместе с халялем как
+      требованием к начинкам. Историю блюда это не переписывает: индийско-мусульманские и
+      малайско-мусульманские корни — установленный фактчеком факт, а решение владельца — про правила
+      внутри игры.</li>
+    <li>От снятой рамки не зависело и осталось в силе: выдуманным блюдам <b>нельзя псевдотайские
+      имена</b>; арабскую вязь и аудио-сэмплы — только проверенные (кейс LittleBigPlanet: отзыв
+      тиража за две строки Корана в треке).</li>
     <li>Nutella — торговая марка: в доках заменить на «шоколадную пасту». Epidemic Sound игры
       <b>не покрывает вовсе</b> — звук брать на Sonniss GDC / Splice.</li>
   </ul>
@@ -1598,32 +1803,55 @@
 <section id="docs">
   <div class="sec-label">12 · Карта документов</div>
   <h2>Где что лежит</h2>
-  <p class="dim">Проект: приватный <a href="https://github.com/newYurk/roti-stand">github.com/newYurk/roti-stand</a> ·
-  стенд: публичный <a href="https://github.com/newYurk/roti-stand">roti-dough-proto</a></p>
+  <p class="dim">Проект и стенд живут в одном публичном репозитории —
+  <a href="https://github.com/newYurk/roti-stand">github.com/newYurk/roti-stand</a>: и код стенда, и корпус
+  доков, и ревью. Играбельная копия публикуется прямо из <span class="path">prototype/dough-closeup/</span>
+  через GitHub Pages: <a href="https://newyurk.github.io/roti-stand/prototype/dough-closeup/">newyurk.github.io/roti-stand/prototype/dough-closeup/</a>.
+  Отдельный репозиторий <span class="path">roti-dough-proto</span> удалён владельцем 26.08.2026, его адрес
+  на Pages больше не отвечает. Расхождение «публичный репозиторий против запрета в доках» ведётся задачей
+  <a href="https://github.com/newYurk/roti-stand/issues/23">#23</a>.</p>
   <div class="tblwrap"><table>
     <tr><th>Файл</th><th>Что внутри</th></tr>
     <tr><td class="path">STATE.md</td><td>точка входа: с него начинается любой новый чат</td></tr>
     <tr><td class="path">docs/roti-design-doc.md</td><td>действующий дизайн-док (v2, 25.08: ядро + мета-слой) — старший над ревью и архивом</td></tr>
     <tr><td class="path">docs/decisions-log.md</td><td>журнал решений: владельца, делегированные ⚑ и сверка дизайн-ядра с v1 (25.08)</td></tr>
     <tr><td class="path">review/review-2026-08-21.md</td><td>разбор ревью: что подтвердилось, что опровергнуто, что решать</td></tr>
-    <tr><td class="path">review/raw/*.json</td><td>175 находок машинно: 9 линз, severity, цитаты, ссылки</td></tr>
+    <tr><td class="path">review/raw/*.json</td><td>175 находок машинно: 9 файлов (8 линз + приложение по фауне), severity, цитаты, ссылки.
+      Осторожно: поле <code>status</code> не поддерживается — у всех 175 находок стоит «open», включая
+      давно закрытые; у пяти приложений ревью из шести JSON нет вовсе, и на этом из 81 «владельческой»
+      находки потерялось 28 (<a href="https://github.com/newYurk/roti-stand/issues/73">#73</a>).
+      Машинный список полон по линзам, но не по приложениям</td></tr>
     <tr><td class="path">docs/slap-input-audit.md</td><td>аудит ввода: state machine, псевдокод, три прохода со стоп-правилами</td></tr>
     <tr><td class="path">docs/frying-mechanics.md</td><td>жарка: спецификация (пузыри, маргарин, переворот) + фактчек «откуда начинает прожариваться»</td></tr>
     <tr><td class="path">docs/simulation-references.md</td><td>источники по симуляции листа: FEM раскатки, критерий разрыва, физика броска, MPM выпечки</td></tr>
     <tr><td class="path">prototype/dough-closeup/MECHANICS.md</td><td>устройство модели теста и её честные пределы</td></tr>
     <tr><td class="path">prototype/…/HYPOTHESIS.md · RESULT.md</td><td>гипотеза замеров до кода · журнал всех опровержений</td></tr>
-    <tr><td class="path">docs/corpus-map.md</td><td>судьба корпуса: что уцелело, что утрачено (v5!), где искали</td></tr>
-    <tr><td class="path">docs/archive/*</td><td>исходные доки v3 · v4 · v6 · бриф · дизайн-ядро «тележка» (25.08) — не редактируются никогда</td></tr>
+    <tr><td class="path">docs/corpus-map.md</td><td>судьба корпуса: что уцелело и что утрачено. Утрачено минимум два документа —
+      addendum v5 («экономика без валюты», «экран готовки одним жестом») и addendum-v3 (детали экрана
+      готовки, оценка сложности VFX, «вкусовое расследование»); corpus-map допускает и третий,
+      «addendum после v5» про акварель и полу-реализм. На диске их нет, единственный шанс — история
+      чатов Perplexity, проверить может только владелец
+      (<a href="https://github.com/newYurk/roti-stand/issues/16">#16</a>)</td></tr>
+    <tr><td class="path">docs/archive/*</td><td>одиннадцать документов. Исходный корпус — v3 · v4 · v6 · утреннее дополнение · бриф ·
+      дизайн-ядро «тележка» (25.08); впитанные после него тексты владельца несут действующие решения:
+      направление на веб-реализацию и сводка по готовке, вводу и стеку (07.09), модель действий готовки
+      (06.09). Там же «масло, а не мука» (06.09) и не владельческая рекомендация по веб-стеку (07.09) —
+      кандидат в конфигурацию <a href="https://github.com/newYurk/roti-stand/issues/30">#30</a>.
+      Не редактируется никогда — вся папка</td></tr>
   </table></div>
-  <div class="note"><b>Открытая рана корпуса:</b> addendum v5 («экономика без валюты», «экран
-  готовки одним жестом») утрачен безвозвратно — на диске его нет, Time Machine не настроен.
-  Единственный шанс — история чатов Perplexity; проверить может только владелец. Тему v5 теперь
-  закрывает дизайн-ядро 25.08 — новым решением, не реконструкцией.</div>
+  <div class="note"><b>Открытая рана корпуса:</b> утрачен не один документ, а минимум два —
+  addendum v5 («экономика без валюты», «экран готовки одним жестом») и addendum-v3 (детали экрана
+  готовки, оценка сложности VFX, «вкусовое расследование»); corpus-map допускает и третий, «addendum
+  после v5» про акварель и полу-реализм. На диске их нет, Time Machine не настроен. Единственный
+  шанс — история чатов Perplexity; проверить может только владелец
+  (<a href="https://github.com/newYurk/roti-stand/issues/16">#16</a>). Тему v5 теперь закрывает
+  дизайн-ядро 25.08 — новым решением, не реконструкцией.</div>
 </section>
 
 <footer>
-  Roti Stand · страница-обзор для работы, стилизована под питч · собрано 22.08.2026 · обновлено 26.08.2026 (мета-слой, тава в стенде, жарка по толщине)<br>
-  сборка стенда на момент вёрстки: «тава и запятая · прожарка по толщине» · один чат — один проект
+  Roti Stand · страница-обзор для работы, стилизована под питч · собрано 22.08.2026 · обновлено 08.09.2026
+  (направление — веб; минимальные требования к устройству; раскладка стенда по ориентации; жест переноса)<br>
+  сборка стенда на момент вёрстки: «2026-09-08 · замер кадра» · один чат — один проект
 </footer>
 </div>
 
