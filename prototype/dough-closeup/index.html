@@ -252,7 +252,12 @@ let action = { state:"RESTING", pointerId:null, edgeNode:-1, gripIds:[], gripWei
   impulse:0, direction:{x:0,y:0}, timer:0, mul:0, heldAtLift:0,
   // перенос «запятой»: накопленный поворот маха, его хвост и параметры полёта
   sweep:0, lastDir:null, tailDir:{x:1,y:0}, carryFrom:{x:0,y:0}, toss:null };
-let lastDecision = "—";            // как классифицирован последний мах — для строки статистики
+let lastDecision = "—";            // как классифицирован последний мах — для строки статистик
+// Сколько махов на шаге 3 стенд засчитал переносом. Нужен потому, что гейт 15°
+// решается частотой событий, а не рукой (#91): на живом пальце долю попаданий
+// приходится считать вручную, а руками из двадцати попыток не сосчитаешь.
+// Считаем только шаг 3: на шаге 2 шлепок — работа, а не промах.
+let tossOk = 0, tossTry = 0;и
 let plasticT = 0;                  // окно пластичности после удара, с
 let startArea = 1;                 // площадь листа при рождении — база для areaRatio
 let gestures = [];                 // журнал шлепков (audit §6.6)
@@ -708,6 +713,7 @@ function updateActionMove(p){
 
   if(heldMs() >= HOLD_MIN && speed/Math.max(1,gestureScale) >= V_MIN && drive >= ACTION_MIN){
     action.state = "LIFTING";
+    if(stepNo === 3 && phase === "TABLE") tossTry++;   // попытка засчитывается с момента маха
     action.timer = LIFT_MAX;
     action.heldAtLift = Math.round(heldMs());
     const sl = speed || 1;
@@ -845,7 +851,7 @@ function updateToss(){
 function land(){
   const t = action.toss;
   bakeTransform(t.x1 - xf.cx, t.y1 - xf.cy, t.spin);
-  xf = null; phase = "PAN";
+  xf = null; phase = "PAN"; tossOk++;
   measureThickness();
   audioPanLand();
   gestures.push({ kind:"toss", sweep_deg: Math.round(t.sweep*180/Math.PI),
@@ -1748,7 +1754,7 @@ function shade(t){ const c = mix(t); return `rgb(${c[0]},${c[1]},${c[2]})`; }
 // читается как «идеально», а «60 fps» до первого измерения — просто неправда (#89).
 let last=performance.now(), fps=null, acc=0, frameCount=0, worst=0, warmup=0;   // не `frames`: совпадает с window.frames
 function resetMeters(){
-  worst=0; fps=null; acc=0; frameCount=0; warmup=6;
+  worst=0; fps=null; acc=0; frameCount=0; warmup=6; tossOk=0; tossTry=0;
   // `latencies` тоже: без этого «звук N мс» — бегущая медиана за всю сессию и по всем
   // видам сразу, и как число вида A или B её читать нельзя (найдено проверкой 08.09).
   latencies.length = 0;
@@ -1827,7 +1833,7 @@ function loop(now){
     // Что стенд решил про последний мах — «запятая 52° → тава» или «дуга 22° → шлепок».
     // Жила эта строка только в полной статистике, то есть за закрытой дверью «прибора»,
     // а именно она объясняет, почему лист не полетел. В колонке она нужнее всего.
-    (lastDecision ? `\n${lastDecision}` : "");
+    (lastDecision ? `\n${lastDecision}${tossTry ? ` · ${tossOk}/${tossTry}` : ""}` : "");
   const done = log.filter(l=>l.variant===variant&&l.condition===condition).length;
   const hit  = log.filter(l=>l.variant===variant&&l.condition===condition&&l.predicted).length;
   stats.textContent =
@@ -1835,7 +1841,8 @@ function loop(now){
     `${variant}/${condition}  попыток ${done}/30  распознано ${done?Math.round(hit/done*100):0}%\n` +
     `${stackedLayout()?"портрет · замер с альбомным не сравнить":"альбом"}\n` +
     `шаг ${stepNo}  ${action.state!=="RESTING"?"◆ "+action.state:"○ покой"}  ` +
-    `${phase==="PAN" ? "тава · сушка "+md.toFixed(2)+" · цвет "+mc.toFixed(2) : "стол"}  мах: ${lastDecision}  ` +
+    `${phase==="PAN" ? "тава · сушка "+md.toFixed(2)+" · цвет "+mc.toFixed(2) : "стол"}  мах: ${lastDecision}` +
+    `${tossTry ? "  перенесено "+tossOk+" из "+tossTry : ""}  ` +
     `лист ${pct}%${ready}${ragged}  жестов ${gestures.length}  ` +
     `[касаний ${rawTouch} · указателей ${rawPointer} · до теста ↓${dbgDown} ↔${dbgMove} · ${dbgKind}${loopErrs?" · сбоев "+loopErrs:""}]  ` +
     `${tornAt?"рваный":pressed?"нажато":"—"}  ` +
