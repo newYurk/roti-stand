@@ -3,147 +3,44 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
-<!-- Стенд правится часто, а GitHub Pages отдаёт max-age=600: без этого телефон
-     показывает вчерашнюю сборку и правки «не доезжают». -->
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
-<meta http-equiv="Pragma" content="no-cache">
-<meta http-equiv="Expires" content="0">
 <title>Растяжка теста роти</title>
 <style>
-  :root{ --bg:#14100c; --ink:#e8ddcc; --dim:#8b7f6e; --line:#2a231b; --hot:#d98b3a; }
-  *{ box-sizing:border-box; -webkit-tap-highlight-color:transparent;
-     -webkit-touch-callout:none; -webkit-user-select:none; user-select:none; }
-  html,body{ margin:0; height:100%; background:var(--bg); color:var(--ink);
-    font:13px/1.45 ui-monospace,SFMono-Regular,Menlo,monospace; overscroll-behavior:none; }
-  body{ display:flex; flex-direction:column; touch-action:none; }
-  #stage{ flex:1; position:relative; min-height:0; min-width:0; }
-  canvas{ position:absolute; inset:0; width:100%; height:100%; display:block; touch-action:none; }
-  #panel{ border-top:1px solid var(--line); padding:8px 10px; display:flex; flex-wrap:wrap;
-    gap:6px 14px; align-items:center; background:#0f0c09; }
-  .grp{ display:flex; gap:4px; align-items:center; }
-  .grp b{ color:var(--dim); font-weight:400; margin-right:2px; }
-  .measure{ opacity:.62; }
-  .measure b{ color:#5d5346; font-size:11px; }
-  .tune label{ display:flex; align-items:center; gap:4px; color:var(--dim); font-size:11px; }
-  .tune input[type=range]{ width:74px; accent-color:var(--hot); }
-  button{ font:inherit; color:var(--ink); background:#1c1710; border:1px solid var(--line);
-    padding:4px 9px; cursor:pointer; }
-  button:hover{ border-color:var(--dim); }
-  button.on{ background:var(--hot); color:#14100c; border-color:var(--hot); }
-  #tear{ padding:8px 18px; font-weight:bold; }
-  #stats{ color:var(--dim); margin-left:auto; text-align:right; white-space:pre-wrap;
-    min-width:0; overflow-wrap:anywhere; }
-  #core, #tools{ display:contents; }
-  #gStep{ order:1 } #gView{ order:2 } #gCond{ order:3 } #tear{ order:4 }
-  #gTune{ order:5 } #gSrv{ order:6 } #stats{ order:7 }
-  #toolsBtn, #mini{ display:none; }
-  #hint{ position:absolute; left:10px; top:10px; right:10px; color:var(--dim);
-    pointer-events:none; font-size:11px; }
-  #live{ position:absolute; left:0; right:0; top:34px; text-align:center;
-    pointer-events:none; font-size:clamp(14px,3.4vw,20px); color:var(--hot); }
-  #flash{ position:absolute; inset:0; pointer-events:none; opacity:0; background:#d98b3a;
-    transition:opacity .28s ease-out; }
-  #tear.armed{ background:var(--hot); color:#14100c; border-color:var(--hot); }
-  #torn{ position:absolute; inset:0; display:none; align-items:center; justify-content:center;
-    color:var(--hot); font-size:clamp(18px,4vw,32px); letter-spacing:.08em;
-    pointer-events:none; z-index:4; }
-  #torn.on{ display:flex; }
-  @media (orientation:portrait) and (max-width:600px){
-    #stage{ flex:none; height:120vw; }
-    #panel{ flex:1 1 auto; align-content:flex-start;
-      overflow-y:auto; touch-action:pan-y; }
-    #stats{ height:auto; min-height:7em; }
-  }
-  @media (max-width:900px){
-    .grp{ flex-wrap:wrap; }
-    #panel{ padding:6px 8px; gap:5px 8px; }
-    #panel button{ font-size:12px; padding:7px 8px; }
-    .grp{ gap:5px; }
-    .grp b{ font-size:11px; }
-    #stats{ margin-left:0; width:100%; white-space:pre-wrap; text-align:left;
-      font-size:11px; line-height:1.35; height:7em; overflow-y:auto; }
-    #tear .kbd{ display:none; }
-    .tune label{ flex-direction:column; align-items:stretch; gap:1px; font-size:10px; }
-    .tune input[type=range]{ width:88px; }
-  }
-  @media (orientation:landscape) and (max-height:640px){
-    body{ --rail:clamp(112px,15vw,146px); flex-direction:row; }
-    #panel{ position:relative; flex:0 0 var(--rail); width:var(--rail);
-      flex-direction:column; flex-wrap:nowrap; align-items:stretch; gap:5px;
-      border-top:0; border-left:1px solid var(--line);
-      padding:6px 6px calc(6px + env(safe-area-inset-bottom,0px)); }
-    #core{ display:flex; flex:1; min-height:0; flex-direction:column;
-      align-items:stretch; gap:5px; overflow-y:auto; touch-action:pan-y; }
-    #gStep{ order:1 } #gView{ order:2 } #tear{ order:3 } #mini{ order:4 } #toolsBtn{ order:5 }
-    #gCond{ order:1 } #gTune{ order:2 } #gSrv{ order:3 } #stats{ order:4 }
-    #tools .tune label{ width:100%; }
-    #core .grp{ flex-direction:column; align-items:stretch; gap:3px; }
-    #core .grp b{ margin:0; font-size:10px; }
-    #panel button{ font-size:10px; padding:9px 3px; white-space:normal; line-height:1.15; }
-    #tear{ padding:14px 3px; font-size:11px; }
-    #tear .kbd{ display:none; }
-    #core .tune label{ flex-direction:column; align-items:stretch; gap:1px; }
-    #core .tune input[type=range]{ width:100%; }
-    #toolsBtn{ display:block; }
-    #mini{ display:block; margin-top:auto; flex:none; color:var(--dim); font-size:11px;
-      line-height:1.35; white-space:pre-line; overflow-wrap:anywhere; }
-    #tools{ display:none; position:fixed; left:0; top:0; bottom:0; right:var(--rail);
-      flex-flow:column wrap; align-content:flex-start; gap:8px 16px;
-      padding:10px 12px calc(10px + env(safe-area-inset-bottom,0px));
-      background:rgba(15,12,9,.99); border-right:1px solid var(--line); z-index:6; }
-    body.tools #tools{ display:flex; }
-    #tools .grp{ width:min(212px,42vw); flex-wrap:wrap; align-items:center; }
-    #tools .grp b{ width:100%; margin:0; }
-    #tools .measure{ opacity:1; }
-    #stats{ width:min(248px,46vw); margin-left:0; text-align:left;
-      white-space:pre-wrap; font-size:10px; line-height:1.35; }
-  }
+  html,body{margin:0;height:100%;background:#14100c;color:#e8ddcc;
+    font:13px/1.45 ui-monospace,SFMono-Regular,Menlo,monospace}
+  #boot{padding:24px;color:#8b7f6e}
 </style>
 </head>
 <body>
-<div id="stage">
-  <canvas id="cv"></canvas>
-  <div id="hint">шаг 1: прижимай кусочек — расплющишь до пунктира · шаг 2: возьми край, миг подержи, резко махни — шлепок · шаг 3: возьми край и круговым махом-«запятой» перекинь на таву — полетит, повернётся, зашипит. Порвётся — останется рваный узор, так и пожарим</div>
-  <div id="live">прижми кусочек теста</div>
-  <div id="flash"></div>
-</div>
-
-<div id="panel">
-  <div id="core">
-    <div class="grp" id="gStep"><b>шаг</b>
-      <button data-s="1" class="on">расплющить</button>
-      <button data-s="2">растянуть</button>
-      <button data-s="3">на таву</button>
-    </div>
-    <button id="tear">СЕЙЧАС ПОРВЁТСЯ<span class="kbd"> (space)</span></button>
-    <div class="grp measure" id="gView"><b>вид</b>
-      <button data-v="A" class="on">A · 80</button>
-      <button data-v="B">B · 224</button>
-      <button data-v="C">C · контроль</button>
-    </div>
-    <button id="toolsBtn">прибор ▸</button>
-    <div id="mini"></div>
-  </div>
-  <div id="tools">
-    <div class="grp tune" id="gTune"><b>ощущение</b>
-      <label>упругость<input id="sCom" type="range" min="0" max="100" value="30"></label>
-      <label>текучесть<input id="sCreep" type="range" min="0" max="100" value="30"></label>
-      <label>прочность<input id="sBreak" type="range" min="0" max="100" value="72"></label>
-    </div>
-    <div class="grp measure" id="gCond"><b>судишь по</b>
-      <button data-c="both" class="on">обоим</button>
-      <button data-c="sight">картинке</button>
-    </div>
-    <div class="grp" id="gSrv">
-      <button id="reset">заново</button>
-      <button id="dump">лог</button>
-      <button id="hardReload">обновить</button>
-    </div>
-    <div id="stats"></div>
-  </div>
-</div>
-
-<script src="stand.js"></script>
-
+<div id="boot">собираю стенд…</div>
+<script>
+(async () => {
+  const PIN = "306ef13881702ceee9d4edbb69bb748f402dc5f0";
+  const PATH = "prototype/dough-closeup/index.html";
+  const urls = [
+    "https://cdn.jsdelivr.net/gh/newYurk/roti-stand@" + PIN + "/" + PATH,
+    "https://raw.githubusercontent.com/newYurk/roti-stand/" + PIN + "/" + PATH
+  ];
+  const boot = document.getElementById("boot");
+  let html = null, err = null;
+  for (const url of urls) {
+    try {
+      const r = await fetch(url, { cache: "no-store" });
+      if (!r.ok) throw new Error(url + " → " + r.status);
+      html = await r.text();
+      break;
+    } catch (e) { err = e; }
+  }
+  if (!html) {
+    boot.textContent = "не скачался стенд: " + (err && err.message);
+    return;
+  }
+  // Лишняя «и» после tossTry давала ReferenceError и гасила canvas.
+  html = html.replace("let tossOk = 0, tossTry = 0;и", "let tossOk = 0, tossTry = 0;");
+  document.open();
+  document.write(html);
+  document.close();
+})();
+</script>
 </body>
 </html>
