@@ -1,3 +1,13 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<!-- Стенд правится часто, а GitHub Pages отдаёт max-age=600: без этого телефон
+     показывает вчерашнюю сборку и правки «не доезжают». -->
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<meta http-equiv="Pragma" content="no-cache">
+<meta http-equiv="Expires" content="0">
 <title>Растяжка теста роти</title>
 <style>
   :root{ --bg:#14100c; --ink:#e8ddcc; --dim:#8b7f6e; --line:#2a231b; --hot:#d98b3a; }
@@ -6,7 +16,7 @@
   html,body{ margin:0; height:100%; background:var(--bg); color:var(--ink);
     font:13px/1.45 ui-monospace,SFMono-Regular,Menlo,monospace; overscroll-behavior:none; }
   body{ display:flex; flex-direction:column; touch-action:none; }
-  #stage{ flex:1; position:relative; min-height:0; }
+  #stage{ flex:1; position:relative; min-height:0; min-width:0; }
   canvas{ position:absolute; inset:0; width:100%; height:100%; display:block; touch-action:none; }
   #panel{ border-top:1px solid var(--line); padding:8px 10px; display:flex; flex-wrap:wrap;
     gap:6px 14px; align-items:center; background:#0f0c09; }
@@ -23,69 +33,183 @@
   button:hover{ border-color:var(--dim); }
   button.on{ background:var(--hot); color:#14100c; border-color:var(--hot); }
   #tear{ padding:8px 18px; font-weight:bold; }
-  #stats{ color:var(--dim); margin-left:auto; text-align:right; white-space:pre; }
+  /* `pre` не переносил строку вовсе, и правый конец уезжал за экран на любой ширине —
+     видно на скриншоте владельца 08.09.2026: обрезаны «сборка» и «худший кадр».
+     `min-width:0` обязателен: без него флекс-элемент не сжимается ниже содержимого. */
+  #stats{ color:var(--dim); margin-left:auto; text-align:right; white-space:pre-wrap;
+    min-width:0; overflow-wrap:anywhere; }
+  /* Смена подписи «ощущение своё» не должна менять высоту поля и стирать лист. */
+  @media (min-width:901px) and (min-height:641px){
+    #stats{ width:100%; height:7em; overflow-y:auto; }
+  }
+  /* #core и #tools — обёртки для ландшафта телефона. В остальных раскладках они
+     display:contents, то есть в разметке не участвуют вовсе, а order возвращает
+     группам исходный порядок панели: шаг · вид · судишь · порвётся · ощущение · служебные · статистика. */
+  #core, #tools{ display:contents; }
+  #gStep{ order:1 } #gView{ order:2 } #gCond{ order:3 } #tear{ order:4 }
+  #gTune{ order:5 } #gSrv{ order:6 } #stats{ order:7 }
+  #toolsBtn, #mini{ display:none; }
   #hint{ position:absolute; left:10px; top:10px; right:10px; color:var(--dim);
     pointer-events:none; font-size:11px; }
   /* Крупный индикатор: мелкую строку внизу на телефоне не разглядеть,
      а без неё непонятно, дошло ли касание вообще. */
   #live{ position:absolute; left:0; right:0; top:34px; text-align:center;
     pointer-events:none; font-size:clamp(14px,3.4vw,20px); color:var(--hot); }
-  #flash{ position:absolute; inset:0; pointer-events:none; opacity:0; background:#d98b3a; }
+  /* Вспышка на предсказание. Было 0,18 за 90 мс — на телефоне не видно вовсе
+     (замечание владельца 08.09.2026). Стало заметно и с затуханием, чтобы читалось
+     как ответ прибора, а не как рывок кадра. */
+  #flash{ position:absolute; inset:0; pointer-events:none; opacity:0; background:#d98b3a;
+    transition:opacity .28s ease-out; }
+  #tear.armed{ background:var(--hot); color:#14100c; border-color:var(--hot); }
   #torn{ position:absolute; inset:0; display:none; align-items:center; justify-content:center;
     color:var(--hot); font-size:clamp(18px,4vw,32px); letter-spacing:.08em;
     pointer-events:none; z-index:4; }
   #torn.on{ display:flex; }
-  #blind{ position:absolute; inset:0; display:none; flex-direction:column; gap:6px;
-    align-items:center; justify-content:center; color:var(--dim); text-align:center;
-    pointer-events:none; z-index:3; }
-  #blind span{ color:#5d5346; font-size:12px; }
-  #blind.on{ display:flex; }
-  /* Подсказка про ориентацию перекрывала весь холст и съедала касания:
-     при вертикальном телефоне играть было нельзя вообще. Теперь она сквозная. */
-  #turn{ position:absolute; left:0; right:0; bottom:8px; display:none; justify-content:center;
-    color:var(--dim); text-align:center; padding:8px; z-index:5; pointer-events:none; }
-  @media (orientation:portrait){ #turn{ display:flex; } }
-</style>
+  /* Портрет БОЛЬШЕ НЕ ЗАКРЫТ (решение владельца 08.09.2026: «на вертикальном экране
+     закидываем роти снизу вверх, и таву увеличим»). Заглушка «поверни телефон» стояла
+     здесь потому, что в портрете сцена была широкой низкой полосой, лист и тава лежали
+     рядом, а две трети поля оставались пустым столом. Теперь зоны в портрете делятся
+     по ВЫСОТЕ: тесто внизу, тава вверху, — и пустая половина стала местом тавы.
+     Оговорка про замер не отменена, а переехала в строку телеметрии: числа портрета
+     с альбомными по-прежнему не сравнить, холст другого размера. Она предупреждает,
+     а не запрещает.
+     Высота поля привязана к ШИРИНЕ (`vw`, не `vh`): на iOS высота вьюпорта скачет от
+     тулбара Safari, а любой скачок высоты пересобирает лист. Поле не `flex:1`, значит
+     содержимое панели физически не может двигать его границу. */
+  @media (orientation:portrait) and (max-width:600px){
+    #stage{ flex:none; height:120vw; }
+    #panel{ flex:1 1 auto; align-content:flex-start;
+      overflow-y:auto; touch-action:pan-y; }
+    #stats{ height:auto; min-height:7em; }
+  }
 
+  /* Узкое окно, раскладка-строка. Панель ОБЯЗАНА переноситься: иначе правый край
+     уезжает за экран, а доскроллить нечем — body{touch-action:none}. Видно на скриншоте
+     владельца 08.09.2026: обрезаны «прочность», «скопировать лог» и «обновить».
+     Сюда попадают: портрет после «всё равно продолжить», планшет и узкое окно на десктопе.
+     Блок стоит ДО ландшафтного: там своя раскладка, и она должна перебивать эту. */
+  @media (max-width:900px){
+    .grp{ flex-wrap:wrap; }
+    #panel{ padding:6px 8px; gap:5px 8px; }
+    #panel button{ font-size:12px; padding:7px 8px; }
+    .grp{ gap:5px; }
+    .grp b{ font-size:11px; }
+    /* Высота ЗАКРЕПЛЕНА, и это не косметика. С `pre-wrap` первое же касание удлиняло
+       строку («задержка —» → «задержка 21 мс»), блок переносился на лишнюю строку,
+       панель подрастала, ResizeObserver дёргал resize() → build() → clearAction(),
+       и жест умирал через 9–14 мс после касания — палец дописывал запятую в пустоту.
+       Тот же приём уже применён к листу «прибор» в ландшафте (см. комментарий ниже). */
+    #stats{ margin-left:0; width:100%; white-space:pre-wrap; text-align:left;
+      font-size:11px; line-height:1.35; height:7em; overflow-y:auto; }
+    #tear .kbd{ display:none; }          /* пробела нет ни на телефоне, ни на планшете */
+    .tune label{ flex-direction:column; align-items:stretch; gap:1px; font-size:10px; }
+    .tune input[type=range]{ width:88px; }
+  }
+
+  /* ── ТЕЛЕФОН В ЛАНДШАФТЕ: панель уходит В КОЛОНКУ СБОКУ.
+     Внизу она забирала высоту первой (247–282 px из 340–430) и полю оставалась треть
+     экрана — «игровая область в верхней трети» — это буквальный замер, 24,9–37,2 %.
+     В ландшафте дефицит — высота, а ширина избыточна: панель тратит ширину.
+     Порог max-height:640px отсекает iPad (1024) и десктоп (900) — там нижняя панель
+     даёт полю 83–86 % и ломать её незачем. Взят с запасом над телефонами (430): при
+     ширине меньше ~1000 px нижняя панель не даёт 70 % НИ НА КАКОЙ высоте — 247 px
+     при 800 требуют экрана в 823 px, которого в ландшафте не бывает. */
+  @media (orientation:landscape) and (max-height:640px){
+    body{ --rail:clamp(112px,15vw,146px); flex-direction:row; }
+    #panel{ position:relative; flex:0 0 var(--rail); width:var(--rail);
+      flex-direction:column; flex-wrap:nowrap; align-items:stretch; gap:5px;
+      border-top:0; border-left:1px solid var(--line);
+      padding:6px 6px calc(6px + env(safe-area-inset-bottom,0px)); }
+    #core{ display:flex; flex:1; min-height:0; flex-direction:column;
+      align-items:stretch; gap:5px; overflow-y:auto; touch-action:pan-y; }
+    /* Порядок панели-строки здесь не действует: в колонке свой — шаг, порвётся, прибор,
+       телеметрия внизу. Без этого #toolsBtn и #mini (order по умолчанию 0) уезжали
+       наверх, а «СЕЙЧАС ПОРВЁТСЯ» уходило под нижний край. */
+    /* В колонке — только то, чем пользуются во время замера: шаг, вид A/B/C, предсказание.
+       Ползунки «ощущение» за весь замер не трогают ни разу, а занимали 134 px из 381 —
+       ровно ту высоту, которой не хватало кнопкам под палец. Они уехали в лист «прибор». */
+    /* `#mini` выше кнопки «прибор»: если колонка не влезает по высоте, срезается кнопка,
+       которой во время прогона не пользуются, а не числа, ради которых прогон идёт.
+       Проверка 08.09: панели нужно 379 px, а Safari в ландшафте отдаёт меньше 393 —
+       тулбар и home-indicator съедают разницу первыми. */
+    #gStep{ order:1 } #gView{ order:2 } #tear{ order:3 } #mini{ order:4 } #toolsBtn{ order:5 }
+    #gCond{ order:1 } #gTune{ order:2 } #gSrv{ order:3 } #stats{ order:4 }
+    #tools .tune label{ width:100%; }
+    #core .grp{ flex-direction:column; align-items:stretch; gap:3px; }
+    #core .grp b{ margin:0; font-size:10px; }
+    #panel button{ font-size:10px; padding:9px 3px; white-space:normal; line-height:1.15; }
+    #tear{ padding:14px 3px; font-size:11px; }
+    #tear .kbd{ display:none; }          /* на телефоне пробела нет */
+    #core .tune label{ flex-direction:column; align-items:stretch; gap:1px; }
+    #core .tune input[type=range]{ width:100%; }
+    #toolsBtn{ display:block; }
+    #mini{ display:block; margin-top:auto; flex:none; color:var(--dim); font-size:11px;
+      line-height:1.35; white-space:pre-line; overflow-wrap:anywhere; }
+    /* Прибор — отдельный лист ПОВЕРХ поля, а не рядом с ним: во-первых, в 112 px он
+       не помещается; во-вторых, любое изменение размера #stage пересобирает лист,
+       и открыть настройки стоило бы игроку теста. Колоночный перенос раскладывает
+       группы в столько столбцов, сколько нужно, — прокрутки нет ни на одной высоте. */
+    #tools{ display:none; position:fixed; left:0; top:0; bottom:0; right:var(--rail);
+      flex-flow:column wrap; align-content:flex-start; gap:8px 16px;
+      padding:10px 12px calc(10px + env(safe-area-inset-bottom,0px));
+      background:rgba(15,12,9,.99); border-right:1px solid var(--line); z-index:6; }
+    body.tools #tools{ display:flex; }
+    #tools .grp{ width:min(212px,42vw); flex-wrap:wrap; align-items:center; }
+    #tools .grp b{ width:100%; margin:0; }
+    #tools .measure{ opacity:1; }        /* поверх поля приглушать нечего */
+    #stats{ width:min(248px,46vw); margin-left:0; text-align:left;
+      white-space:pre-wrap; font-size:10px; line-height:1.35; }
+  }
+</style>
+</head>
+<body>
 <div id="stage">
   <canvas id="cv"></canvas>
   <div id="hint">шаг 1: прижимай кусочек — расплющишь до пунктира · шаг 2: возьми край, миг подержи, резко махни — шлепок · шаг 3: возьми край и круговым махом-«запятой» перекинь на таву — полетит, повернётся, зашипит. Порвётся — останется рваный узор, так и пожарим</div>
   <div id="live">прижми кусочек теста</div>
   <div id="flash"></div>
-  <div id="blind">картинка выключена намеренно<br><span>это режим замера: тяни на слух</span></div>
-  <div id="turn">удобнее горизонтально</div>
 </div>
 
 <div id="panel">
-  <div class="grp"><b>шаг</b>
-    <button data-s="1" class="on">1 · расплющить</button>
-    <button data-s="2">2 · растянуть</button>
-    <button data-s="3">3 · на таву</button>
+  <!-- В ландшафте телефона #core — это узкая колонка сбоку (то, что нужно в игре),
+       а #tools открывается поверх поля кнопкой «прибор». В портрете и на большом
+       экране обе обёртки display:contents и панель остаётся прежней строкой. -->
+  <div id="core">
+    <div class="grp" id="gStep"><b>шаг</b>
+      <button data-s="1" class="on">расплющить</button>
+      <button data-s="2">растянуть</button>
+      <button data-s="3">на таву</button>
+    </div>
+    <button id="tear">СЕЙЧАС ПОРВЁТСЯ<span class="kbd"> (space)</span></button>
+    <div class="grp measure" id="gView"><b>вид</b>
+      <button data-v="A" class="on">A · 80</button>
+      <button data-v="B">B · 224</button>
+      <button data-v="C">C · контроль</button>
+    </div>
+    <button id="toolsBtn">прибор ▸</button>
+    <div id="mini"></div>
   </div>
-  <div class="grp measure"><b>замер: вид</b>
-    <button data-v="A" class="on">A · пиксель 80</button>
-    <button data-v="B">B · пиксель 224</button>
-    <button data-v="C">C · контроль</button>
+  <div id="tools">
+    <div class="grp tune" id="gTune"><b>ощущение</b>
+      <label>податливость<input id="sCom" type="range" min="0" max="100" value="100"></label>
+      <label>текучесть<input id="sCreep" type="range" min="0" max="100" value="100"></label>
+      <label>прочность<input id="sBreak" type="range" min="0" max="100" value="100"></label>
+      <button id="tuneDefault" title="Вернуть стартовые 100 / 100 / 100, сохранив текущий лист">исходные</button>
+    </div>
+    <div class="grp measure" id="gCond"><b>судишь по</b>
+      <button data-c="both" class="on">обоим</button>
+      <button data-c="sight">картинке</button>
+    </div>
+    <div class="grp" id="gSrv">
+      <button id="reset">заново</button>
+      <button id="dump">лог</button>
+      <button id="hardReload">обновить</button>
+    </div>
+    <div id="stats"></div>
   </div>
-  <div class="grp measure"><b>замер: по чему судишь</b>
-    <button data-c="both" class="on">оба</button>
-    <button data-c="sound">только звук</button>
-    <button data-c="sight">только картинка</button>
-  </div>
-  <button id="tear">СЕЙЧАС ПОРВЁТСЯ (space)</button>
-  <div class="grp tune"><b>ощущение</b>
-    <label>упругость<input id="sCom" type="range" min="0" max="100" value="30"></label>
-    <label>текучесть<input id="sCreep" type="range" min="0" max="100" value="30"></label>
-    <label>прочность<input id="sBreak" type="range" min="0" max="100" value="72"></label>
-  </div>
-  <div class="grp">
-    <button id="reset">заново</button>
-    <button id="dump">скопировать лог</button>
-    <button id="hardReload">обновить (сбросить кеш)</button>
-  </div>
-  <div id="stats"></div>
 </div>
 
+<!-- Standalone snapshot of index.html + stand.js. Edit those source files. -->
 <script>
 "use strict";
 /* Прототип «крупный план теста». Ввод перестроен по docs/slap-input-audit.md:
@@ -98,18 +222,41 @@
 // Полярная сетка (24x48 из линзы T2) даёт верное число узлов, но вырождается в центре:
 // длина окружного ребра там падает до долей пикселя, относительное растяжение скачет
 // до 400%+ и лист «рвётся» в середине от любого движения. Замер это обнаружил сразу.
-// Число узлов сохранено (~1150), однородность рёбер восстановлена.
-const BUILD = "2026-08-25 · тава и запятая";
-const GRID = 38;                   // 38x38, в круг попадает ~1130 узлов
+// Число узлов сохранено (1 060 после обрезки по кругу; прежняя оценка «~1150» была на глаз,
+// пересчитано 07.09.2026), однородность рёбер восстановлена.
+const BUILD = "2026-09-16 · мягкое тесто · 1";
+const GRID = 38;                   // 38x38, в круг попадает 1 060 узлов (посчитано, не оценка)
 let SUBSTEPS = 8;                  // T2: 8–10 подшагов, 1 итерация
-let COMPLIANCE = 0.000010;         // податливость. Крутилась вслепую, пока не работал тап,
-                                   // и тесто превратилось в сопли: вернул к упругому.
 let DAMP = 0.986;
-let THICK_BREAK = 0.020;           // лист рвётся там, где ИСТОНЧИЛСЯ до этой доли толщины.
-                                   // Комок ~3 см превращается в лист ~1 мм: толщина падает раз в
-                                   // тридцать, и настоящее тесто это выдерживает. Прежние 0.12
-                                   // делали цель физически недостижимой.
-const HOLE_THICK = 0.020;          // ниже этой толщины лист просвечен насквозь
+
+// ─────────────────────────── ощущение теста: одно место на весь файл (#57)
+// Три параметра задаются ползунками «ощущение» и переживают перезагрузку.
+// До 08.09.2026 они вдобавок объявлялись здесь литералами — COMPLIANCE 1e-5,
+// THICK_BREAK 0,020, CREEP 0,55, — а applyTune() перетирал их при старте. То есть
+// объявленные числа в работе не участвовали НИКОГДА, а сверка «модель против кода»
+// сравнивала бы модель с ними. Литералы убраны; осталась формула и её исходная точка.
+// Рабочая стартовая точка по живой пробе владелицы (#94), не финальный баланс.
+// Старые ручные настройки сохраняются; вернуться к этой точке можно кнопкой «исходные».
+const TUNE_DEFAULT = Object.freeze({ com:100, creep:100, brk:100 });
+const TUNE = { ...TUNE_DEFAULT };
+const feelCompliance = t => 0.0000004 * Math.pow(60, t.com/100);   // 4e-7 … 2,4e-5 · при 30 → 1,37e-6
+const feelCreep      = t => 0.04 + (t.creep/100) * 0.9;            // 0,04 … 0,94   · при 30 → 0,31
+const feelBreak      = t => 0.045 - (t.brk/100) * 0.042;           // 0,045 … 0,003 · при 72 → 0,0148
+let COMPLIANCE  = feelCompliance(TUNE);   // податливость
+let CREEP       = feelCreep(TUNE);        // текучесть: скорость, с которой длина покоя догоняет текущую
+let THICK_BREAK = feelBreak(TUNE);        // лист рвётся там, где истончился до этой доли толщины
+
+// Смена материала сохраняет лист, но его пластическая история становится смешанной.
+let runTuneAtBuild = null, mixedTune = false;
+function measurementContext(){
+  return { build:BUILD, tune:{ ...TUNE },
+    runTuneAtBuild:runTuneAtBuild ? { ...runTuneAtBuild } : null, mixedTune };
+}
+function currentMeasurement(entry){
+  return entry.build===BUILD && entry.mixedTune===false &&
+    entry.variant===variant && entry.condition===condition &&
+    entry.tune && ["com","creep","brk"].every(key=>entry.tune[key]===TUNE[key]);
+}
 
 // ─────────────────────────── состояние
 let N = 0;
@@ -124,7 +271,12 @@ let action = { state:"RESTING", pointerId:null, edgeNode:-1, gripIds:[], gripWei
   impulse:0, direction:{x:0,y:0}, timer:0, mul:0, heldAtLift:0,
   // перенос «запятой»: накопленный поворот маха, его хвост и параметры полёта
   sweep:0, lastDir:null, tailDir:{x:1,y:0}, carryFrom:{x:0,y:0}, toss:null };
-let lastDecision = "—";            // как классифицирован последний мах — для строки статистики
+let lastDecision = "—";            // как классифицирован последний мах — для строки статистик
+// Сколько махов на шаге 3 стенд засчитал переносом. Нужен потому, что гейт 15°
+// решается частотой событий, а не рукой (#91): на живом пальце долю попаданий
+// приходится считать вручную, а руками из двадцати попыток не сосчитаешь.
+// Считаем только шаг 3: на шаге 2 шлепок — работа, а не промах.
+let tossOk = 0, tossTry = 0;
 let plasticT = 0;                  // окно пластичности после удара, с
 let startArea = 1;                 // площадь листа при рождении — база для areaRatio
 let gestures = [];                 // журнал шлепков (audit §6.6)
@@ -133,6 +285,8 @@ let edgeNodes = [];                          // граничные узлы — 
 // Разрыв — не провал и не перезапуск (решение владельца 22.08.2026): дырка остаётся
 // в листе рваным узором, симуляция не останавливается, тесто не переделывается.
 let tornAt = 0, lastSnap = 0, breakTime = 0, pressTime = 0, pressed = false;
+// Ответ прибора на предсказание: что показать крупной строкой и с какого момента.
+let verdict = "", verdictAt = 0;
 let tornNode = null;               // узлы порванных ячеек — для подсветки рваного края
 let conDeg = null;                 // сколько живых связей держит узел; 0 = осколок
 let runStart = 0, R0 = 1;
@@ -144,15 +298,21 @@ const stage = document.getElementById("stage");
 const cv = document.getElementById("cv"), ctx = cv.getContext("2d", { alpha:false });
 const lo = document.createElement("canvas"), lctx = lo.getContext("2d", { alpha:false });
 const stats = document.getElementById("stats"), flash = document.getElementById("flash");
+const miniEl = document.getElementById("mini"), hintEl = document.getElementById("hint");
 
 // ─────────────────────────── раскладка стола (v3: тесто слева, начинки по центру, тава справа)
 // Раскладка закрепляется навсегда, чтобы игрок со временем готовил «не глядя».
 // Точные пропорции были в утраченном addendum-v3; здесь рабочее приближение, которое и проверяем.
 // Дошли до жарки: тава вернулась справа. Мостик начинок вернётся с шагом 4 —
 // пока он только отнимал бы место у двух главных жестов: шлепка и переноса.
-// На телефоне в альбоме размер листа задаёт высота сцены, так что рабочая зона
-// в 58 % ширины лист не уменьшает; тава в оставшихся 42 % умещается целиком.
-const ZONES = { work:[0.00,0.58], pan:[0.58,1.00] };
+// Раскладка идёт по ДЛИННОЙ стороне кадра (решение владельца 08.09.2026). В альбоме
+// тесто слева, тава справа — как было. В портрете тесто ВНИЗУ, тава ВВЕРХУ, и лист
+// закидывается снизу вверх: раньше верх портрета был пустым столом (замер 08.09 —
+// две трети поля), и таве при этом не хватало места настолько, что роти выходил за
+// её борт на любом экране. Теперь пустая половина стала местом тавы.
+const WORK_FRAC = 0.50;
+// Гистерезис 1.02: у почти квадратного холста раскладка не должна прыгать от пикселя.
+function stackedLayout(){ return cv.height > cv.width * 1.02; }
 let panC = { x:0, y:0 }, PAN_R = 1;   // тава: центр и радиус в координатах стола (считаются в build)
 // Где лист: на столе (все жесты растяжки) или на таве (жарится; жесты жарки — следующий этап).
 let phase = "TABLE";
@@ -179,9 +339,25 @@ function unproject(sx, sy){
   return { x: cv.width*0.5 + (sx - cv.width*0.5)/k, y: wy };
 }
 function zone(name){
-  const [a,b] = ZONES[name];
-  return { x:a*cv.width, y:0, w:(b-a)*cv.width, h:cv.height,
-           cx:(a+b)/2*cv.width, cy:cv.height/2 };
+  const work = name === "work", f = work ? WORK_FRAC : 1 - WORK_FRAC;
+  // Вертикальные границы зон — по ВИДИМОЙ полосе стола, а не по числу cv.height.
+  // Перспектива сжимает стол в TILT раз, поэтому координата y = cv.height приходится
+  // примерно на 3/4 высоты кадра: считая зоны по cv.height, нижнюю четверть кадра
+  // не занимал никто, и это была та самая «пустая треть поля» из замера 08.09.2026.
+  const h0 = horizon();
+  const top = h0 + (0 - h0)/TILT, bot = h0 + (cv.height - h0)/TILT;
+  if(stackedLayout()){                     // портрет: тесто внизу, тава вверху
+    // Отступ по бокам — только ТЕСТУ: на всю ширину кадра лист быть не должен, иначе
+    // таве расти некуда. Таве ширина кадра отдана целиком (решение владельца 08.09.2026:
+    // «в вертикальном таву можно расширить почти до границ экрана» — и тут же:
+    // «чтобы место для готовки осталось, тоже нужно»). 4 % — та середина, где тава
+    // встаёт в 20 px от края, а лист остаётся крупнее, чем был в альбоме.
+    const inset = work ? cv.width * 0.04 : 0;
+    const h = (bot - top) * f, y = work ? bot - h : top;
+    return { x:inset, y, w:cv.width - inset*2, h, cx:cv.width*0.5, cy:y + h*0.5 };
+  }
+  const w = cv.width * f, x = work ? 0 : cv.width - w;   // альбом: тесто слева, тава справа
+  return { x, y:top, w, h:bot - top, cx:x + w*0.5, cy:(top + bot)*0.5 };
 }
 
 // ─────────────────────────── построение листа
@@ -195,6 +371,8 @@ let advancedAt = 0;                            // момент авто-пере
 let gestureScale = 1;                          // масштаб жеста: фиксирован от экрана, не от роста листа
 let FLAT_RATE = 0.55;                          // скорость расплющивания под пальцем
 function build(){
+  runTuneAtBuild = { ...TUNE };
+  mixedTune = false;
   const z = zone("work");
   R0 = Math.min(z.w, z.h) * (stepNo===1 ? FLAT_START_FRAC : START_FRAC);
   startR = R0;
@@ -255,11 +433,46 @@ function build(){
   edgeNodes = [];
   for(let i=0;i<N;i++) if(deg[i] < 8) edgeNodes.push(i);   // граница круга
 
-  // Тава — справа, в своей зоне; радиус такой, чтобы готовый лист (мишень) занимал
-  // ~80 % её диаметра, как настоящий роти на кратхе, но целиком помещался на экране.
-  const pz = zone("pan");
-  PAN_R = Math.min(targetR*1.25, pz.w*0.49, pz.h*0.49);
-  panC = { x: pz.cx - pz.w*0.03, y: pz.cy + pz.h*0.04 };
+  // Тава считается по СВОБОДНОМУ МЕСТУ В КАДРЕ, а не по доле зоны.
+  //
+  // Как было и почему это дефект (замер 08.09.2026, жалоба владельца «роти выходит за
+  // границы тавы»). Пределов было два, и оба врали. `pz.h*0.49` сравнивал НЕСЖАТЫЙ
+  // радиус с высотой зоны, хотя тава рисуется эллипсом, сплющенным в TILT = 0,56 раза, —
+  // предел был строже нужного в 1,8 раза. Потом правый край срезал ещё 15 %, требуя,
+  // чтобы в кадр влезла и ТЕНЬ (PAN_RIM = 1,16). В сумме `PAN_R ≤ 0,175·ширины`, тогда
+  // как `targetR = 0,232·ширины`: роти оказывался шире тавы в 1,32 раза НА ЛЮБОМ экране,
+  // хотя строка ниже просит обратного — таву в 1,25 раза шире роти.
+  //
+  // Как стало. Тава занимает место между кромкой теста и краем кадра. В кадр обязан
+  // помещаться БОРТ (1,08), тень (1,16) может уходить за край — она тень. Сравнение
+  // честное: полуширина роти НА ТАВЕ — это targetR, умноженный на перспективу, а не сам
+  // targetR (лист рисуется поузловой проекцией, а тава — эллипсом от PAN_R без множителя).
+  const pz = zone("pan"), wz = zone("work");
+  const RIM = 1.08, pad = Math.min(cv.width, cv.height) * 0.02;
+  const kAt = (ty)=> 1 + ((ty - horizon())/cv.height) * PERSP;
+  let cxS, cyS;
+  for(let pass = 0; pass < 2; pass++){                 // второй проход уточняет перспективу
+    const rotiHalf = targetR * kAt(pass ? panC.y : pz.cy);
+    if(stackedLayout()){
+      const doughTop = prY(wz.cx, wz.cy - targetR);    // ближняя кромка теста снизу
+      const room = (doughTop - pad*2) - pad;
+      // Тава берёт всё, что даёт кадр: в портрете упор идёт в ШИРИНУ, и борт встаёт
+      // в pad от края. Потолок 1,45 — чтобы на нестандартно вытянутом экране тава не
+      // раздулась вокруг крошечного роти.
+      PAN_R = Math.max(8, Math.min(rotiHalf*1.45, (cv.width*0.5 - pad)/RIM,
+                                   room*0.5/(TILT*RIM)));
+      cxS = cv.width*0.5;
+      cyS = doughTop - pad*2 - PAN_R*TILT*RIM;
+    } else {
+      const doughRight = prX(wz.cx + targetR, wz.cy);  // кромка теста со стороны тавы
+      const left = doughRight + pad*2, right = cv.width - pad;
+      PAN_R = Math.max(8, Math.min(rotiHalf*1.25, (right - left)*0.5/RIM,
+                                   (cv.height*0.5 - pad)/(TILT*RIM)));
+      cxS = right - PAN_R*RIM;
+      cyS = prY(0, pz.cy);
+    }
+    panC = unproject(cxS, cyS);
+  }
   phase = "TABLE"; xf = null;
   cook = new Float32Array(N); dry = new Float32Array(N);
   // Контакт с плитой пятнистый, а не идеальный: под листом микрозазоры, складки, плёнка
@@ -310,6 +523,8 @@ function build(){
 
   clearAction(); plasticT = 0;
   tornAt = 0; lastSnap = 0; pressed = false; breakTime = pressTime = 0;
+  verdict = ""; verdictAt = 0;
+  { const b = document.getElementById("tear"); if(b) b.classList.remove("armed"); }
   runStart = performance.now();
 }
 
@@ -357,6 +572,16 @@ function step(dt){
   if(stepNo===1 && sheetRadius() >= step1R){
     stepNo = 2; advancedAt = performance.now();          // кусок готов — дальше шлепки, тем же листом
     try{ localStorage.setItem("dough_step","2"); }catch(e){}
+    syncStepButtons();
+  }
+  // Шаг 2 → 3 так же автоматически и ТЕМ ЖЕ ЛИСТОМ. Раньше перехода не было вовсе:
+  // строка говорила «✓ готов · запятой на таву», а шаг оставался вторым, и нажатие
+  // «на таву» вручную ПЕРЕСОБИРАЛО лист — растянутый своими руками уходил в мусор,
+  // и на таву летел свежий. Это спорило с «как порвал, так и пожаришь»: дырки,
+  // заработанные при растяжке, до тавы не доезжали (замечание владельца 08.09.2026).
+  if(stepNo===2 && phase==="TABLE" && sheetRadius() >= targetR){
+    stepNo = 3; advancedAt = performance.now();
+    try{ localStorage.setItem("dough_step","3"); }catch(e){}
     syncStepButtons();
   }
   updateAction(dt);
@@ -435,6 +660,10 @@ function clearAction(){
 function armAction(pointerId, p){
   const n = nodeNear(p.x, p.y);
   if(n < 0) return;
+  // Решение прошлого маха стирается на входе в новый: иначе после неудачной запятой
+  // в панели продолжает висеть «запятая 154° → тава» от прошлой удачной, и по строке
+  // нельзя судить, что случилось сейчас (найдено проверкой 08.09).
+  lastDecision = "—";
   action.state = "ARMED"; action.pointerId = pointerId; action.edgeNode = n;
   action.down = { x:p.x, y:p.y, t: performance.now() };
   action.last = { x:p.x, y:p.y, t: performance.now() };
@@ -497,6 +726,7 @@ function updateActionMove(p){
 
   if(heldMs() >= HOLD_MIN && speed/Math.max(1,gestureScale) >= V_MIN && drive >= ACTION_MIN){
     action.state = "LIFTING";
+    if(stepNo === 3 && phase === "TABLE") tossTry++;   // попытка засчитывается с момента маха
     action.timer = LIFT_MAX;
     action.heldAtLift = Math.round(heldMs());
     const sl = speed || 1;
@@ -588,7 +818,13 @@ function endCarry(){
   const cosA = (dir.x*tpx + dir.y*tpy)/tl;
   const sweepDeg = Math.round(action.sweep*180/Math.PI);
   const transfer = phase==="TABLE" && Math.abs(action.sweep) >= COMMA_SWEEP && cosA >= Math.cos(COMMA_CONE);
-  if(transfer){ lastDecision = `запятая ${sweepDeg}° → тава`; startToss(hx, hy, dir, tl); return; }
+  if(transfer){
+    // Размер листа в самом решении: закинуть недотянутый лист МОЖНО (отказов почти не бывает),
+    // но тогда это должно читаться как выбор, а не как случайность.
+    const pctNow = Math.round(sheetRadius()/targetR*100);
+    lastDecision = `запятая ${sweepDeg}° → тава · лист ${pctNow}%`;
+    startToss(hx, hy, dir, tl); return;
+  }
   // Не к таве: это шлепок с дугой — лист опускается там, где его отпустили, и бьётся.
   lastDecision = `дуга ${sweepDeg}° → шлепок`;
   dropCarry();
@@ -628,10 +864,17 @@ function updateToss(){
 function land(){
   const t = action.toss;
   bakeTransform(t.x1 - xf.cx, t.y1 - xf.cy, t.spin);
-  xf = null; phase = "PAN";
+  xf = null; phase = "PAN"; tossOk++;
+  // Недотянутый лист тоже разрешено перенести. В step() эта ветка была недостижима:
+  // TOSS и PAN возвращаются раньше. Обновляем шаг в момент самой посадки.
+  if(stepNo < 3){
+    stepNo = 3;
+    try{ localStorage.setItem("dough_step","3"); }catch(e){}
+    syncStepButtons();
+  }
   measureThickness();
   audioPanLand();
-  gestures.push({ kind:"toss", sweep_deg: Math.round(t.sweep*180/Math.PI),
+  gestures.push({ ...measurementContext(), kind:"toss", sweep_deg: Math.round(t.sweep*180/Math.PI),
     spin_deg: Math.round(t.spin*180/Math.PI), aim: +t.aim.toFixed(2),
     flight_ms: Math.round(t.T*1000), sheet_pct: Math.round(sheetRadius()/targetR*100),
     ts: new Date().toISOString() });
@@ -673,7 +916,11 @@ function cookStep(dt){
   for(let i=0;i<N;i++){
     if(conDeg[i] <= 0) continue;
     const r = Math.hypot(px[i]-panC.x, py[i]-panC.y)/PAN_R;
-    const heat = panHeat(r) * (1.05 + 0.10*Math.max(0, 1 - r/0.35)) * contactF[i];
+    // Масло: скромные +5 % равномерно. Центральной добавки здесь БЫЛА +10 % при r<0.35 —
+    // она гасила весь профиль panHeat: разница между центром и горбом на среднем радиусе
+    // падала с 11 % до 0,3 %, то есть кольцевая горелка переставала быть видна, и лист
+    // румянился ровно — против собственного фактчека строкой выше.
+    const heat = panHeat(r) * 1.05 * contactF[i];
     if(dry[i] < 1){
       const thin = Math.max(0.2, Math.min(2.0, 0.10/Math.max(0.05, thick[i])));
       dry[i] = Math.min(1, dry[i] + dt * DRY_RATE * heat * thin);
@@ -811,6 +1058,7 @@ function finalizeGesture(){
   }
   const ths = Array.from(thick).sort((x,y)=>x-y);
   gestures.push({
+    ...measurementContext(),
     kind: "slap",
     sweep_deg: Math.round(action.sweep*180/Math.PI),
     impulse: +action.impulse.toFixed(2),
@@ -839,8 +1087,19 @@ function gripArc(n, mul){
 
 // Разрыв судится по устойчивому натяжению за кадр, а не по шуму отдельного подшага,
 // и распространяется по соседям — дырка рвётся дальше, как в настоящем тесте.
-let RATE_SENS = 0.30;              // насколько рывок снижает предел прочности
-let CREEP = 0.55;                   // текучесть: скорость, с которой длина покоя догоняет текущую
+// Чем быстрее истончается место, тем раньше оно рвётся. Это ИГРОВАЯ УСЛОВНОСТЬ, не физика.
+// У настоящего теста в измеренном окне (примерно 1e-3..1e-1 1/с) знак ОБРАТНЫЙ: быстрее
+// растянутое рвётся при БОЛЬШЕЙ деформации, то есть более тонким (Sliwinski 2002, печ. с. 75,
+// 76, 129; см. docs/simulation-references.md §б). Критерий Консидера этого не обосновывает
+// ни в какую сторону: он про максимум силы при ПОСТОЯННОЙ скорости деформации, члена по
+// скорости в нём нет. На скоростях живой руки (порядка 1..10 1/с) данных нет ни за, ни против —
+// поэтому знак и не переворачивается вслед за литературой, а держится как условность ради
+// читаемости жеста: истончение видно игроку за 0,77 с до разрыва.
+// История имени: RATE_SENS («наказание за рывок») -> RATE_BRITTLE (07.09.2026, обоснование
+// не выдержало проверки) -> TEAR_RATE_BIAS (08.09.2026, #90). Величина 0,30 не тронута:
+// она подобрана под инструментальный прогон, а не под живую руку (#42).
+let TEAR_RATE_BIAS = 0.30;
+// CREEP объявлен наверху, вместе с формулой ползунка (#57)
 const CREEP_ON = 0.06;             // порог растяжения, с которого тесто начинает течь
 
 // Тесто ПЛАСТИЧНО: удержанное натяжение оно не возвращает, а запоминает — лист
@@ -881,8 +1140,9 @@ function checkBreak(dt){
   const young = (performance.now() - runStart) < 1500;
   if(young) return;
   // Тесто рвётся не там, где сильнее натянуто, а там, где стало слишком тонким:
-  // «дырка» из v3 — это следствие истончения. Рывок рвёт раньше, чем терпеливое
-  // растягивание, потому что поднимает эффективный порог толщины.
+  // «дырка» из v3 — это следствие истончения. Рывок рвёт раньше терпеливого растягивания,
+  // потому что поднимает эффективный порог толщины: это наш выбор ради читаемости жеста,
+  // а не свойство теста (см. TEAR_RATE_BIAS выше и docs/simulation-references.md §б).
   // судим по СГЛАЖЕННОЙ толщине: лист не рвётся от мгновенной дрожи после хлопка
   let torn = 0;
   if(!quadSm || quadSm.length!==quads.length) quadSm = new Float32Array(quads.length).fill(1);
@@ -893,7 +1153,7 @@ function checkBreak(dt){
     const t = quadSm[q];
     if(t > 0.5) continue;
     const grow = quadPrev ? Math.max(0, (quadPrev[q]-t)/Math.max(1e-4,dt)) : 0;  // скорость истончения
-    if(t < THICK_BREAK * Math.min(1.6, 1 + grow*RATE_SENS)){
+    if(t < THICK_BREAK * Math.min(1.6, 1 + grow*TEAR_RATE_BIAS)){
       for(const c of quadCons[q]) if(breakCon(c)) torn++;
     }
   }
@@ -1037,13 +1297,31 @@ function audioSlap(I){
 function onTear(){
   const nowT = performance.now();
   if(nowT - lastSnap > 150){ lastSnap = nowT; audioSnap(); }   // треск на каждую новую дырку, без пулемёта
-  if(!tornAt){ tornAt = nowT; breakTime = nowT; record(); }    // в журнал — только первый разрыв листа
+  if(!tornAt){
+    tornAt = nowT; breakTime = nowT; record();                 // в журнал — только первый разрыв листа
+    // Предсказание получает ответ по существу, а не только вспышку: за сколько секунд угадала.
+    // Порог 0,3 с — тот же, по которому пишется `predicted` в журнале, чтобы экран и лог совпадали.
+    const lead = pressed ? (nowT - pressTime)/1000 : null;
+    verdict = lead === null ? "порвался без предсказания — жми «сейчас порвётся», пока тянешь"
+            : lead >= 0.3   ? `угадала: нажала за ${lead.toFixed(1)} с до разрыва`
+                            : `почти: нажала за ${lead.toFixed(1)} с — засчитывается от 0,3 с`;
+    verdictAt = nowT;
+    const b = document.getElementById("tear"); if(b) b.classList.remove("armed");
+  }
 }
 function pressNow(){
   if(pressed) return;
   pressed = true; pressTime = performance.now();
-  flash.style.opacity = "0.18";
-  setTimeout(()=>flash.style.opacity="0", 90);
+  // Вспышка заметная: 0,5 сразу, затем затухание по CSS-переходу. Она рисуется поверх
+  // холста слоем композитора — на замере худшего кадра нажатие может стоить кадра,
+  // поэтому во время прогона fps лучше не жать.
+  flash.style.opacity = "0.5";
+  setTimeout(()=>flash.style.opacity = "0", 150);
+  const b = document.getElementById("tear");
+  if(b && !tornAt) b.classList.add("armed");
+  verdict = tornAt ? "лист уже порван — предсказывать нечего, жми «заново»"
+                   : "предсказание записано · жду разрыва";
+  verdictAt = performance.now();
 }
 let recorded = false;
 function record(){
@@ -1052,6 +1330,7 @@ function record(){
   recorded = true;
   const lead = pressed ? (breakTime - pressTime)/1000 : null;   // за сколько секунд до разрыва
   log.push({
+    ...measurementContext(),
     variant, condition,
     lead_s: lead === null ? null : +lead.toFixed(3),
     predicted: lead !== null && lead >= 0.3,
@@ -1101,7 +1380,10 @@ function onDown(id, cx, cy){
   const p = toLocal(cx, cy);
   const w = zone("work");
   if(phase !== "TABLE"){ dbgKind = "тава"; return; }   // лист на таве: жесты жарки — следующий этап
-  if(p.x > w.x + w.w) return;
+  // Отсекается только зона тавы, и по той оси, которая делит стол: в альбоме правее
+  // теста, в портрете выше него. Сверху/снизу (в альбоме) и слева/справа (в портрете)
+  // границ нет намеренно — любое касание берёт лист за ближайший край.
+  if(stackedLayout() ? p.y < w.y : p.x > w.x + w.w) return;
   armAction(id, p);                                  // только выбор края: тесто НЕ двигается
 }
 function onMove(id, cx, cy){
@@ -1127,17 +1409,22 @@ function onCancel(id){
 // На окне его не перехватит никто. Панель с кнопками отфильтрована по цели события.
 let rawTouch = 0, rawPointer = 0;
 
-function inPanel(t){ return !!(t && t.closest && t.closest("#panel")); }
+// Что считается интерфейсом, а не полем. Касание интерфейса нельзя гасить через
+// preventDefault: тогда браузер не синтезирует click, и кнопка мертва. Так 08.09.2026
+// умерла кнопка «всё равно продолжить» на заглушке поворота: она лежала внутри #stage,
+// а проверка была только на #panel. Заглушки больше нет, но правило остаётся:
+// ЛЮБОЙ новый слой поверх поля добавлять СЮДА, иначе его кнопки не нажмутся.
+function inUI(t){ return !!(t && t.closest && t.closest("#panel")); }
 
 window.addEventListener("touchstart", e=>{
   rawTouch++;
-  if(inPanel(e.target)) return;
+  if(inUI(e.target)) return;
   e.preventDefault(); dbgKind = "touch";
   for(const t of e.changedTouches) onDown("t"+t.identifier, t.clientX, t.clientY);
 }, {passive:false, capture:true});
 
 window.addEventListener("touchmove", e=>{
-  if(inPanel(e.target)) return;
+  if(inUI(e.target)) return;
   e.preventDefault();
   for(const t of e.changedTouches) onMove("t"+t.identifier, t.clientX, t.clientY);
 }, {passive:false, capture:true});
@@ -1152,11 +1439,11 @@ window.addEventListener("touchcancel", e=>{
 
 window.addEventListener("pointerdown", e=>{
   rawPointer++;
-  if(e.pointerType === "touch" || inPanel(e.target)) return;
+  if(e.pointerType === "touch" || inUI(e.target)) return;
   dbgKind = "мышь"; onDown("p"+e.pointerId, e.clientX, e.clientY);
 }, true);
 window.addEventListener("pointermove", e=>{
-  if(e.pointerType === "touch" || inPanel(e.target)) return;
+  if(e.pointerType === "touch" || inUI(e.target)) return;
   onMove("p"+e.pointerId, e.clientX, e.clientY);
 }, true);
 window.addEventListener("pointerup", e=>{ onUp("p"+e.pointerId); }, true);
@@ -1173,49 +1460,102 @@ addEventListener("keydown", e=>{
 });
 document.getElementById("tear").addEventListener("click", pressNow);
 document.getElementById("reset").addEventListener("click", reset);
+// «Прибор» — шесть из семи строк панели, которые нужны замеру, а не игре. В ландшафте
+// они уходят на лист поверх поля; лист не меняет размер #stage, поэтому лист теста цел.
+const toolsBtn = document.getElementById("toolsBtn");
+function setTools(on){
+  document.body.classList.toggle("tools", on);
+  toolsBtn.textContent = on ? "✕ закрыть" : "прибор ▸";
+}
+toolsBtn.addEventListener("click", ()=>setTools(!document.body.classList.contains("tools")));
+// Тап по пустому месту листа закрывает его: лист накрывает поле, и искать кнопку,
+// когда хочется просто вернуться к тесту, — лишний шаг.
+document.getElementById("tools").addEventListener("click", e=>{ if(e.target.id==="tools") setTools(false); });
 
+// Подсказка сразу на три шага занимала 2–4 строки и закрывала до 62 % поля в ландшафте
+// (замер: низ #hint приходился на 40–62 % высоты #stage). Показываем только текущий шаг.
+const HINTS = {
+  1: "шаг 1: прижимай кусочек — расплющишь до пунктира",
+  2: "шаг 2: возьми край, миг подержи, резко махни — шлепок. Порвётся — останется рваный узор, так и пожарим",
+  3: "шаг 3: возьми край и круговым махом-«запятой» перекинь на таву — полетит, повернётся, зашипит"
+};
 function syncStepButtons(){
   document.querySelectorAll("[data-s]").forEach(b=>b.classList.toggle("on", +b.dataset.s === stepNo));
+  hintEl.textContent = HINTS[stepNo] || "";
 }
 document.querySelectorAll("[data-s]").forEach(b=>b.addEventListener("click", ()=>{
-  stepNo = +b.dataset.s;
+  const to = +b.dataset.s;
+  // Кнопка шага значила «дай новый кусочек на этом шаге» и пересобирала лист ВСЕГДА —
+  // даже когда её жали на уже горящем шаге. После автоперехода «на таву» загорается сама,
+  // привычка нажать осталась с тех пор, когда другого пути туда не было, — и растянутый
+  // лист с дырками улетал в мусор (замер 08.09: 25 % экрана перерисовывалось разом,
+  // tornAt 163472 → 0). Теперь пересборка только там, где она осмысленна: назад или
+  // вперёд на лист, который до этого шага ещё не дорос. Свежий кусочек даёт «заново».
+  const ready = to === 1 ? false
+              : to === 2 ? sheetRadius() >= step1R
+              :            sheetRadius() >= targetR;
+  const keep = to === stepNo || (to > stepNo && ready && phase === "TABLE");
+  stepNo = to;
   try{ localStorage.setItem("dough_step", String(stepNo)); }catch(e){}
-  syncStepButtons(); reset();
+  syncStepButtons();
+  if(!keep) reset();
 }));
 try{ const st0 = +(localStorage.getItem("dough_step")||1); if(st0===1||st0===2||st0===3) stepNo = st0; }catch(e){}
 syncStepButtons();
 
 // Ощущение теста подбирается рукой, а не прогоном: три ползунка меняют
-// упругость, текучесть и запас прочности, значения переживают перезагрузку.
-const TUNE = { com:30, creep:30, brk:72 };
+// податливость, текучесть и запас прочности, значения переживают перезагрузку.
 function applyTune(){
-  // Диапазоны сдвинуты в упругую сторону: прежние делали тесто тряпкой на любом
-  // положении ползунка. Теперь даже максимум мягкости заметно держит форму.
-  COMPLIANCE  = 0.0000004 * Math.pow(60, TUNE.com/100);    // 4e-7 … 2.4e-5
-  CREEP       = 0.04 + (TUNE.creep/100) * 0.9;             // 0.04 … 0.94
-  THICK_BREAK = 0.045 - (TUNE.brk/100) * 0.042;            // мягче … выносливее
+  if(runTuneAtBuild && ["com","creep","brk"].some(key=>TUNE[key]!==runTuneAtBuild[key])){
+    mixedTune = true;
+  }
+  // Формулы и диапазоны не меняются вместе со стартовой точкой (#94).
+  COMPLIANCE  = feelCompliance(TUNE);
+  CREEP       = feelCreep(TUNE);
+  THICK_BREAK = feelBreak(TUNE);
   try{ localStorage.setItem("dough_tune", JSON.stringify(TUNE)); }catch(e){}
 }
+// Ползунки переживают перезагрузку — значит замер можно снять на чужой настройке,
+// не заметив этого. Панель обязана сказать, что ощущение не исходное (#89).
+function tuneChanged(){
+  return TUNE.com!==TUNE_DEFAULT.com || TUNE.creep!==TUNE_DEFAULT.creep || TUNE.brk!==TUNE_DEFAULT.brk;
+}
 try{ const t = JSON.parse(localStorage.getItem("dough_tune")||"null");
-     if(t) Object.assign(TUNE, t); }catch(e){}
+  if(t && typeof t==="object"){
+    for(const key of ["com","creep","brk"]){
+      if(typeof t[key]==="number" && Number.isFinite(t[key])){
+        TUNE[key] = Math.max(0, Math.min(100, t[key]));
+      }
+    }
+  }
+}catch(e){}
 [["sCom","com"],["sCreep","creep"],["sBreak","brk"]].forEach(([id,key])=>{
   const el = document.getElementById(id);
   el.value = TUNE[key];
   el.addEventListener("input", ()=>{ TUNE[key] = +el.value; applyTune(); });
 });
+document.getElementById("tuneDefault").addEventListener("click", ()=>{
+  Object.assign(TUNE, TUNE_DEFAULT);
+  [["sCom","com"],["sCreep","creep"],["sBreak","brk"]].forEach(([id,key])=>{
+    document.getElementById(id).value = TUNE[key];
+  });
+  applyTune();
+});
 applyTune();
 
-function reset(){ recorded=false; resize(); }
+function reset(){ recorded=false; resetMeters(); resize(true); }
 
+// Вид и условие меняют только draw() и звук — лист от них не зависит. Пересборка теряла
+// растянутый лист (A и B мерились на разных листах) и вбрасывала свой всплеск в «худший».
 document.querySelectorAll("[data-v]").forEach(b=>b.addEventListener("click",()=>{
   variant=b.dataset.v;
   document.querySelectorAll("[data-v]").forEach(x=>x.classList.toggle("on",x===b));
-  reset();
+  resetMeters(); setTools(false);
 }));
 document.querySelectorAll("[data-c]").forEach(b=>b.addEventListener("click",()=>{
   condition=b.dataset.c;
   document.querySelectorAll("[data-c]").forEach(x=>x.classList.toggle("on",x===b));
-  reset();
+  resetMeters(); setTools(false);
 }));
 // Принудительное обновление: страница отдаётся с GitHub Pages и залипает в кеше,
 // поэтому правки иначе не доезжают до телефона. Та же схема, что в «Лягушке».
@@ -1237,7 +1577,10 @@ document.getElementById("hardReload").addEventListener("click", ()=>{
 });
 
 document.getElementById("dump").addEventListener("click", async ()=>{
-  const txt = JSON.stringify({ tears: log, gestures }, null, 2);
+  // Старым записям не приписываем сегодняшние настройки. Их отсутствие означает
+  // неизвестный контекст; новые записи несут собственный снимок build/tune.
+  const txt = JSON.stringify({ formatVersion:2, exportedAt:new Date().toISOString(),
+    current:measurementContext(), tears:log, gestures }, null, 2);
   const btn = document.getElementById("dump");
   try{ await navigator.clipboard.writeText(txt); btn.textContent = `скопировано (${log.length}+${gestures.length})`; }
   catch(e){ console.log(txt); btn.textContent = "лог в консоли"; }
@@ -1317,9 +1660,9 @@ function draw(){
   }
 
   g.fillStyle = "#14100c"; g.fillRect(0,0,W,H);
-  if(condition!=="sound") drawTable(g, sx, sy, pixelated);
+  drawTable(g, sx, sy);
 
-  if(condition!=="sound"){
+  {   // режим «только звук», в котором поле не рисовалось вовсе, снят 08.09.2026
     // ячейки решётки; порванные и просвеченные насквозь — дырки
     // порванные ячейки: пометить их узлы, чтобы подсветить рваный край у соседей
     if(tornAt){
@@ -1361,7 +1704,8 @@ function draw(){
         // Сквозная дыра — тень ПОД листом, темнее и стола, и любого тонкого теста.
         g.fillStyle = onPan ? "#1c1712" : "#100a06";
       } else {
-        if(t < HOLE_THICK) continue;                  // истончилось до сквозной дыры
+        // Тонкий, но целый лист остаётся видимым. Дыру задают разорванные связи:
+        // отдельный визуальный порог создавал исчезающие дырки без разрыва (#94).
         // Рваный край собирается толще — у настоящего теста кромка разрыва скатывается.
         if(tornAt && (tornNode[a]||tornNode[b2]||tornNode[c]||tornNode[d])) t = Math.min(1, t + 0.28);
         if(onPan){
@@ -1400,18 +1744,21 @@ function draw(){
 // Стол: рабочая зона · мостик начинок · тава.
 // Тава по F1 — กระทะโรตี, толстая сталь 18–20″ с ВОГНУТЫМ дном, удерживающим масло,
 // а не плоская «тава»: лужица жира собирается в центре, отсюда техника подгона масла к краям.
-function drawTable(g, sx, sy, px_){
+function drawTable(g, sx, sy){   // пикселизация делается низкоразрешающей канвой, отдельный флаг сюда не нужен
   const w = zone("work");
   const R_ = (x)=>x*sx, D_ = (y)=>y*sy;
 
-  g.fillStyle = "#2b2016";                                    // столешница — на всю ширину, тава стоит на ней
-  g.fillRect(0, D_(w.y), R_(cv.width), D_(w.h));
-  const boards = 7, bh = w.h/boards;
+  // Столешница — весь кадр: и рабочая зона, и зона тавы стоят на одном столе.
+  // Раньше здесь стояла высота РАБОЧЕЙ зоны; пока зоны делились по ширине, это было
+  // одно и то же, а в портрете доски кончились бы на середине.
+  g.fillStyle = "#2b2016";
+  g.fillRect(0, 0, R_(cv.width), D_(cv.height));
+  const boards = 7, bh = cv.height/boards;
   for(let i=0;i<boards;i++){
     g.fillStyle = i%2 ? "#31251a" : "#2b2016";
-    g.fillRect(0, D_(w.y+i*bh), R_(cv.width), D_(bh-1));
+    g.fillRect(0, D_(i*bh), R_(cv.width), D_(bh-1));
     g.fillStyle = "#1d150e";
-    g.fillRect(0, D_(w.y+(i+1)*bh-1), R_(cv.width), Math.max(1, D_(1)));
+    g.fillRect(0, D_((i+1)*bh-1), R_(cv.width), Math.max(1, D_(1)));
   }
 
   // Тава (กระทะโรตี): толстая сталь с вогнутым дном — кольца темнеют к борту,
@@ -1444,10 +1791,31 @@ function drawTable(g, sx, sy, px_){
 function shade(t){ const c = mix(t); return `rgb(${c[0]},${c[1]},${c[2]})`; }
 
 // ─────────────────────────── цикл
-let last=performance.now(), fps=60, acc=0, frames=0;
-let loopErrs = 0;
+// `fps=null` и `worst=0` означают «ещё не мерили», и печатаются прочерком: ноль в приборе
+// читается как «идеально», а «60 fps» до первого измерения — просто неправда (#89).
+let last=performance.now(), fps=null, acc=0, frameCount=0, worst=0, warmup=0;   // не `frames`: совпадает с window.frames
+function resetMeters(){
+  worst=0; fps=null; acc=0; frameCount=0; warmup=6; tossOk=0; tossTry=0;
+  // `latencies` тоже: без этого «звук N мс» — бегущая медиана за всю сессию и по всем
+  // видам сразу, и как число вида A или B её читать нельзя (найдено проверкой 08.09).
+  latencies.length = 0;
+}
+let loopErrs = 0, paused = 0;
 function loop(now){
-  const dt = Math.min(0.033, (now-last)/1000); last=now;
+  // Настоящее время кадра — для измерений; обрезанное — только для устойчивости симуляции.
+  // Раньше счётчик копил обрезанное dt и потому не умел показывать меньше 30 fps:
+  // при кадрах по 50 мс он рисовал 30 вместо 20, то есть был слеп ровно к тем
+  // просадкам, ради которых его и читают на телефоне. Найдено 07.09.2026.
+  const real = (now-last)/1000;
+  const dt = Math.min(0.033, real); last=now;
+  // Первые кадры после пересборки и после возврата из фона — это сборка листа и пауза
+  // вкладки, а не рисование. И то и другое попадало в «худший» и оставалось там навсегда:
+  // до 08.09.2026 `worst` не обнуляло ничто, даже смена варианта. Значит A, B и C
+  // возвращали одно и то же число — худший кадр первой пересборки.
+  if(pendingResize) flushResize();
+  if(warmup > 0) warmup--;
+  else if(real < 1 && real > worst) worst = real;
+  else if(real >= 1) paused++;   // пауза вкладки не «просадка»: считаем отдельно, но не прячем
   try{
     step(dt);
     audioFrame();
@@ -1459,22 +1827,24 @@ function loop(now){
     if(loopErrs < 4) console.error("кадр упал:", err);
   }
 
-  acc+=dt; frames++;
-  if(acc>0.5){ fps=frames/acc; acc=0; frames=0; }
+  acc+=real; frameCount++;
+  if(acc>0.5){ fps=frameCount/acc; acc=0; frameCount=0; }
   const liveEl = document.getElementById("live");
   const pct = Math.round(sheetRadius()/targetR*100);
   const ragged = tornAt ? " · рваный узор" : "";
   const ready = sheetRadius()>=targetR ? " ✓ готов · запятой на таву →" : "";
   const banner = advancedAt && performance.now()-advancedAt < 2600;
   const mc = meanCook(), md = meanDry();
-  liveEl.textContent =
+  const verdictAge = verdictAt ? performance.now() - verdictAt : Infinity;
+  liveEl.textContent = verdictAge < 3500 ? verdict :
     phase==="PAN" ? (md < 0.35 ? "на таве · шипит — слушай, цвета ещё нет"
                      : md < 0.9 ? "на таве · подсыхает, звук уходит выше"
                      : mc < 0.12 ? "на таве · суше и звонче — вот-вот пойдут пятна"
                      : "на таве · пятна цвета (жесты жарки — следующий этап, «заново» — новый кусочек)")
     : action.state==="CARRY" ? "в руке — веди запятую к таве"
     : action.state==="TOSS" ? "летит…"
-    : banner ? "✓ расплющено — шаг 2: возьми край и резко махни"
+    : banner ? (stepNo===3 ? "✓ растянуто — теперь круговым махом-«запятой» на таву"
+                           : "✓ расплющено — шаг 2: возьми край и резко махни")
     : stepNo===1 ? (action.state==="ARMED"
         ? `расплющиваешь · ${Math.round(sheetRadius()/step1R*100)}%`
         : `шаг 1 · прижми кусочек и расплющивай · ${Math.round(sheetRadius()/step1R*100)}%`)
@@ -1482,32 +1852,83 @@ function loop(now){
     : (action.state==="LIFTING"||action.state==="FLYING") ? "бросок…"
     : (action.state==="IMPACT"||action.state==="SETTLING") ? `ШЛЕП · лист ${pct}%${ready}${ragged}`
     : `коснись края · лист ${pct}%${ready}${ragged}`;
-  liveEl.style.color = action.state!=="RESTING" ? "#8fbf6a" : "#d98b3a";
-  document.getElementById("blind").classList.toggle("on", condition === "sound");
-  const done = log.filter(l=>l.variant===variant&&l.condition===condition).length;
-  const hit  = log.filter(l=>l.variant===variant&&l.condition===condition&&l.predicted).length;
+  // Ответ на предсказание отличается цветом, иначе он теряется среди обычных подсказок.
+  liveEl.style.color = verdictAge < 3500 ? (verdict.startsWith("угадала") ? "#8fbf6a" : "#f0c674")
+                     : action.state!=="RESTING" ? "#8fbf6a" : "#d98b3a";
+  // В ландшафте полная строка статистики уезжала за правый край (35–212 px) и не
+  // прокручивалась: fps и задержку — те самые числа — на телефоне было не прочитать.
+  // По одному числу на строку и с именем варианта рядом: колонка даёт 114 px, а прежняя
+  // строка «60 fps · худший 183 мс» требовала ~132 и обрезалась за краем экрана — «1180 мс»
+  // читалось как «118». Три числа за поездку не должны остаться тремя безымянными числами.
+  const condShort = condition==="both" ? "оба" : "без звука";
+  miniEl.textContent =
+    `вид ${variant} · ${condShort}\n` +
+    `худший ${worst ? (worst*1000).toFixed(0)+" мс" : "—"}\n` +
+    `fps ${fps===null ? "—" : fps.toFixed(0)}\n` +
+    (condition==="sight" ? "звук выключен"
+       : `звук ${latencies.length ? median(latencies).toFixed(0)+" мс" : "—"}`) +
+    (paused ? `\nпауз ${paused}` : "") +
+    // Подмена физики обязана быть видна В КОЛОНКЕ: лист «прибор» во время замера закрыт,
+    // а задетый бедром ползунок отравляет все последующие числа молча.
+    (tuneChanged() ? `\n⚙ ощущение своё` : "") +
+    (mixedTune ? `\nсмешанный лист · для замера «заново»` : "") +
+    // Что стенд решил про последний мах — «запятая 52° → тава» или «дуга 22° → шлепок».
+    // Жила эта строка только в полной статистике, то есть за закрытой дверью «прибора»,
+    // а именно она объясняет, почему лист не полетел. В колонке она нужнее всего.
+    (lastDecision ? `\n${lastDecision}${tossTry ? ` · ${tossOk}/${tossTry}` : ""}` : "");
+  const measured = log.filter(currentMeasurement);
+  const done = measured.length;
+  const hit  = measured.filter(l=>l.predicted).length;
   stats.textContent =
     `сборка: ${BUILD}\n` +
     `${variant}/${condition}  попыток ${done}/30  распознано ${done?Math.round(hit/done*100):0}%\n` +
+    `${stackedLayout()?"портрет · замер с альбомным не сравнить":"альбом"}\n` +
     `шаг ${stepNo}  ${action.state!=="RESTING"?"◆ "+action.state:"○ покой"}  ` +
-    `${phase==="PAN" ? "тава · сушка "+md.toFixed(2)+" · цвет "+mc.toFixed(2) : "стол"}  мах: ${lastDecision}  ` +
+    `${phase==="PAN" ? "тава · сушка "+md.toFixed(2)+" · цвет "+mc.toFixed(2) : "стол"}  мах: ${lastDecision}` +
+    `${tossTry ? "  перенесено "+tossOk+" из "+tossTry : ""}  ` +
     `лист ${pct}%${ready}${ragged}  жестов ${gestures.length}  ` +
-    `[касаний ${rawTouch} · до теста ↓${dbgDown} ↔${dbgMove} · ${dbgKind}${loopErrs?" · сбоев "+loopErrs:""}]  ` +
+    `[касаний ${rawTouch} · указателей ${rawPointer} · до теста ↓${dbgDown} ↔${dbgMove} · ${dbgKind}${loopErrs?" · сбоев "+loopErrs:""}]  ` +
     `${tornAt?"рваный":pressed?"нажато":"—"}  ` +
-    `${fps.toFixed(0)} fps  задержка ${latencies.length?median(latencies).toFixed(0):"—"} мс`;
+    `${tuneChanged()?`⚙ ощущение своё (${TUNE.com}/${TUNE.creep}/${TUNE.brk}, исходное ${TUNE_DEFAULT.com}/${TUNE_DEFAULT.creep}/${TUNE_DEFAULT.brk})  `:""}` +
+    `${mixedTune?"смешанный лист · для замера «заново»  ":""}` +
+    `${fps===null?"—":fps.toFixed(0)} fps  худший кадр ${worst?(worst*1000).toFixed(0)+" мс":"—"}  ` +
+    `задержка ${latencies.length?median(latencies).toFixed(0)+" мс":"—"}${paused?"  пауз "+paused:""}`;
   requestAnimationFrame(loop);
 }
 
-function resize(){
+// Пересборка листа стоит игроку всей работы, поэтому она только при РЕАЛЬНОЙ смене
+// размера: событие resize прилетает и от панели Safari, и от поворота, и от наблюдателя.
+// Пересборка холста стирает жест: build() кончается clearAction() и ставит phase="TABLE".
+// Значит любой ресайз посреди запятой убивает её — а ресайз прилетает не только от поворота
+// телефона: тулбар Safari, клавиатура, подросшая строка телеметрии. Откладываем.
+let pendingResize = false;
+// Отсрочка держится на ДЕЙСТВИИ РУКИ, а не на том, где лежит лист. Была клауза
+// `|| phase === "PAN"` — она истинна всю жарку, и отложенный ресайз не применялся
+// НИКОГДА после удачного броска: холст оставался в старом размере до «заново»
+// (найдено проверкой 08.09, обе формы окна). Полёт при этом всё равно защищён —
+// в нём `action.state === "TOSS"`.
+function gestureLive(){ return action.state !== "RESTING"; }
+function resize(force){
   const r = stage.getBoundingClientRect(), dpr = Math.min(2, devicePixelRatio||1);
-  cv.width = Math.max(64, Math.round(r.width*dpr));
-  cv.height = Math.max(64, Math.round(r.height*dpr));
+  const w = Math.max(64, Math.round(r.width*dpr)), h = Math.max(64, Math.round(r.height*dpr));
+  if(!force && w===cv.width && h===cv.height) return;
+  if(!force && gestureLive()){ pendingResize = true; return; }   // доиграем жест, потом пересоберём
+  pendingResize = false;
+  cv.width = w; cv.height = h;
   build();
 }
-addEventListener("resize", resize);
+// Отложенный ресайз применяется, как только рука отпустила и лист вернулся в покой.
+function flushResize(){ if(pendingResize && !gestureLive()) resize(); }
+addEventListener("resize", ()=>resize());
+// Поворот телефона меняет раскладку (панель вниз ↔ вбок), а событие resize на iOS
+// приходит раньше, чем пересчитан layout: наблюдатель ловит уже итоговый размер.
+if(window.ResizeObserver) new ResizeObserver(()=>resize()).observe(stage);
 try{ const s=localStorage.getItem("dough_log"); if(s) log=JSON.parse(s); }catch(e){}
 try{ const s=localStorage.getItem("dough_gestures"); if(s) gestures=JSON.parse(s); }catch(e){}
-resize();
+resize(true);
+// Возврат из фона: rAF там стоял, и первый кадр после возврата — это секунды, а не просадка.
+addEventListener("visibilitychange", ()=>{ if(!document.hidden){ last = performance.now(); resetMeters(); } });
 requestAnimationFrame(loop);
 </script>
-
+</body>
+</html>
