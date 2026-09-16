@@ -11,7 +11,7 @@
 // до 400%+ и лист «рвётся» в середине от любого движения. Замер это обнаружил сразу.
 // Число узлов сохранено (1 060 после обрезки по кругу; прежняя оценка «~1150» была на глаз,
 // пересчитано 07.09.2026), однородность рёбер восстановлена.
-const BUILD = "2026-09-16 · мягкое тесто · 1";
+const BUILD = "2026-09-16 · конверт и нарезка · 1";
 const GRID = 38;                   // 38x38, в круг попадает 1 060 узлов (посчитано, не оценка)
 let SUBSTEPS = 8;                  // T2: 8–10 подшагов, 1 итерация
 let DAMP = 0.986;
@@ -147,6 +147,274 @@ function zone(name){
   return { x, y:top, w, h:bot - top, cx:x + w*0.5, cy:(top + bot)*0.5 };
 }
 
+function layoutPan(){
+  // Тава считается по СВОБОДНОМУ МЕСТУ В КАДРЕ, а не по доле зоны.
+  //
+  // Как было и почему это дефект (замер 08.09.2026, жалоба владельца «роти выходит за
+  // границы тавы»). Пределов было два, и оба врали. `pz.h*0.49` сравнивал НЕСЖАТЫЙ
+  // радиус с высотой зоны, хотя тава рисуется эллипсом, сплющенным в TILT = 0,56 раза, —
+  // предел был строже нужного в 1,8 раза. Потом правый край срезал ещё 15 %, требуя,
+  // чтобы в кадр влезла и ТЕНЬ (PAN_RIM = 1,16). В сумме `PAN_R ≤ 0,175·ширины`, тогда
+  // как `targetR = 0,232·ширины`: роти оказывался шире тавы в 1,32 раза НА ЛЮБОМ экране,
+  // хотя строка ниже просит обратного — таву в 1,25 раза шире роти.
+  //
+  // Как стало. Тава занимает место между кромкой теста и краем кадра. В кадр обязан
+  // помещаться БОРТ (1,08), тень (1,16) может уходить за край — она тень. Сравнение
+  // честное: полуширина роти НА ТАВЕ — это targetR, умноженный на перспективу, а не сам
+  // targetR (лист рисуется поузловой проекцией, а тава — эллипсом от PAN_R без множителя).
+  const pz = zone("pan"), wz = zone("work");
+  const RIM = 1.08, pad = Math.min(cv.width, cv.height) * 0.02;
+  const kAt = (ty)=> 1 + ((ty - horizon())/cv.height) * PERSP;
+  let cxS, cyS;
+  for(let pass = 0; pass < 2; pass++){                 // второй проход уточняет перспективу
+    const rotiHalf = targetR * kAt(pass ? panC.y : pz.cy);
+    if(stackedLayout()){
+      const doughTop = prY(wz.cx, wz.cy - targetR);    // ближняя кромка теста снизу
+      const room = (doughTop - pad*2) - pad;
+      // Тава берёт всё, что даёт кадр: в портрете упор идёт в ШИРИНУ, и борт встаёт
+      // в pad от края. Потолок 1,45 — чтобы на нестандартно вытянутом экране тава не
+      // раздулась вокруг крошечного роти.
+      PAN_R = Math.max(8, Math.min(rotiHalf*1.45, (cv.width*0.5 - pad)/RIM,
+                                   room*0.5/(TILT*RIM)));
+      cxS = cv.width*0.5;
+      cyS = doughTop - pad*2 - PAN_R*TILT*RIM;
+    } else {
+      const doughRight = prX(wz.cx + targetR, wz.cy);  // кромка теста со стороны тавы
+      const left = doughRight + pad*2, right = cv.width - pad;
+      PAN_R = Math.max(8, Math.min(rotiHalf*1.25, (right - left)*0.5/RIM,
+                                   (cv.height*0.5 - pad)/(TILT*RIM)));
+      cxS = right - PAN_R*RIM;
+      cyS = prY(0, pz.cy);
+    }
+    panC = unproject(cxS, cyS);
+  }
+}
+
+// ─────────────────────────── проба конверта и нарезки (#20 / #53)
+// После посадки замораживаем исходную сетку. Локальные полигоны хранят настоящий
+// материал: разорванные ячейки отсутствуют, складка отражает материал и порядок
+// слоёв. Это геометрический стенд, не симуляция самоконтакта или готовности блюда.
+let dish = null, dishGesture = null;
+const polyArea = p => Math.abs(p.reduce((s,a,i)=>{ const b=p[(i+1)%p.length]; return s+a.x*b.y-b.x*a.y; },0))/2;
+function clipPoly(points, nx, ny, offset, positive=true){
+  const out=[], sign=positive ? 1 : -1;
+  for(let i=0;i<points.length;i++){
+    const a=points[i], b=points[(i+1)%points.length];
+    const da=sign*(a.x*nx+a.y*ny-offset), db=sign*(b.x*nx+b.y*ny-offset);
+    if(da>=0) out.push(a);
+    if((da>=0)!==(db>=0)){
+      const t=da/(da-db); out.push({x:a.x+(b.x-a.x)*t,y:a.y+(b.y-a.y)*t});
+    }
+  }
+  return out.length>=3 && polyArea(out)>1e-10 ? out : [];
+}
+function dishBounds(faces=dish.faces){
+  const pts=faces.filter(f=>f.kind==="dough").flatMap(f=>f.points);
+  const xs=pts.map(p=>p.x), ys=pts.map(p=>p.y);
+  return {left:Math.min(...xs),right:Math.max(...xs),top:Math.min(...ys),bottom:Math.max(...ys)};
+}
+function dishPose(){
+  if(dish.mode==="fold") return {x:panC.x,y:panC.y,scale:targetR};
+  const w=zone("work"), b=dish.cutBounds;
+  const perspective=1+((w.cy+w.h*.35-horizon())/cv.height)*PERSP;
+  const scale=Math.min(targetR*1.4,w.w*.82/(b.right-b.left)/perspective,w.h*.70/(b.bottom-b.top));
+  return {x:w.cx-dish.cutCenter.x*scale,y:w.cy-dish.cutCenter.y*scale,scale};
+}
+function dishLocal(p){ const pose=dishPose(); return {x:(p.x-pose.x)/pose.scale,y:(p.y-pose.y)/pose.scale}; }
+function dishHull(){
+  const pts=dish.faces.filter(f=>f.kind==="dough").flatMap(f=>f.points).slice().sort((a,b)=>a.x-b.x||a.y-b.y);
+  const cross=(a,b,c)=>(b.x-a.x)*(c.y-a.y)-(b.y-a.y)*(c.x-a.x);
+  function half(list){ const h=[]; for(const p of list){ while(h.length>1&&cross(h[h.length-2],h[h.length-1],p)<=0) h.pop(); h.push(p); } return h; }
+  const a=half(pts), b=half(pts.slice().reverse()); a.pop(); b.pop(); return a.concat(b);
+}
+function materialTriangles(p){
+  const cross=(a,b,c)=>(b.x-a.x)*(c.y-a.y)-(b.y-a.y)*(c.x-a.x);
+  // A crossed quad has two lobes, matching the original canvas fill. Splitting
+  // at the crossing avoids manufacturing a triangle outside the drawn sheet.
+  for(const [i,j,k,l] of [[0,1,2,3],[1,2,3,0]]){
+    const a=p[i],b=p[j],c=p[k],d=p[l],den=(b.x-a.x)*(d.y-c.y)-(b.y-a.y)*(d.x-c.x);
+    if(Math.abs(den)<1e-12) continue;
+    const t=((c.x-a.x)*(d.y-c.y)-(c.y-a.y)*(d.x-c.x))/den;
+    const u=((c.x-a.x)*(b.y-a.y)-(c.y-a.y)*(b.x-a.x))/den;
+    if(t>0&&t<1&&u>0&&u<1){
+      const q={x:a.x+t*(b.x-a.x),y:a.y+t*(b.y-a.y)};
+      return [[q,b,c],[q,d,a]];
+    }
+  }
+  return cross(p[0],p[1],p[2])*cross(p[0],p[2],p[3])>=0
+    ? [[p[0],p[1],p[2]],[p[0],p[2],p[3]]]
+    : [[p[0],p[1],p[3]],[p[1],p[2],p[3]]];
+}
+function startDish(){
+  if(dish) return; // раскладка начинки ровно одна на посадку
+  const faces=[];
+  for(let q=0;q<quads.length;q++){
+    if(quadCons[q].some(c=>c.broken)) continue;
+    const ids=quads[q], points=ids.map(i=>({x:(px[i]-panC.x)/targetR,y:(py[i]-panC.y)/targetR}));
+    const tone=ids.reduce((s,i)=>s+thick[i],0)/4;
+    // Внутренняя диагональ сохраняет вогнутые квады при выпуклом отсечении.
+    for(const p of materialTriangles(points)){
+      if(polyArea(p)>1e-10) faces.push({points:p,kind:"dough",source:q,tone,turned:false});
+    }
+  }
+  dish={mode:"fold",faces,folds:0,cuts:[],history:[],filling:[],message:"Начинка на месте · заверни края внутрь"};
+  if(!faces.length){ dish=null; return; }
+  const b=dishBounds(), cx=(b.left+b.right)/2, cy=(b.top+b.bottom)/2;
+  const span=Math.min(b.right-b.left,b.bottom-b.top), radius=span*.075;
+  const base=faces.slice();
+  // Кружочки условной начинки обрезаются самим листом: через дырку не висит даже
+  // край порции. Случайны только центры и оттенок, далее все части сохраняют id.
+  for(let id=0;id<7;id++){
+    const angle=id*Math.PI*2/6, r=id===6 ? 0 : span*(.17+Math.random()*.025);
+    const x=cx+Math.cos(angle)*r+(Math.random()-.5)*radius*.4;
+    const y=cy+Math.sin(angle)*r+(Math.random()-.5)*radius*.4;
+    const ring=Array.from({length:12},(_,j)=>({x:x+Math.cos(j*Math.PI/6)*radius,y:y+Math.sin(j*Math.PI/6)*radius*.8}));
+    let added=false;
+    for(const face of base){
+      let p=face.points;
+      for(let j=0;j<ring.length && p.length;j++){
+        const a=ring[j], z=ring[(j+1)%ring.length], nx=-(z.y-a.y), ny=z.x-a.x;
+        p=clipPoly(p,nx,ny,a.x*nx+a.y*ny);
+      }
+      if(p.length){ faces.push({points:p,kind:"filling",source:id,tone:id%3,turned:false}); added=true; }
+    }
+    if(added) dish.filling.push({id,x,y,radius});
+  }
+  // Даже у маленького/сильно порванного листа остаётся проверяемая порция на материале.
+  if(!dish.filling.length){
+    const f=base.reduce((a,b)=>polyArea(a.points)>polyArea(b.points)?a:b);
+    const c=f.points.reduce((s,p)=>({x:s.x+p.x/3,y:s.y+p.y/3}),{x:0,y:0});
+    faces.push({...f,kind:"filling",source:0,tone:0,points:f.points.map(p=>({x:c.x+(p.x-c.x)*.7,y:c.y+(p.y-c.y)*.7}))});
+    dish.filling.push({id:0,x:c.x,y:c.y,radius:0});
+  }
+  dish.hull=dishHull(); syncDishUI();
+}
+function foldGeometry(anchor,end){
+  const dx=anchor.x-end.x, dy=anchor.y-end.y, length=Math.hypot(dx,dy);
+  if(length<.12) return null;
+  const nx=dx/length, ny=dy/length, offset=((anchor.x+end.x)*nx+(anchor.y+end.y)*ny)/2;
+  const fixed=[], moving=[]; let aFixed=0,aMoving=0;
+  for(const f of dish.faces){
+    const stay=clipPoly(f.points,nx,ny,offset,false), lift=clipPoly(f.points,nx,ny,offset);
+    if(stay.length){ fixed.push({...f,points:stay}); if(f.kind==="dough") aFixed+=polyArea(stay); }
+    if(lift.length){
+      if(f.kind==="dough") aMoving+=polyArea(lift);
+      moving.push({...f,turned:!f.turned,points:lift.map(p=>{const d=p.x*nx+p.y*ny-offset;return{x:p.x-2*d*nx,y:p.y-2*d*ny};})});
+    }
+  }
+  if(aMoving<.025*(aFixed+aMoving)||aFixed<.18*(aFixed+aMoving)) return null;
+  return {faces:fixed.concat(moving.reverse()),crease:{nx,ny,offset}};
+}
+function rememberDish(){
+  dish.history.push({faces:dish.faces,folds:dish.folds,cuts:dish.cuts});
+  if(dish.history.length>20) dish.history.shift();
+}
+function foldDish(anchor,end){
+  const next=foldGeometry(anchor,end); if(!next) return false;
+  rememberDish(); dish.faces=next.faces; dish.folds++; dish.hull=dishHull();
+  dish.message=`Складок: ${dish.folds} · можно сложить ещё`;
+  syncDishUI(); return true;
+}
+function startCutting(){
+  if(!dish || !dish.folds || dish.mode!=="fold" || dishGesture) return;
+  const b=dishBounds(); dish.cutBounds=b; dish.cutCenter={x:(b.left+b.right)/2,y:(b.top+b.bottom)/2};
+  dish.mode="cut"; phase="CUT"; dish.history=[];
+  dish.message="Проведи через конверт · длину и направление выбираешь сама";
+  syncDishUI();
+}
+function cutDish(a,b){
+  const dx=b.x-a.x,dy=b.y-a.y,len=Math.hypot(dx,dy); if(len<.08) return false;
+  const ux=dx/len,uy=dy/len,nx=-uy,ny=ux, width=.018;
+  // Вычитаем узкую конечную полосу ножа из КАЖДОГО слоя. Четыре полуплоскости
+  // оставляют концы короткого надреза на месте: это не бесконечная линия и не
+  // нарисованная поверх теста полоска. Удалённый зазор делает срез видимым.
+  const edges=[[ux,uy,a.x*ux+a.y*uy],[-ux,-uy,-b.x*ux-b.y*uy],
+    [nx,ny,a.x*nx+a.y*ny-width/2],[-nx,-ny,-a.x*nx-a.y*ny-width/2]];
+  const faces=[]; let removed=0;
+  for(const f of dish.faces){
+    let inside=f.points;
+    for(const [ex,ey,offset] of edges){
+      if(!inside.length) break;
+      const outside=clipPoly(inside,ex,ey,offset,false);
+      if(outside.length) faces.push({...f,points:outside});
+      inside=clipPoly(inside,ex,ey,offset);
+    }
+    if(inside.length) removed+=polyArea(inside);
+  }
+  if(removed<1e-7) return false;
+  rememberDish(); dish.faces=faces; dish.cuts=dish.cuts.concat({a,b,width});
+  dish.message=`Разрезов: ${dish.cuts.length} · режь дальше или «заново»`;
+  syncDishUI(); return true;
+}
+function undoDish(){
+  if(!dish || dishGesture || !dish.history.length) return;
+  Object.assign(dish,dish.history.pop()); dish.hull=dishHull();
+  dish.message="Последнее действие отменено"; syncDishUI();
+}
+function syncDishUI(){
+  document.getElementById("gDish").hidden=!dish;
+  document.getElementById("gStep").hidden=!!dish;
+  document.getElementById("tear").hidden=!!dish;
+  document.getElementById("gTune").hidden=!!dish;
+  document.getElementById("gCond").hidden=!!dish;
+  const cut=document.getElementById("cutMode");
+  cut.disabled=!dish || !dish.folds || dish.mode==="cut";
+  cut.textContent=dish && dish.mode==="cut" ? "нарезка на столе" : "к нарезке →";
+  document.getElementById("undoDish").disabled=!dish || !dish.history.length;
+  if(dish) hintEl.textContent=dish.mode==="fold"
+    ? "Край → внутрь: заверни начинку в тесто."
+    : "Нарезка: веди прямо. Жарка пока пропущена.";
+}
+function beginDishGesture(id,p){
+  if(dishGesture) return;
+  const start=dishLocal(p);
+  if(dish.mode==="cut"){ dishGesture={id,start,end:start}; return; }
+  let anchor=null,distance=Infinity;
+  for(let i=0;i<dish.hull.length;i++){
+    const a=dish.hull[i],b=dish.hull[(i+1)%dish.hull.length],dx=b.x-a.x,dy=b.y-a.y;
+    const t=Math.max(0,Math.min(1,((start.x-a.x)*dx+(start.y-a.y)*dy)/(dx*dx+dy*dy||1)));
+    const q={x:a.x+t*dx,y:a.y+t*dy},d=Math.hypot(q.x-start.x,q.y-start.y);
+    if(d<distance){distance=d;anchor=q;}
+  }
+  if(distance>.30){dish.message="Возьми край листа и веди к начинке";return;}
+  dishGesture={id,start,end:start,anchor,preview:null};
+}
+function moveDishGesture(p){
+  const g=dishGesture; g.end=dishLocal(p);
+  if(dish.mode==="fold"){
+    // Сохраняем смещение пальца от выбранной кромки, чтобы лист не прыгал к нему.
+    g.target={x:g.anchor.x+g.end.x-g.start.x,y:g.anchor.y+g.end.y-g.start.y};
+    g.preview=foldGeometry(g.anchor,g.target);
+  }
+}
+function endDishGesture(){
+  const g=dishGesture; dishGesture=null;
+  const ok=dish.mode==="fold" ? g.target&&foldDish(g.anchor,g.target) : cutDish(g.start,g.end);
+  if(!ok) dish.message=dish.mode==="fold" ? "Потяни край дальше внутрь листа" : "Проведи лезвием через тесто";
+}
+function drawDish(g,sx,sy){
+  const pose=dishPose(), faces=dishGesture&&dishGesture.preview ? dishGesture.preview.faces : dish.faces;
+  const screen=p=>{const x=pose.x+p.x*pose.scale,y=pose.y+p.y*pose.scale;return{x:prX(x,y)*sx,y:prY(x,y)*sy};};
+  for(const f of faces){
+    // Прозрачность накладывает настоящие слои друг на друга, а не смешивает каждый
+    // слой с цветом тавы. Начинку закрывает только материал над ней.
+    g.fillStyle=f.kind==="filling" ? ["#dfb955","#eac66d","#d9aa4b"][f.tone%3]
+      : f.turned ? "#ddc798" : "#e3d5b2";
+    g.globalAlpha=f.kind==="filling" ? 1 : Math.max(.48,Math.min(.92,.48+f.tone*.7));
+    const p=screen(f.points[0]); g.beginPath();g.moveTo(p.x,p.y);
+    for(let i=1;i<f.points.length;i++){const q=screen(f.points[i]);g.lineTo(q.x,q.y);}
+    g.closePath();g.fill();
+  }
+  g.globalAlpha=1;
+  if(dishGesture){
+    const d=dishGesture, a=screen(d.anchor||d.start),b=screen(d.target||d.end);
+    g.strokeStyle=dish.mode==="fold" ? "#eab562" : "#f5ead6";g.lineWidth=Math.max(1,2*sx);
+    g.beginPath();g.moveTo(a.x,a.y);g.lineTo(b.x,b.y);g.stroke();
+    // Короткое лезвие остаётся под пальцем во время реза.
+    if(dish.mode==="cut"){g.fillStyle="#d1d2c9";g.fillRect(b.x-2,b.y-5,4,9);}
+  }
+}
+
 // ─────────────────────────── построение листа
 // Подготовка теста разбита на шаги (решение владельца 22.08.2026):
 // шаг 1 — отрезанный от «колбаски» кусочек расплющивается пальцем до ~42% мишени
@@ -220,47 +488,9 @@ function build(){
   edgeNodes = [];
   for(let i=0;i<N;i++) if(deg[i] < 8) edgeNodes.push(i);   // граница круга
 
-  // Тава считается по СВОБОДНОМУ МЕСТУ В КАДРЕ, а не по доле зоны.
-  //
-  // Как было и почему это дефект (замер 08.09.2026, жалоба владельца «роти выходит за
-  // границы тавы»). Пределов было два, и оба врали. `pz.h*0.49` сравнивал НЕСЖАТЫЙ
-  // радиус с высотой зоны, хотя тава рисуется эллипсом, сплющенным в TILT = 0,56 раза, —
-  // предел был строже нужного в 1,8 раза. Потом правый край срезал ещё 15 %, требуя,
-  // чтобы в кадр влезла и ТЕНЬ (PAN_RIM = 1,16). В сумме `PAN_R ≤ 0,175·ширины`, тогда
-  // как `targetR = 0,232·ширины`: роти оказывался шире тавы в 1,32 раза НА ЛЮБОМ экране,
-  // хотя строка ниже просит обратного — таву в 1,25 раза шире роти.
-  //
-  // Как стало. Тава занимает место между кромкой теста и краем кадра. В кадр обязан
-  // помещаться БОРТ (1,08), тень (1,16) может уходить за край — она тень. Сравнение
-  // честное: полуширина роти НА ТАВЕ — это targetR, умноженный на перспективу, а не сам
-  // targetR (лист рисуется поузловой проекцией, а тава — эллипсом от PAN_R без множителя).
-  const pz = zone("pan"), wz = zone("work");
-  const RIM = 1.08, pad = Math.min(cv.width, cv.height) * 0.02;
-  const kAt = (ty)=> 1 + ((ty - horizon())/cv.height) * PERSP;
-  let cxS, cyS;
-  for(let pass = 0; pass < 2; pass++){                 // второй проход уточняет перспективу
-    const rotiHalf = targetR * kAt(pass ? panC.y : pz.cy);
-    if(stackedLayout()){
-      const doughTop = prY(wz.cx, wz.cy - targetR);    // ближняя кромка теста снизу
-      const room = (doughTop - pad*2) - pad;
-      // Тава берёт всё, что даёт кадр: в портрете упор идёт в ШИРИНУ, и борт встаёт
-      // в pad от края. Потолок 1,45 — чтобы на нестандартно вытянутом экране тава не
-      // раздулась вокруг крошечного роти.
-      PAN_R = Math.max(8, Math.min(rotiHalf*1.45, (cv.width*0.5 - pad)/RIM,
-                                   room*0.5/(TILT*RIM)));
-      cxS = cv.width*0.5;
-      cyS = doughTop - pad*2 - PAN_R*TILT*RIM;
-    } else {
-      const doughRight = prX(wz.cx + targetR, wz.cy);  // кромка теста со стороны тавы
-      const left = doughRight + pad*2, right = cv.width - pad;
-      PAN_R = Math.max(8, Math.min(rotiHalf*1.25, (right - left)*0.5/RIM,
-                                   (cv.height*0.5 - pad)/(TILT*RIM)));
-      cxS = right - PAN_R*RIM;
-      cyS = prY(0, pz.cy);
-    }
-    panC = unproject(cxS, cyS);
-  }
+  layoutPan();
   phase = "TABLE"; xf = null;
+  dish = null; dishGesture = null; syncDishUI(); syncStepButtons();
   cook = new Float32Array(N); dry = new Float32Array(N);
   // Контакт с плитой пятнистый, а не идеальный: под листом микрозазоры, складки, плёнка
   // жира. Источники в один голос описывают ПЯТНА («some brown spots», «leopard-spotted»),
@@ -320,6 +550,7 @@ function step(dt){
   // В руке и в полёте узлы заморожены: перенос — движение картинки, запекаемое при посадке.
   // На таве лист схватился и стоит — только жарится.
   if(action.state==="CARRY" || action.state==="TOSS"){ updateAction(dt); return; }
+  if(dish) return; // геометрическая проба: жарку не считаем по старому плоскому листу
   if(phase==="PAN"){ cookStep(dt); return; }
   const h = dt / SUBSTEPS;
   // Затухание зависит от фазы: в полёте лист скользит свободнее, после удара,
@@ -668,6 +899,7 @@ function land(){
   if(gestures.length>200) gestures.shift();
   try{ localStorage.setItem("dough_gestures", JSON.stringify(gestures)); }catch(e){}
   clearAction();
+  startDish();
 }
 function bakeTransform(ox, oy, th){
   const c = Math.cos(th), s = Math.sin(th), cx = xf.cx, cy = xf.cy;
@@ -1014,7 +1246,7 @@ function audioInit(){
   // шлепок удара, треск новой дырки.
 }
 function audioFrame(){
-  if(!AC || condition==="sight"){
+  if(!AC || condition==="sight" || dish){
     if(tenseGain) tenseGain.gain.value=0;
     if(sizzleGain) sizzleGain.gain.value=0;
     return;
@@ -1155,6 +1387,7 @@ let dbgDown = 0, dbgMove = 0, dbgKind = "ждёт";
 
 function onDown(id, cx, cy){
   dbgDown++;
+  if(dish){ beginDishGesture(id,toLocal(cx,cy)); return; }
   if(action.pointerId !== null) return;              // один активный палец; второй игнорируется (audit §5)
   if(action.state === "SETTLING") finalizeGesture(); // быстрый повторный тап не ждёт хвоста успокоения
   if(action.state !== "RESTING") return;             // остальные фазы доигрывают автономно
@@ -1174,15 +1407,18 @@ function onDown(id, cx, cy){
   armAction(id, p);                                  // только выбор края: тесто НЕ двигается
 }
 function onMove(id, cx, cy){
+  if(dishGesture && dishGesture.id===id){ dbgMove++; moveDishGesture(toLocal(cx,cy)); return; }
   if(action.pointerId !== id) return;
   dbgMove++;
   updateActionMove(toLocal(cx, cy));
 }
 function onUp(id){
+  if(dishGesture && dishGesture.id===id){ endDishGesture(); return; }
   if(action.pointerId !== id) return;
   releaseAction();
 }
 function onCancel(id){
+  if(dishGesture && dishGesture.id===id){ dishGesture=null; return; }
   if(action.pointerId !== id) return;
   // Отмена всегда возвращает покой из ARMED/LIFTING (audit §5);
   // автономные фазы (FLYING и дальше) доигрывают сами и очистятся за ≤0.4 с.
@@ -1237,6 +1473,7 @@ window.addEventListener("pointerup", e=>{ onUp("p"+e.pointerId); }, true);
 window.addEventListener("pointercancel", e=>{ onCancel("p"+e.pointerId); }, true);
 // Уход в фон — та же отмена: не оставлять взведённый жест (audit §5).
 addEventListener("blur", ()=>{
+  dishGesture=null;
   if(action.state==="CARRY"){ action.pointerId = null; dropCarry(); }
   else if(action.state==="ARMED"||action.state==="LIFTING") clearAction();
 });
@@ -1247,6 +1484,14 @@ addEventListener("keydown", e=>{
 });
 document.getElementById("tear").addEventListener("click", pressNow);
 document.getElementById("reset").addEventListener("click", reset);
+document.getElementById("cutMode").addEventListener("click", startCutting);
+document.getElementById("undoDish").addEventListener("click", undoDish);
+document.getElementById("foldSample").addEventListener("click", ()=>{
+  stepNo=3; reset();
+  const c=centerOfSheet(); xf={cx:c.x,cy:c.y};
+  bakeTransform(panC.x-c.x,panC.y-c.y,0); xf=null; phase="PAN";
+  measureThickness(); startDish();
+});
 // «Прибор» — шесть из семи строк панели, которые нужны замеру, а не игре. В ландшафте
 // они уходят на лист поверх поля; лист не меняет размер #stage, поэтому лист теста цел.
 const toolsBtn = document.getElementById("toolsBtn");
@@ -1269,6 +1514,7 @@ const HINTS = {
 function syncStepButtons(){
   document.querySelectorAll("[data-s]").forEach(b=>b.classList.toggle("on", +b.dataset.s === stepNo));
   hintEl.textContent = HINTS[stepNo] || "";
+  if(dish) syncDishUI();
 }
 document.querySelectorAll("[data-s]").forEach(b=>b.addEventListener("click", ()=>{
   const to = +b.dataset.s;
@@ -1449,7 +1695,8 @@ function draw(){
   g.fillStyle = "#14100c"; g.fillRect(0,0,W,H);
   drawTable(g, sx, sy);
 
-  {   // режим «только звук», в котором поле не рисовалось вовсе, снят 08.09.2026
+  if(dish) drawDish(g,sx,sy);
+  else {   // режим «только звук», в котором поле не рисовалось вовсе, снят 08.09.2026
     // ячейки решётки; порванные и просвеченные насквозь — дырки
     // порванные ячейки: пометить их узлы, чтобы подсветить рваный край у соседей
     if(tornAt){
@@ -1623,7 +1870,7 @@ function loop(now){
   const banner = advancedAt && performance.now()-advancedAt < 2600;
   const mc = meanCook(), md = meanDry();
   const verdictAge = verdictAt ? performance.now() - verdictAt : Infinity;
-  liveEl.textContent = verdictAge < 3500 ? verdict :
+  liveEl.textContent = dish ? dish.message : verdictAge < 3500 ? verdict :
     phase==="PAN" ? (md < 0.35 ? "на таве · шипит — слушай, цвета ещё нет"
                      : md < 0.9 ? "на таве · подсыхает, звук уходит выше"
                      : mc < 0.12 ? "на таве · суше и звонче — вот-вот пойдут пятна"
@@ -1671,7 +1918,7 @@ function loop(now){
     `${variant}/${condition}  попыток ${done}/30  распознано ${done?Math.round(hit/done*100):0}%\n` +
     `${stackedLayout()?"портрет · замер с альбомным не сравнить":"альбом"}\n` +
     `шаг ${stepNo}  ${action.state!=="RESTING"?"◆ "+action.state:"○ покой"}  ` +
-    `${phase==="PAN" ? "тава · сушка "+md.toFixed(2)+" · цвет "+mc.toFixed(2) : "стол"}  мах: ${lastDecision}` +
+    `${dish ? "проба · складок "+dish.folds+" · разрезов "+dish.cuts.length : phase==="PAN" ? "тава · сушка "+md.toFixed(2)+" · цвет "+mc.toFixed(2) : "стол"}  мах: ${lastDecision}` +
     `${tossTry ? "  перенесено "+tossOk+" из "+tossTry : ""}  ` +
     `лист ${pct}%${ready}${ragged}  жестов ${gestures.length}  ` +
     `[касаний ${rawTouch} · указателей ${rawPointer} · до теста ↓${dbgDown} ↔${dbgMove} · ${dbgKind}${loopErrs?" · сбоев "+loopErrs:""}]  ` +
@@ -1694,14 +1941,22 @@ let pendingResize = false;
 // НИКОГДА после удачного броска: холст оставался в старом размере до «заново»
 // (найдено проверкой 08.09, обе формы окна). Полёт при этом всё равно защищён —
 // в нём `action.state === "TOSS"`.
-function gestureLive(){ return action.state !== "RESTING"; }
+function gestureLive(){ return action.state !== "RESTING" || !!dishGesture; }
 function resize(force){
   const r = stage.getBoundingClientRect(), dpr = Math.min(2, devicePixelRatio||1);
   const w = Math.max(64, Math.round(r.width*dpr)), h = Math.max(64, Math.round(r.height*dpr));
   if(!force && w===cv.width && h===cv.height) return;
   if(!force && gestureLive()){ pendingResize = true; return; }   // доиграем жест, потом пересоберём
   pendingResize = false;
+  const oldPan={...panC},oldR=targetR;
   cv.width = w; cv.height = h;
+  if(dish && !force){
+    const z=zone("work"); targetR=Math.min(z.w,z.h)*TARGET_FRAC; layoutPan();
+    const scale=targetR/oldR;
+    for(let i=0;i<N;i++){px[i]=panC.x+(px[i]-oldPan.x)*scale;py[i]=panC.y+(py[i]-oldPan.y)*scale;prx[i]=px[i];pry[i]=py[i];}
+    startR*=scale;step1R*=scale;gestureScale*=scale;R0*=scale;
+    return; // dish и история в локальных координатах: ни одной пересборки материала
+  }
   build();
 }
 // Отложенный ресайз применяется, как только рука отпустила и лист вернулся в покой.
