@@ -50,7 +50,7 @@
      группам исходный порядок панели: шаг · вид · судишь · порвётся · ощущение · служебные · статистика. */
   #core, #tools{ display:contents; }
   #gStep{ order:1 } #gView{ order:2 } #gCond{ order:3 } #tear{ order:4 }
-  #gTune{ order:5 } #gSrv{ order:6 } #stats{ order:7 }
+  #gTune{ order:5 } #gThrough{ order:5 } #gSrv{ order:6 } #stats{ order:7 }
   #toolsBtn, #mini{ display:none; }
   #hint{ position:absolute; left:10px; top:10px; right:10px; color:var(--dim);
     pointer-events:none; font-size:11px; }
@@ -142,7 +142,7 @@
        Проверка 08.09: панели нужно 379 px, а Safari в ландшафте отдаёт меньше 393 —
        тулбар и home-indicator съедают разницу первыми. */
     #gStep{ order:1 } #gView{ order:2 } #tear{ order:3 } #mini{ order:4 } #toolsBtn{ order:5 }
-    #gCond{ order:1 } #gTune{ order:2 } #gSrv{ order:3 } #stats{ order:4 }
+    #gCond{ order:1 } #gTune{ order:2 } #gThrough{ order:2 } #gSrv{ order:3 } #stats{ order:4 }
     #tools .tune label{ width:100%; }
     #core .grp{ flex-direction:column; align-items:stretch; gap:3px; }
     #core .grp b{ margin:0; font-size:10px; }
@@ -215,6 +215,12 @@
       <button data-c="both" class="on">обоим</button>
       <button data-c="sight">картинке</button>
     </div>
+    <!-- Условность отрисовки (#21): сколько цвета нижней стороны видно сквозь тонкий лист. -->
+    <div class="grp measure" id="gThrough"><b>низ сквозь лист</b>
+      <button data-k="0">0</button>
+      <button data-k="0.3" class="on">0,3</button>
+      <button data-k="0.6">0,6</button>
+    </div>
     <div class="grp" id="gSrv">
       <button id="reset">заново</button>
       <button id="dump">лог</button>
@@ -238,7 +244,7 @@
 // до 400%+ и лист «рвётся» в середине от любого движения. Замер это обнаружил сразу.
 // Число узлов сохранено (1 060 после обрезки по кругу; прежняя оценка «~1150» была на глаз,
 // пересчитано 07.09.2026), однородность рёбер восстановлена.
-const BUILD = "2026-09-16 · жарка и конверт · 2";
+const BUILD = "2026-09-16 · две стороны · 3";
 const GRID = 38;                   // 38x38, в круг попадает 1 060 узлов (посчитано, не оценка)
 let SUBSTEPS = 8;                  // T2: 8–10 подшагов, 1 итерация
 let DAMP = 0.986;
@@ -514,10 +520,14 @@ function startDish(){
     faces.push({...f,kind:"filling",source:0,tone:0,points:f.points.map(p=>({x:c.x+(p.x-c.x)*.7,y:c.y+(p.y-c.y)*.7}))});
     dish.filling.push({id:0,x:c.x,y:c.y,radius:0});
   }
+  // У материала две поверхности: 0 — та, что легла на таву при посадке, 1 — исходный
+  // верх. Обе начинаются с нуля: startDish вызывается в момент посадки, и узловые
+  // dry/cook к этому времени ещё не успели вырасти ни на одном пути.
   dish.thermal=quads.map((ids,q)=>quadCons[q].some(c=>c.broken) ? null : {
-    dry:ids.reduce((s,i)=>s+dry[i],0)/4,cook:ids.reduce((s,i)=>s+cook[i],0)/4,
+    dry:[0,0],cook:[0,0],
     tone:ids.reduce((s,i)=>s+thick[i],0)/4,contact:ids.reduce((s,i)=>s+contactF[i],0)/4
   });
+  dish.flips=0; dish.panTime=0; dish.sessions=[{flip:0,start:0,gold:null}];
   rebuildDishContact(); dish.hull=dishHull(); syncDishUI();
 }
 // Heat belongs to material, not to a geometry snapshot. Undo never rewinds cooking.
@@ -531,6 +541,15 @@ function pointInFace(points,x,y){
   }
   return true;
 }
+// Сушка верхней, открытой стороны: пар от нагретого низа уходит сквозь лист.
+// INFERRED — источника на долю нет. Закрытая сверху сторона (под клапаном или под
+// начинкой) не сохнет вовсе: там пар заперт, а начинка — водяной резервуар
+// (docs/frying-mechanics.md §1, «cover»).
+const UP_DRY = 0.35;
+// Цвет растёт только у стороны, прижатой прямо к стали. Условие цвета — поверхность
+// >120 °C при a_w<0,6 (frying-mechanics.md §1 п. 3); закрытые поверхности между
+// слоями его не достигают — это вывод из условия, а не цитата (INFERRED).
+// Поле контакта `contact` у обеих сторон одно — принадлежит материалу (упрощение).
 function rebuildDishContact(){
   if(!dish || !dish.thermal) return;
   const b=dishBounds(), size=48, dx=(b.right-b.left)/size,dy=(b.bottom-b.top)/size;
@@ -548,22 +567,33 @@ function rebuildDishContact(){
       if(!cell.some(a=>a.kind===f.kind && a.source===f.source && a.turned===f.turned)) cell.push(f);
     }
   }
-  const sum=dish.thermal.map(()=>0),count=sum.slice(),contact=sum.slice();
+  const n=dish.thermal.length, pair=()=>Array.from({length:n},()=>[0,0]);
+  const dryD=pair(), cookD=pair(), contactW=pair(), topW=pair(), count=new Float64Array(n);
+  // Один образец слоя: нижняя сторона получает тепло, прошедшее сквозь всё, что ниже;
+  // открытая верхняя — долю UP_DRY на сушку; цвет — только прямой контакт со сталью.
+  const deposit=(f,heat,tr,top,weight)=>{
+    const t=dish.thermal[f.source]; if(!t) return;
+    const s=f.source, down=f.turned ? 1 : 0, up=1-down, h=heat*t.contact*weight;
+    count[s]+=weight;
+    dryD[s][down]+=h*tr;
+    if(top){ dryD[s][up]+=UP_DRY*h*tr; topW[s][up]+=weight; }
+    if(tr===1 && heat>0){ cookD[s][down]+=h; contactW[s][down]+=weight; }
+  };
   for(let y=0;y<size;y++) for(let x=0;x<size;x++){
     const cell=cells[y*size+x]; let transmission=1;
     const r=Math.hypot(b.left+(x+.5)*dx,b.top+(y+.5)*dy)*targetR/PAN_R;
     const heat=r<=1 ? panHeat(r)*1.05 : 0;
-    for(const f of cell){
-      if(f.kind==="dough"){
-        const t=dish.thermal[f.source];
-        if(t){sum[f.source]+=heat*t.contact*transmission;count[f.source]++;if(transmission===1&&heat>0) contact[f.source]++;}
-        transmission*=.62;
-      } else transmission*=.45; // moist filling slows heat reaching the upper flap
+    for(let k=0;k<cell.length;k++){
+      const f=cell[k];
+      if(f.kind==="dough"){ deposit(f,heat,transmission,k===cell.length-1,1); transmission*=.62; }
+      else transmission*=.45; // moist filling slows heat reaching the upper flap
     }
   }
   // Tiny intact fragments may fit between all grid centres. Sample their own
   // interior instead of leaving a permanently raw island inside the hot pan.
-  const missed=count.map(n=>n===0);
+  const missed=Array.from(count,v=>v===0);
+  const pad=1e-7, inBox=(j,p)=>{const box=boxes[j];
+    return !(p.x<box[0]-pad||p.x>box[1]+pad||p.y<box[2]-pad||p.y>box[3]+pad);};
   for(let i=0;i<dish.faces.length;i++){
     const f=dish.faces[i],t=dish.thermal[f.source];
     if(f.kind!=="dough" || !t || !missed[f.source]) continue;
@@ -572,50 +602,80 @@ function rebuildDishContact(){
     const seen=new Set();
     for(let j=0;j<i;j++){
       // Рамка отсекает почти все грани до точного теста: без неё открытый лист
-      // тратил здесь 67 тысяч вызовов pointInFace на одну пересборку.
-      const box=boxes[j],pad=1e-7;
-      if(p.x<box[0]-pad||p.x>box[1]+pad||p.y<box[2]-pad||p.y>box[3]+pad) continue;
+      // тратил здесь десятки тысяч вызовов pointInFace на одну пересборку.
+      if(!inBox(j,p)) continue;
       const below=dish.faces[j],key=below.kind+":"+below.source+":"+below.turned;
       if(seen.has(key) || !pointInFace(below.points,p.x,p.y)) continue;
       seen.add(key); transmission*=below.kind==="dough" ? .62 : .45;
     }
+    let top=true;
+    for(let j=i+1;j<dish.faces.length && top;j++){
+      if(inBox(j,p) && pointInFace(dish.faces[j].points,p.x,p.y)) top=false;
+    }
     const r=Math.hypot(p.x,p.y)*targetR/PAN_R,heat=r<=1 ? panHeat(r)*1.05 : 0;
-    const weight=polyArea(f.points)/(dx*dy);
-    sum[f.source]+=heat*t.contact*transmission*weight;count[f.source]+=weight;
-    if(transmission===1&&heat>0) contact[f.source]+=weight;
+    deposit(f,heat,transmission,top,polyArea(f.points)/(dx*dy));
   }
-  dish.heatDrive=sum.map((v,i)=>count[i] ? v/count[i] : 0);
-  dish.contactWeights=contact;
+  const avg=(v,s)=>count[s] ? [v[0]/count[s],v[1]/count[s]] : [0,0];
+  dish.dryDrive=dryD.map(avg);
+  dish.cookDrive=cookD.map(avg);
+  dish.contactWeights=contactW;   // [s][сторона]: сколько образцов стороны лежит на стали
+  dish.topWeights=topW;           // [s][сторона]: сколько образцов стороны открыто сверху
 }
 function cookDish(dt){
   if(!dish || dish.mode!=="fold" || phase!=="PAN" || !dish.thermal) return;
-  if(!dish.heatDrive) rebuildDishContact();
+  if(!dish.dryDrive) rebuildDishContact();
   for(let i=0;i<dish.thermal.length;i++){
     const t=dish.thermal[i]; if(!t) continue;
-    const heat=dish.heatDrive[i]||0;
     const thin=Math.max(.2,Math.min(2,.10/Math.max(.05,t.tone)));
-    if(t.dry<1) t.dry=Math.min(1,t.dry+dt*DRY_RATE*heat*thin);
-    else t.cook+=dt*COOK_RATE*heat;
+    for(let side=0;side<2;side++){
+      // Сторона сначала сохнет, и только потом набирает цвет — как было для листа целиком.
+      if(t.dry[side]<1) t.dry[side]=Math.min(1,t.dry[side]+dt*DRY_RATE*dish.dryDrive[i][side]*thin);
+      else t.cook[side]+=dt*COOK_RATE*dish.cookDrive[i][side];
+    }
+  }
+  // Время на таве по «сеансам»: посадка и каждый переворот открывают новый. Золото низа
+  // (средний цвет прижатых сторон 0,4) — ответ на вопрос бюджета 30–60 с (#21).
+  if(dish.sessions){
+    dish.panTime+=dt;
+    const cur=dish.sessions[dish.sessions.length-1];
+    if(cur.gold===null && dishSideMean("cook","contactWeights")>=0.4) cur.gold=dish.panTime-cur.start;
   }
 }
-function dishThermalMean(key,contactOnly=false){
-  if(!dish || !dish.thermal) return 0;
+// Среднее по сторонам с весами: contactWeights — то, что лежит на стали (звук и «низ»),
+// topWeights — то, что открыто сверху и видно игроку («верх»).
+function dishSideMean(key,weightsKey){
+  if(!dish || !dish.thermal || !dish[weightsKey]) return 0;
   let sum=0,weight=0;
-  if(contactOnly){
-    for(let i=0;i<dish.thermal.length;i++){
-      const t=dish.thermal[i],w=dish.contactWeights[i]||0;
-      if(t){sum+=t[key]*w;weight+=w;}
-    }
-  } else for(const f of dish.faces){
-    if(f.kind!=="dough") continue;
-    const t=dish.thermal[f.source],w=polyArea(f.points);
-    if(t){sum+=t[key]*w;weight+=w;}
+  const W=dish[weightsKey];
+  for(let i=0;i<dish.thermal.length;i++){
+    const t=dish.thermal[i]; if(!t) continue;
+    for(let side=0;side<2;side++){ const w=W[i][side]; if(w){ sum+=t[key][side]*w; weight+=w; } }
   }
   return weight ? sum/weight : 0;
 }
-function dishCookColor(f){
-  const c=dish.thermal && dish.thermal[f.source] ? dish.thermal[f.source].cook : 0;
-  return cookColor(f.turned ? [221,199,152] : [227,213,178],c);
+// Строка прибора: «низ» — то, что лежит на стали, «верх» — то, что открыто взгляду.
+// Золото низа считается по сеансам: посадка и каждый переворот начинают новый.
+function dishStatus(){
+  const parts=[`складок ${dish.folds}`,`переворотов ${dish.flips||0}`,`разрезов ${dish.cuts.length}`];
+  if(phase!=="PAN") return parts.concat("на столе").join(" · ");
+  parts.push(`низ: сушка ${meanDry().toFixed(2)} цвет ${meanCook().toFixed(2)}`);
+  parts.push(`верх: цвет ${dishSideMean("cook","topWeights").toFixed(2)}`);
+  if(dish.sessions) parts.push("золото низа "+dish.sessions.map(x=>x.gold===null ? "—" : Math.round(x.gold)+" с").join(" / "));
+  return parts.join(" · ");
+}
+// Условность отрисовки, не физика: тонкий лист показывает сквозь себя цвет своей
+// нижней стороны с весом (1 − толщина) × SHOW_THROUGH. На таве настоящий лист матовеет,
+// опора на просвечивание есть только у сырого растянутого листа. Доля — на пробу (#21).
+let SHOW_THROUGH = 0.3;
+function dishCookColor(f,side,through=true){
+  const base=f.turned ? [221,199,152] : [227,213,178];
+  const t=dish.thermal && dish.thermal[f.source];
+  if(!t) return cookColor(base,0);
+  if(side===undefined) side=f.turned ? 0 : 1;           // видна верхняя сторона грани
+  const own=cookColor(base,t.cook[side]);
+  if(!through || SHOW_THROUGH<=0) return own;
+  const w=Math.max(0,Math.min(1,1-t.tone))*SHOW_THROUGH;
+  return lerp3(own,cookColor(base,t.cook[1-side]),w);
 }
 
 function foldGeometry(anchor,end){
@@ -834,15 +894,22 @@ function drawDishSections(g,screen,faces,sx,sy){
     if(!w.cut&&w.stack.length<2) continue; // no artificial thick rim around a bare sheet
     const weights=w.stack.map(f=>f.kind==="filling"?1.65:1),sum=weights.reduce((a,b)=>a+b,0);
     const height=Math.min(Math.max(3,14*pixel),unit*sum),step=height/sum;
+    const band=(from,to,color)=>{
+      g.fillStyle=rgb(color);g.beginPath();
+      g.moveTo(a.x+nx*from,a.y+ny*from);g.lineTo(b.x+nx*from,b.y+ny*from);
+      g.lineTo(b.x+nx*to,b.y+ny*to);g.lineTo(a.x+nx*to,a.y+ny*to);g.closePath();g.fill();
+    };
     let bottom=0;
     for(let i=0;i<w.stack.length;i++){
       const f=w.stack[i],top=bottom+weights[i]*step;
-      const base=f.kind==="filling"?[[231,183,67],[245,210,113],[213,154,45]][Math.round(f.tone)%3]:dishCookColor(f);
-      // The crumb is lighter than the thin cooked rim, but retains material heat.
-      const color=f.kind==="filling"?base:base.map(c=>Math.round(c*.82+18));
-      g.fillStyle=rgb(color);g.beginPath();
-      g.moveTo(a.x+nx*bottom,a.y+ny*bottom);g.lineTo(b.x+nx*bottom,b.y+ny*bottom);
-      g.lineTo(b.x+nx*top,b.y+ny*top);g.lineTo(a.x+nx*top,a.y+ny*top);g.closePath();g.fill();
+      if(f.kind==="filling"){ band(bottom,top,[[231,183,67],[245,210,113],[213,154,45]][Math.round(f.tone)%3]); bottom=top; continue; }
+      // Мякиш светлее корочек. Корочки — настоящие стороны слоя: снизу та, что смотрит
+      // вниз, сверху — та, что вверх; у каждой свой цвет (в виде A слой ~0,5 px — не разглядеть).
+      const down=f.turned ? 1 : 0, crust=Math.min((top-bottom)*.3,Math.max(.5,1.2*pixel));
+      const crumb=dishCookColor(f,down,false).map((c,k)=>(c+dishCookColor(f,1-down,false)[k])/2);
+      band(bottom,top,crumb.map(c=>Math.round(c*.82+18)));
+      band(bottom,bottom+crust,dishCookColor(f,down,false));
+      band(top-crust,top,dishCookColor(f,1-down,false));
       bottom=top;
     }
     // Only the actual outer lips are stroked; never a triangle or a filling tile.
@@ -1413,7 +1480,7 @@ function cookStep(dt){
   }
 }
 function meanCook(){
-  if(dish) return dishThermalMean("cook");
+  if(dish) return dishSideMean("cook","contactWeights");   // цвет того, что сейчас жарится
   if(!cook) return 0;
   let s=0, n=0;
   for(let i=0;i<N;i++){ if(conDeg[i]<=0) continue; s+=cook[i]; n++; }
@@ -1422,7 +1489,7 @@ function meanCook(){
 // Звук ведёт вода, а не цвет: шипение и треск идут от сушки и потому ОПЕРЕЖАЮТ окраску —
 // «суше и звонче» слышно раньше, чем видно золото. Это и есть «звук как HUD».
 function meanDry(){
-  if(dish) return dishThermalMean("dry",true);
+  if(dish) return dishSideMean("dry","contactWeights");    // вода прижатых сторон ведёт шипение
   if(!dry) return 0;
   let s=0, n=0;
   for(let i=0;i<N;i++){ if(conDeg[i]<=0) continue; s+=dry[i]; n++; }
@@ -2062,6 +2129,17 @@ document.querySelectorAll("[data-c]").forEach(b=>b.addEventListener("click",()=>
   document.querySelectorAll("[data-c]").forEach(x=>x.classList.toggle("on",x===b));
   resetMeters(); setTools(false);
 }));
+// Доля «низа сквозь лист» — условность отрисовки для пробы; переживает перезагрузку.
+try{ const k=localStorage.getItem("dough_through"); if(k!==null && [0,0.3,0.6].includes(+k)) SHOW_THROUGH=+k; }catch(e){}
+document.querySelectorAll("[data-k]").forEach(b=>{
+  b.classList.toggle("on", +b.dataset.k===SHOW_THROUGH);
+  b.addEventListener("click",()=>{
+    SHOW_THROUGH=+b.dataset.k;
+    try{ localStorage.setItem("dough_through", String(SHOW_THROUGH)); }catch(e){}
+    document.querySelectorAll("[data-k]").forEach(x=>x.classList.toggle("on",x===b));
+    setTools(false);
+  });
+});
 // Принудительное обновление: страница отдаётся с GitHub Pages и залипает в кеше,
 // поэтому правки иначе не доезжают до телефона. Та же схема, что в «Лягушке».
 document.getElementById("hardReload").addEventListener("click", ()=>{
@@ -2390,7 +2468,7 @@ function loop(now){
     `${variant}/${condition}  попыток ${done}/30  распознано ${done?Math.round(hit/done*100):0}%\n` +
     `${stackedLayout()?"портрет · замер с альбомным не сравнить":"альбом"}\n` +
     `шаг ${stepNo}  ${action.state!=="RESTING"?"◆ "+action.state:"○ покой"}  ` +
-    `${dish ? "складок "+dish.folds+" · разрезов "+dish.cuts.length+(phase==="PAN" ? " · сушка "+md.toFixed(2)+" · цвет "+mc.toFixed(2) : " · на столе") : phase==="PAN" ? "тава · сушка "+md.toFixed(2)+" · цвет "+mc.toFixed(2) : "стол"}  мах: ${lastDecision}` +
+    `${dish ? dishStatus() : phase==="PAN" ? "тава · сушка "+md.toFixed(2)+" · цвет "+mc.toFixed(2) : "стол"}  мах: ${lastDecision}` +
     `${tossTry ? "  перенесено "+tossOk+" из "+tossTry : ""}  ` +
     `лист ${pct}%${ready}${ragged}  жестов ${gestures.length}  ` +
     `[касаний ${rawTouch} · указателей ${rawPointer} · до теста ↓${dbgDown} ↔${dbgMove} · ${dbgKind}${loopErrs?" · сбоев "+loopErrs:""}]  ` +
