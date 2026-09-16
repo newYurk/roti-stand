@@ -11,7 +11,7 @@
 // до 400%+ и лист «рвётся» в середине от любого движения. Замер это обнаружил сразу.
 // Число узлов сохранено (1 060 после обрезки по кругу; прежняя оценка «~1150» была на глаз,
 // пересчитано 07.09.2026), однородность рёбер восстановлена.
-const BUILD = "2026-09-16 · конверт и нарезка · 1";
+const BUILD = "2026-09-16 · жарка и конверт · 2";
 const GRID = 38;                   // 38x38, в круг попадает 1 060 узлов (посчитано, не оценка)
 let SUBSTEPS = 8;                  // T2: 8–10 подшагов, 1 итерация
 let DAMP = 0.986;
@@ -287,8 +287,104 @@ function startDish(){
     faces.push({...f,kind:"filling",source:0,tone:0,points:f.points.map(p=>({x:c.x+(p.x-c.x)*.7,y:c.y+(p.y-c.y)*.7}))});
     dish.filling.push({id:0,x:c.x,y:c.y,radius:0});
   }
-  dish.hull=dishHull(); syncDishUI();
+  dish.thermal=quads.map((ids,q)=>quadCons[q].some(c=>c.broken) ? null : {
+    dry:ids.reduce((s,i)=>s+dry[i],0)/4,cook:ids.reduce((s,i)=>s+cook[i],0)/4,
+    tone:ids.reduce((s,i)=>s+thick[i],0)/4,contact:ids.reduce((s,i)=>s+contactF[i],0)/4
+  });
+  rebuildDishContact(); dish.hull=dishHull(); syncDishUI();
 }
+// Heat belongs to material, not to a geometry snapshot. Undo never rewinds cooking.
+function pointInFace(points,x,y){
+  let sign=0;
+  for(let i=0;i<points.length;i++){
+    const a=points[i],b=points[(i+1)%points.length],v=(b.x-a.x)*(y-a.y)-(b.y-a.y)*(x-a.x);
+    if(Math.abs(v)<1e-10) continue;
+    if(sign && Math.sign(v)!==sign) return false;
+    sign=Math.sign(v);
+  }
+  return true;
+}
+function rebuildDishContact(){
+  if(!dish || !dish.thermal) return;
+  const b=dishBounds(), size=48, dx=(b.right-b.left)/size,dy=(b.bottom-b.top)/size;
+  const cells=Array.from({length:size*size},()=>[]);
+  for(const f of dish.faces){
+    const xs=f.points.map(p=>p.x),ys=f.points.map(p=>p.y);
+    const x0=Math.max(0,Math.floor((Math.min(...xs)-b.left)/dx)),x1=Math.min(size-1,Math.floor((Math.max(...xs)-b.left)/dx));
+    const y0=Math.max(0,Math.floor((Math.min(...ys)-b.top)/dy)),y1=Math.min(size-1,Math.floor((Math.max(...ys)-b.top)/dy));
+    for(let y=y0;y<=y1;y++) for(let x=x0;x<=x1;x++){
+      if(!pointInFace(f.points,b.left+(x+.5)*dx,b.top+(y+.5)*dy)) continue;
+      const cell=cells[y*size+x];
+      // Shared mesh diagonals must not count as an extra physical layer.
+      if(!cell.some(a=>a.kind===f.kind && a.source===f.source && a.turned===f.turned)) cell.push(f);
+    }
+  }
+  const sum=dish.thermal.map(()=>0),count=sum.slice(),contact=sum.slice();
+  for(let y=0;y<size;y++) for(let x=0;x<size;x++){
+    const cell=cells[y*size+x]; let transmission=1;
+    const r=Math.hypot(b.left+(x+.5)*dx,b.top+(y+.5)*dy)*targetR/PAN_R;
+    const heat=r<=1 ? panHeat(r)*1.05 : 0;
+    for(const f of cell){
+      if(f.kind==="dough"){
+        const t=dish.thermal[f.source];
+        if(t){sum[f.source]+=heat*t.contact*transmission;count[f.source]++;if(transmission===1&&heat>0) contact[f.source]++;}
+        transmission*=.62;
+      } else transmission*=.45; // moist filling slows heat reaching the upper flap
+    }
+  }
+  // Tiny intact fragments may fit between all grid centres. Sample their own
+  // interior instead of leaving a permanently raw island inside the hot pan.
+  const missed=count.map(n=>n===0);
+  for(let i=0;i<dish.faces.length;i++){
+    const f=dish.faces[i],t=dish.thermal[f.source];
+    if(f.kind!=="dough" || !t || !missed[f.source]) continue;
+    const p=f.points.reduce((s,p)=>({x:s.x+p.x/f.points.length,y:s.y+p.y/f.points.length}),{x:0,y:0});
+    let transmission=1;
+    const seen=new Set();
+    for(let j=0;j<i;j++){
+      const below=dish.faces[j],key=below.kind+":"+below.source+":"+below.turned;
+      if(seen.has(key) || !pointInFace(below.points,p.x,p.y)) continue;
+      seen.add(key); transmission*=below.kind==="dough" ? .62 : .45;
+    }
+    const r=Math.hypot(p.x,p.y)*targetR/PAN_R,heat=r<=1 ? panHeat(r)*1.05 : 0;
+    const weight=polyArea(f.points)/(dx*dy);
+    sum[f.source]+=heat*t.contact*transmission*weight;count[f.source]+=weight;
+    if(transmission===1&&heat>0) contact[f.source]+=weight;
+  }
+  dish.heatDrive=sum.map((v,i)=>count[i] ? v/count[i] : 0);
+  dish.contactWeights=contact;
+}
+function cookDish(dt){
+  if(!dish || dish.mode!=="fold" || phase!=="PAN" || !dish.thermal) return;
+  if(!dish.heatDrive) rebuildDishContact();
+  for(let i=0;i<dish.thermal.length;i++){
+    const t=dish.thermal[i]; if(!t) continue;
+    const heat=dish.heatDrive[i]||0;
+    const thin=Math.max(.2,Math.min(2,.10/Math.max(.05,t.tone)));
+    if(t.dry<1) t.dry=Math.min(1,t.dry+dt*DRY_RATE*heat*thin);
+    else t.cook+=dt*COOK_RATE*heat;
+  }
+}
+function dishThermalMean(key,contactOnly=false){
+  if(!dish || !dish.thermal) return 0;
+  let sum=0,weight=0;
+  if(contactOnly){
+    for(let i=0;i<dish.thermal.length;i++){
+      const t=dish.thermal[i],w=dish.contactWeights[i]||0;
+      if(t){sum+=t[key]*w;weight+=w;}
+    }
+  } else for(const f of dish.faces){
+    if(f.kind!=="dough") continue;
+    const t=dish.thermal[f.source],w=polyArea(f.points);
+    if(t){sum+=t[key]*w;weight+=w;}
+  }
+  return weight ? sum/weight : 0;
+}
+function dishCookColor(f){
+  const c=dish.thermal && dish.thermal[f.source] ? dish.thermal[f.source].cook : 0;
+  return cookColor(f.turned ? [221,199,152] : [227,213,178],c);
+}
+
 function foldGeometry(anchor,end){
   const dx=anchor.x-end.x, dy=anchor.y-end.y, length=Math.hypot(dx,dy);
   if(length<.12) return null;
@@ -311,7 +407,7 @@ function rememberDish(){
 }
 function foldDish(anchor,end){
   const next=foldGeometry(anchor,end); if(!next) return false;
-  rememberDish(); dish.faces=next.faces; dish.folds++; dish.hull=dishHull();
+  rememberDish(); dish.faces=next.faces; dish.folds++; dish.hull=dishHull(); rebuildDishContact();
   dish.message=`Складок: ${dish.folds} · можно сложить ещё`;
   syncDishUI(); return true;
 }
@@ -348,7 +444,7 @@ function cutDish(a,b){
 }
 function undoDish(){
   if(!dish || dishGesture || !dish.history.length) return;
-  Object.assign(dish,dish.history.pop()); dish.hull=dishHull();
+  Object.assign(dish,dish.history.pop()); dish.hull=dishHull(); rebuildDishContact();
   dish.message="Последнее действие отменено"; syncDishUI();
 }
 function syncDishUI(){
@@ -362,8 +458,8 @@ function syncDishUI(){
   cut.textContent=dish && dish.mode==="cut" ? "нарезка на столе" : "к нарезке →";
   document.getElementById("undoDish").disabled=!dish || !dish.history.length;
   if(dish) hintEl.textContent=dish.mode==="fold"
-    ? "Край → внутрь: заверни начинку в тесто."
-    : "Нарезка: веди прямо. Жарка пока пропущена.";
+    ? "На таве: жарится. Край → внутрь — складка."
+    : "Нарезка: проведи через конверт прямым жестом.";
 }
 function beginDishGesture(id,p){
   if(dishGesture) return;
@@ -392,20 +488,155 @@ function endDishGesture(){
   const ok=dish.mode==="fold" ? g.target&&foldDish(g.anchor,g.target) : cutDish(g.start,g.end);
   if(!ok) dish.message=dish.mode==="fold" ? "Потяни край дальше внутрь листа" : "Проведи лезвием через тесто";
 }
+// Section geometry belongs to a material snapshot, not to its screen size or heat.
+// A boundary exists only where dough ends. Shared mesh diagonals never get walls.
+function dishSectionGeometry(faces, cuts=dish.cuts){
+  const cache=dishSectionGeometry.cache||(dishSectionGeometry.cache=new WeakMap());
+  if(cache.has(faces)) return cache.get(faces);
+  const entries=faces.map((face,id)=>{
+    const xs=face.points.map(p=>p.x),ys=face.points.map(p=>p.y);
+    return {face,id,left:Math.min(...xs),right:Math.max(...xs),top:Math.min(...ys),bottom:Math.max(...ys)};
+  });
+  const bounds={left:Math.min(...entries.map(e=>e.left)),right:Math.max(...entries.map(e=>e.right)),
+    top:Math.min(...entries.map(e=>e.top)),bottom:Math.max(...entries.map(e=>e.bottom))};
+  const cell=Math.max(.025,Math.max(bounds.right-bounds.left,bounds.bottom-bounds.top)/24),grid=new Map();
+  const cellX=x=>Math.floor((x-bounds.left)/cell),cellY=y=>Math.floor((y-bounds.top)/cell);
+  for(const e of entries) for(let y=cellY(e.top);y<=cellY(e.bottom);y++) for(let x=cellX(e.left);x<=cellX(e.right);x++){
+    const key=x+":"+y; if(!grid.has(key)) grid.set(key,[]); grid.get(key).push(e);
+  }
+  function nearby(left,top,right,bottom){
+    const found=new Set();
+    for(let y=cellY(top);y<=cellY(bottom);y++) for(let x=cellX(left);x<=cellX(right);x++){
+      for(const e of grid.get(x+":"+y)||[]) if(e.right>=left&&e.left<=right&&e.bottom>=top&&e.top<=bottom) found.add(e);
+    }
+    return [...found];
+  }
+  function stackAt(x,y){
+    // Do not merge equal source/turned IDs: folding can put two different parts
+    // of one original cell above each other. Interior samples avoid triangle edges.
+    return nearby(x,y,x,y).filter(e=>pointInFace(e.face.points,x,y)).sort((a,b)=>a.id-b.id).map(e=>e.face);
+  }
+  function onCut(p){
+    return cuts.some(c=>{
+      const dx=c.b.x-c.a.x,dy=c.b.y-c.a.y,len=Math.hypot(dx,dy);
+      const along=((p.x-c.a.x)*dx+(p.y-c.a.y)*dy)/len;
+      const across=((p.x-c.a.x)*-dy+(p.y-c.a.y)*dx)/len;
+      return along>=-1e-6&&along<=len+1e-6&&Math.abs(across)<=c.width/2+1e-6 &&
+        (Math.abs(Math.abs(across)-c.width/2)<1e-6||Math.abs(along)<1e-6||Math.abs(along-len)<1e-6);
+    });
+  }
+  const pointKey=p=>Math.round(p.x*1e8)+","+Math.round(p.y*1e8);
+  const edgeKey=(a,b)=>{const ak=pointKey(a),bk=pointKey(b);return ak<bk?ak+"/"+bk:bk+"/"+ak;};
+  // Exact paired mesh edges have dough on both sides along their entire length.
+  // Remove those before the more expensive crossing/T-junction work.
+  const paired=new Map();
+  for(const e of entries){
+    if(e.face.kind!=="dough") continue;
+    const ps=e.face.points,orientation=Math.sign(ps.reduce((s,p,i)=>{const q=ps[(i+1)%ps.length];return s+p.x*q.y-q.x*p.y;},0));
+    for(let j=0;j<ps.length;j++){
+      const a=ps[j],b=ps[(j+1)%ps.length],key=edgeKey(a,b),side=orientation*(pointKey(a)<pointKey(b)?1:-1)>0?1:2;
+      paired.set(key,(paired.get(key)||0)|side);
+    }
+  }
+  const walls=[],seen=new Set(),cross=(x,y,u,v)=>x*v-y*u;
+  for(const e of entries){
+    if(e.face.kind!=="dough") continue;
+    const points=e.face.points;
+    for(let j=0;j<points.length;j++){
+      const a=points[j],b=points[(j+1)%points.length],dx=b.x-a.x,dy=b.y-a.y,len=Math.hypot(dx,dy);
+      if(len<1e-8||paired.get(edgeKey(a,b))===3) continue;
+      const breaks=[0,1],candidates=nearby(Math.min(a.x,b.x)-1e-7,Math.min(a.y,b.y)-1e-7,Math.max(a.x,b.x)+1e-7,Math.max(a.y,b.y)+1e-7);
+      // Split at crossings AND collinear endpoints. Cuts produce T junctions;
+      // comparing whole triangle edges would leave false seams at those junctions.
+      for(const other of candidates){
+        const ps=other.face.points;
+        for(let k=0;k<ps.length;k++){
+          const c=ps[k],d=ps[(k+1)%ps.length],ex=d.x-c.x,ey=d.y-c.y,den=cross(dx,dy,ex,ey);
+          if(Math.abs(den)>1e-12){
+            const t=cross(c.x-a.x,c.y-a.y,ex,ey)/den,u=cross(c.x-a.x,c.y-a.y,dx,dy)/den;
+            if(t>1e-8&&t<1-1e-8&&u>=-1e-8&&u<=1+1e-8) breaks.push(t);
+          } else if(Math.abs(cross(c.x-a.x,c.y-a.y,dx,dy))<1e-9*len){
+            for(const p of [c,d]){const t=((p.x-a.x)*dx+(p.y-a.y)*dy)/(len*len);if(t>1e-8&&t<1-1e-8) breaks.push(t);}
+          }
+        }
+      }
+      breaks.sort((a,b)=>a-b);
+      for(let k=1;k<breaks.length;k++){
+        const lo=breaks[k-1],hi=breaks[k];if((hi-lo)*len<1e-7) continue;
+        const p={x:a.x+dx*lo,y:a.y+dy*lo},q={x:a.x+dx*hi,y:a.y+dy*hi};
+        const keyPoint=p=>Math.round(p.x*1e7)+","+Math.round(p.y*1e7),pk=keyPoint(p),qk=keyPoint(q),key=pk<qk?pk+"/"+qk:qk+"/"+pk;
+        if(seen.has(key)) continue;seen.add(key);
+        const mid={x:(p.x+q.x)/2,y:(p.y+q.y)/2},nx=-dy/len,ny=dx/len,eps=Math.min(1e-5,(hi-lo)*len*.001);
+        const left=stackAt(mid.x+nx*eps,mid.y+ny*eps),right=stackAt(mid.x-nx*eps,mid.y-ny*eps);
+        const hasLeft=left.some(f=>f.kind==="dough"),hasRight=right.some(f=>f.kind==="dough");
+        if(hasLeft===hasRight) continue;
+        walls.push({a:p,b:q,inward:{x:hasLeft?nx:-nx,y:hasLeft?ny:-ny},stack:hasLeft?left:right,cut:onCut(mid)});
+      }
+    }
+  }
+  const result={walls,stackAt,bounds};cache.set(faces,result);return result;
+}
+function drawDishSections(g,screen,faces,sx,sy){
+  const sections=dishSectionGeometry(faces),pixel=Math.min(2,devicePixelRatio||1)*Math.min(sx,sy);
+  const unit=Math.max(.55,1.7*pixel);
+  // Magnified cross sections sit just INSIDE their real material edge. Otherwise
+  // a .018 kerf on a phone hides every layer behind its neighbouring piece. This
+  // is a drawing convention: neither the cut width nor any material is moved.
+  g.save();g.globalAlpha=1;g.beginPath();
+  for(const f of faces){
+    if(f.kind!=="dough") continue;
+    const signed=f.points.reduce((s,p,i)=>{const q=f.points[(i+1)%f.points.length];return s+p.x*q.y-q.x*p.y;},0);
+    const ps=signed<0?f.points.slice().reverse():f.points;
+    const a=screen(ps[0]);g.moveTo(a.x,a.y);
+    for(let i=1;i<ps.length;i++){const p=screen(ps[i]);g.lineTo(p.x,p.y);}g.closePath();
+  }
+  g.clip();
+  const walls=sections.walls.map(w=>{
+    const a=screen(w.a),b=screen(w.b),mid={x:(w.a.x+w.b.x)/2,y:(w.a.y+w.b.y)/2};
+    const m=screen(mid),n=screen({x:mid.x+w.inward.x*.001,y:mid.y+w.inward.y*.001});
+    const l=Math.hypot(n.x-m.x,n.y-m.y)||1;return {w,a,b,nx:(n.x-m.x)/l,ny:(n.y-m.y)/l};
+  }).filter(s=>-(s.nx*.4+s.ny)>.06).sort((a,b)=>(a.a.y+a.b.y)-(b.a.y+b.b.y));
+  for(const s of walls){
+    const {w,a,b,nx,ny}=s;
+    if(!w.cut&&w.stack.length<2) continue; // no artificial thick rim around a bare sheet
+    const weights=w.stack.map(f=>f.kind==="filling"?1.65:1),sum=weights.reduce((a,b)=>a+b,0);
+    const height=Math.min(Math.max(3,14*pixel),unit*sum),step=height/sum;
+    let bottom=0;
+    for(let i=0;i<w.stack.length;i++){
+      const f=w.stack[i],top=bottom+weights[i]*step;
+      const base=f.kind==="filling"?[[231,183,67],[245,210,113],[213,154,45]][Math.round(f.tone)%3]:dishCookColor(f);
+      // The crumb is lighter than the thin cooked rim, but retains material heat.
+      const color=f.kind==="filling"?base:base.map(c=>Math.round(c*.82+18));
+      g.fillStyle=rgb(color);g.beginPath();
+      g.moveTo(a.x+nx*bottom,a.y+ny*bottom);g.lineTo(b.x+nx*bottom,b.y+ny*bottom);
+      g.lineTo(b.x+nx*top,b.y+ny*top);g.lineTo(a.x+nx*top,a.y+ny*top);g.closePath();g.fill();
+      bottom=top;
+    }
+    // Only the actual outer lips are stroked; never a triangle or a filling tile.
+    g.strokeStyle="rgba(64,34,16,.72)";g.lineWidth=Math.max(.35,.7*pixel);
+    g.beginPath();g.moveTo(a.x,a.y);g.lineTo(b.x,b.y);g.stroke();
+    g.strokeStyle="rgba(255,232,171,.6)";g.lineWidth=Math.max(.3,.65*pixel);
+    g.beginPath();g.moveTo(a.x+nx*height,a.y+ny*height);g.lineTo(b.x+nx*height,b.y+ny*height);g.stroke();
+  }
+  g.restore();
+}
 function drawDish(g,sx,sy){
   const pose=dishPose(), faces=dishGesture&&dishGesture.preview ? dishGesture.preview.faces : dish.faces;
   const screen=p=>{const x=pose.x+p.x*pose.scale,y=pose.y+p.y*pose.scale;return{x:prX(x,y)*sx,y:prY(x,y)*sy};};
   for(const f of faces){
     // Прозрачность накладывает настоящие слои друг на друга, а не смешивает каждый
     // слой с цветом тавы. Начинку закрывает только материал над ней.
-    g.fillStyle=f.kind==="filling" ? ["#dfb955","#eac66d","#d9aa4b"][f.tone%3]
-      : f.turned ? "#ddc798" : "#e3d5b2";
+    g.fillStyle=f.kind==="filling" ? ["#dfb955","#eac66d","#d9aa4b"][Math.round(f.tone)%3]
+      : rgb(dishCookColor(f));
     g.globalAlpha=f.kind==="filling" ? 1 : Math.max(.48,Math.min(.92,.48+f.tone*.7));
     const p=screen(f.points[0]); g.beginPath();g.moveTo(p.x,p.y);
     for(let i=1;i<f.points.length;i++){const q=screen(f.points[i]);g.lineTo(q.x,q.y);}
     g.closePath();g.fill();
   }
   g.globalAlpha=1;
+  // Rebuild expensive boundary intersections only after a committed geometry
+  // change. During a drag the existing flat preview remains immediate.
+  if((dish.folds||dish.cuts.length)&&!(dishGesture&&dishGesture.preview)) drawDishSections(g,screen,faces,sx,sy);
   if(dishGesture){
     const d=dishGesture, a=screen(d.anchor||d.start),b=screen(d.target||d.end);
     g.strokeStyle=dish.mode==="fold" ? "#eab562" : "#f5ead6";g.lineWidth=Math.max(1,2*sx);
@@ -550,7 +781,7 @@ function step(dt){
   // В руке и в полёте узлы заморожены: перенос — движение картинки, запекаемое при посадке.
   // На таве лист схватился и стоит — только жарится.
   if(action.state==="CARRY" || action.state==="TOSS"){ updateAction(dt); return; }
-  if(dish) return; // геометрическая проба: жарку не считаем по старому плоскому листу
+  if(dish){ cookDish(dt); return; }
   if(phase==="PAN"){ cookStep(dt); return; }
   const h = dt / SUBSTEPS;
   // Затухание зависит от фазы: в полёте лист скользит свободнее, после удара,
@@ -949,6 +1180,7 @@ function cookStep(dt){
   }
 }
 function meanCook(){
+  if(dish) return dishThermalMean("cook");
   if(!cook) return 0;
   let s=0, n=0;
   for(let i=0;i<N;i++){ if(conDeg[i]<=0) continue; s+=cook[i]; n++; }
@@ -957,6 +1189,7 @@ function meanCook(){
 // Звук ведёт вода, а не цвет: шипение и треск идут от сушки и потому ОПЕРЕЖАЮТ окраску —
 // «суше и звонче» слышно раньше, чем видно золото. Это и есть «звук как HUD».
 function meanDry(){
+  if(dish) return dishThermalMean("dry",true);
   if(!dry) return 0;
   let s=0, n=0;
   for(let i=0;i<N;i++){ if(conDeg[i]<=0) continue; s+=dry[i]; n++; }
@@ -1246,7 +1479,7 @@ function audioInit(){
   // шлепок удара, треск новой дырки.
 }
 function audioFrame(){
-  if(!AC || condition==="sight" || dish){
+  if(!AC || condition==="sight"){
     if(tenseGain) tenseGain.gain.value=0;
     if(sizzleGain) sizzleGain.gain.value=0;
     return;
@@ -1271,8 +1504,8 @@ function audioFrame(){
   if(sizzleGain) sizzleGain.gain.setTargetAtTime(0, now, 0.08);
   // Только скрип натяжения от фактической работы — никакой привязки к толщине:
   // лист не гудит «сейчас порвусь», он просто рвётся, и это слышно треском.
-  const st = Math.min(1, avgStrain*2.5);
-  tenseGain.gain.setTargetAtTime(Math.min(0.22, avgStrain*0.7), now, 0.04);
+  const st = dish ? 0 : Math.min(1, avgStrain*2.5);
+  tenseGain.gain.setTargetAtTime(dish ? 0 : Math.min(0.22, avgStrain*0.7), now, 0.04);
   tenseFilt.frequency.setTargetAtTime(260 + st*260, now, 0.05);
 }
 function audioCrackle(t, dry){
@@ -1487,10 +1720,11 @@ document.getElementById("reset").addEventListener("click", reset);
 document.getElementById("cutMode").addEventListener("click", startCutting);
 document.getElementById("undoDish").addEventListener("click", undoDish);
 document.getElementById("foldSample").addEventListener("click", ()=>{
+  audioInit(); if(AC && AC.state==="suspended") AC.resume();
   stepNo=3; reset();
   const c=centerOfSheet(); xf={cx:c.x,cy:c.y};
   bakeTransform(panC.x-c.x,panC.y-c.y,0); xf=null; phase="PAN";
-  measureThickness(); startDish();
+  measureThickness(); startDish(); audioPanLand();
 });
 // «Прибор» — шесть из семи строк панели, которые нужны замеру, а не игре. В ландшафте
 // они уходят на лист поверх поля; лист не меняет размер #stage, поэтому лист теста цел.
@@ -1918,7 +2152,7 @@ function loop(now){
     `${variant}/${condition}  попыток ${done}/30  распознано ${done?Math.round(hit/done*100):0}%\n` +
     `${stackedLayout()?"портрет · замер с альбомным не сравнить":"альбом"}\n` +
     `шаг ${stepNo}  ${action.state!=="RESTING"?"◆ "+action.state:"○ покой"}  ` +
-    `${dish ? "проба · складок "+dish.folds+" · разрезов "+dish.cuts.length : phase==="PAN" ? "тава · сушка "+md.toFixed(2)+" · цвет "+mc.toFixed(2) : "стол"}  мах: ${lastDecision}` +
+    `${dish ? "складок "+dish.folds+" · разрезов "+dish.cuts.length+(phase==="PAN" ? " · сушка "+md.toFixed(2)+" · цвет "+mc.toFixed(2) : " · на столе") : phase==="PAN" ? "тава · сушка "+md.toFixed(2)+" · цвет "+mc.toFixed(2) : "стол"}  мах: ${lastDecision}` +
     `${tossTry ? "  перенесено "+tossOk+" из "+tossTry : ""}  ` +
     `лист ${pct}%${ready}${ragged}  жестов ${gestures.length}  ` +
     `[касаний ${rawTouch} · указателей ${rawPointer} · до теста ↓${dbgDown} ↔${dbgMove} · ${dbgKind}${loopErrs?" · сбоев "+loopErrs:""}]  ` +
@@ -1955,6 +2189,7 @@ function resize(force){
     const scale=targetR/oldR;
     for(let i=0;i<N;i++){px[i]=panC.x+(px[i]-oldPan.x)*scale;py[i]=panC.y+(py[i]-oldPan.y)*scale;prx[i]=px[i];pry[i]=py[i];}
     startR*=scale;step1R*=scale;gestureScale*=scale;R0*=scale;
+    rebuildDishContact();
     return; // dish и история в локальных координатах: ни одной пересборки материала
   }
   build();
