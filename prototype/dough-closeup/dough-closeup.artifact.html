@@ -1686,7 +1686,9 @@ let AC=null, master=null, tenseGain=null, tenseFilt=null, noiseBuf=null;
 let sizzleGain=null, sizzleFilt=null, crackleNext=0;
 function audioInit(){
   if(AC) return;
-  AC = new (window.AudioContext||window.webkitAudioContext)({ latencyHint:"interactive" });
+  const Ctx = window.AudioContext || window.webkitAudioContext;
+  if(!Ctx) return;                       // без звука стенд работает дальше
+  AC = new Ctx({ latencyHint:"interactive" });
   master = AC.createGain(); master.gain.value = 0.9; master.connect(AC.destination);
 
   const len = AC.sampleRate*2, b = AC.createBuffer(1, len, AC.sampleRate), d = b.getChannelData(0);
@@ -1853,7 +1855,10 @@ let dbgDown = 0, dbgMove = 0, dbgKind = "ждёт";
 
 function onDown(id, cx, cy){
   dbgDown++;
-  if(dish){ beginDishGesture(id,toLocal(cx,cy)); return; }
+  // iOS усыпляет AudioContext в фоне. Касание блюда тоже будит звук, иначе после
+  // возврата шипение на таве молчало бы до «заново».
+  if(dish){ audioInit(); if(AC && AC.state==="suspended") AC.resume();
+            beginDishGesture(id,toLocal(cx,cy)); return; }
   if(action.pointerId !== null) return;              // один активный палец; второй игнорируется (audit §5)
   if(action.state === "SETTLING") finalizeGesture(); // быстрый повторный тап не ждёт хвоста успокоения
   if(action.state !== "RESTING") return;             // остальные фазы доигрывают автономно
