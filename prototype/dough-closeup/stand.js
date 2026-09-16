@@ -11,7 +11,7 @@
 // до 400%+ и лист «рвётся» в середине от любого движения. Замер это обнаружил сразу.
 // Число узлов сохранено (1 060 после обрезки по кругу; прежняя оценка «~1150» была на глаз,
 // пересчитано 07.09.2026), однородность рёбер восстановлена.
-const BUILD = "2026-09-16 · две стороны · 3";
+const BUILD = "2026-09-16 · переворот · 4";
 const GRID = 38;                   // 38x38, в круг попадает 1 060 узлов (посчитано, не оценка)
 let SUBSTEPS = 8;                  // T2: 8–10 подшагов, 1 итерация
 let DAMP = 0.986;
@@ -195,6 +195,8 @@ function layoutPan(){
 // материал: разорванные ячейки отсутствуют, складка отражает материал и порядок
 // слоёв. Это геометрический стенд, не симуляция самоконтакта или готовности блюда.
 let dish = null, dishGesture = null;
+// Полёт при перевороте живёт вне dish: «заново» его сбрасывает, а снимки dish не меняются.
+let dishFlight = null;
 const polyArea = p => Math.abs(p.reduce((s,a,i)=>{ const b=p[(i+1)%p.length]; return s+a.x*b.y-b.x*a.y; },0))/2;
 function clipPoly(points, nx, ny, offset, positive=true){
   const out=[], sign=positive ? 1 : -1;
@@ -389,7 +391,7 @@ function rebuildDishContact(){
   dish.topWeights=topW;           // [s][сторона]: сколько образцов стороны открыто сверху
 }
 function cookDish(dt){
-  if(!dish || dish.mode!=="fold" || phase!=="PAN" || !dish.thermal) return;
+  if(!dish || dish.mode!=="fold" || phase!=="PAN" || !dish.thermal || dishFlight) return;
   if(!dish.dryDrive) rebuildDishContact();
   for(let i=0;i<dish.thermal.length;i++){
     const t=dish.thermal[i]; if(!t) continue;
@@ -462,7 +464,7 @@ function foldGeometry(anchor,end){
   return {faces:fixed.concat(moving.reverse()),crease:{nx,ny,offset}};
 }
 function rememberDish(){
-  dish.history.push({faces:dish.faces,folds:dish.folds,cuts:dish.cuts});
+  dish.history.push({faces:dish.faces,folds:dish.folds,cuts:dish.cuts,flips:dish.flips||0});
   if(dish.history.length>20) dish.history.shift();
 }
 function foldDish(anchor,end){
@@ -472,7 +474,7 @@ function foldDish(anchor,end){
   syncDishUI(); return true;
 }
 function startCutting(){
-  if(!dish || !dish.folds || dish.mode!=="fold" || dishGesture) return;
+  if(!dish || !dish.folds || dish.mode!=="fold" || dishGesture || dishFlight) return;
   const b=dishBounds(); dish.cutBounds=b; dish.cutCenter={x:(b.left+b.right)/2,y:(b.top+b.bottom)/2};
   dish.mode="cut"; phase="CUT"; dish.history=[];
   dish.message="Проведи через конверт · длину и направление выбираешь сама";
@@ -503,9 +505,80 @@ function cutDish(a,b){
   syncDishUI(); return true;
 }
 function undoDish(){
-  if(!dish || dishGesture || !dish.history.length) return;
+  if(!dish || dishGesture || dishFlight || !dish.history.length) return;
+  const flipsBefore=dish.flips||0;
   Object.assign(dish,dish.history.pop()); dish.hull=dishHull(); rebuildDishContact();
+  // Отмена переворота кладёт на сталь другую сторону — это новый сеанс, а не откат времени.
+  if((dish.flips||0)!==flipsBefore) startPanSession();
   dish.message="Последнее действие отменено"; syncDishUI();
+}
+
+// ─── Переворот (#21). Чистая геометрия: отражение относительно прямой через центроид
+// площади теста, перпендикулярной направлению маха, плюс сдвиг посадки. Центроид при
+// отражении стоит на месте, поэтому два переворота на месте возвращают лист точно.
+// Порядок слоёв разворачивается, у каждой грани меняется сторона, материал и его
+// тепловая история не трогаются: стороны принадлежат тесту. dish.filling — раскладка
+// на момент посадки, её не отражаем (складка её тоже не трогает).
+function dishCentroid(faces=dish.faces){
+  let a=0,cx=0,cy=0;
+  for(const f of faces){
+    if(f.kind!=="dough") continue;
+    const p=f.points;
+    for(let i=0;i<p.length;i++){
+      const u=p[i],v=p[(i+1)%p.length],c=u.x*v.y-v.x*u.y;
+      a+=c; cx+=(u.x+v.x)*c; cy+=(u.y+v.y)*c;
+    }
+  }
+  return Math.abs(a)>1e-12 ? {x:cx/(3*a),y:cy/(3*a)} : {x:0,y:0};
+}
+const FLIP_REACH = 0.30;     // как у переноса: центр блюда не дальше 30 % радиуса тавы
+function flipGeometry(dir,landing={x:0,y:0}){
+  const len=Math.hypot(dir.x,dir.y); if(len<1e-9) return null;
+  const nx=dir.x/len, ny=dir.y/len, c=dishCentroid();
+  // Упор посадки: не уводить центр дальше предела, но и не подтягивать уже лежащий дальше.
+  let tx=c.x+landing.x, ty=c.y+landing.y;
+  const lim=FLIP_REACH*PAN_R/targetR, r=Math.hypot(tx,ty);
+  if(r>lim && r>1e-12){ const k=Math.max(lim,Math.hypot(c.x,c.y))/r; if(k<1){ tx*=k; ty*=k; } }
+  const ox=tx-c.x, oy=ty-c.y, moved=new Map();
+  const mirror=p=>{
+    let q=moved.get(p);
+    if(!q){ const d=(p.x-c.x)*nx+(p.y-c.y)*ny; q={x:p.x-2*d*nx+ox,y:p.y-2*d*ny+oy}; moved.set(p,q); }
+    return q;
+  };
+  const faces=[];
+  for(let i=dish.faces.length-1;i>=0;i--){
+    const f=dish.faces[i];
+    faces.push({...f,turned:!f.turned,points:f.points.map(mirror)});
+  }
+  return {faces,axis:{nx,ny,c},from:c,to:{x:tx,y:ty}};
+}
+function startPanSession(){
+  if(dish.sessions) dish.sessions.push({flip:dish.flips||0,start:dish.panTime||0,gold:null});
+}
+function commitFlip(next){
+  rememberDish(); dish.faces=next.faces; dish.flips=(dish.flips||0)+1;
+  dish.hull=dishHull(); rebuildDishContact(); startPanSession();
+  dish.message=`Перевёрнуто: ${dish.flips} · жарится другая сторона`;
+  syncDishUI();
+}
+// Технический и жестовый вход одинаковы: полёт 0,45 с, посадка — шлепок и волна шипения.
+const FLIP_T = 0.45;
+function startFlip(dir,landing){
+  if(!dish || dish.mode!=="fold" || phase!=="PAN" || dishGesture || dishFlight) return false;
+  const next=flipGeometry(dir,landing); if(!next) return false;
+  dishSectionGeometry(next.faces);        // дорогую геометрию торца считаем до посадки, а не в её кадре
+  let radius=0;
+  for(const f of dish.faces) if(f.kind==="dough") for(const p of f.points)
+    radius=Math.max(radius,Math.hypot(p.x-next.from.x,p.y-next.from.y));
+  dishFlight={next,from:dish.faces,t0:performance.now(),T:FLIP_T,radius};
+  dish.message="Переворот…"; syncDishUI(); audioFlipLift();
+  return true;
+}
+function updateDishFlight(){
+  if(!dishFlight) return;
+  if((performance.now()-dishFlight.t0)/1000 < dishFlight.T) return;
+  const next=dishFlight.next; dishFlight=null;
+  commitFlip(next); audioPanLand();
 }
 function syncDishUI(){
   document.getElementById("gDish").hidden=!dish;
@@ -516,13 +589,16 @@ function syncDishUI(){
   const cut=document.getElementById("cutMode");
   cut.disabled=!dish || !dish.folds || dish.mode==="cut";
   cut.textContent=dish && dish.mode==="cut" ? "нарезка на столе" : "к нарезке →";
-  document.getElementById("undoDish").disabled=!dish || !dish.history.length;
+  cut.disabled=cut.disabled || !!dishFlight;
+  document.getElementById("undoDish").disabled=!dish || !dish.history.length || !!dishFlight;
+  const flip=document.getElementById("flipDish");
+  if(flip) flip.disabled=!dish || dish.mode!=="fold" || !!dishFlight;
   if(dish) hintEl.textContent=dish.mode==="fold"
     ? "На таве: жарится. Край → внутрь — складка."
     : "Нарезка: проведи через конверт прямым жестом.";
 }
 function beginDishGesture(id,p){
-  if(dishGesture) return;
+  if(dishGesture || dishFlight) return;
   const start=dishLocal(p);
   if(dish.mode==="cut"){ dishGesture={id,start,end:start}; return; }
   let anchor=null,distance=Infinity;
@@ -687,9 +763,7 @@ function drawDishSections(g,screen,faces,sx,sy){
   }
   g.restore();
 }
-function drawDish(g,sx,sy){
-  const pose=dishPose(), faces=dishGesture&&dishGesture.preview ? dishGesture.preview.faces : dish.faces;
-  const screen=p=>{const x=pose.x+p.x*pose.scale,y=pose.y+p.y*pose.scale;return{x:prX(x,y)*sx,y:prY(x,y)*sy};};
+function drawDishFaces(g,faces,screen){
   for(const f of faces){
     // Прозрачность накладывает настоящие слои друг на друга, а не смешивает каждый
     // слой с цветом тавы. Начинку закрывает только материал над ней.
@@ -701,6 +775,35 @@ function drawDish(g,sx,sy){
     g.closePath();g.fill();
   }
   g.globalAlpha=1;
+}
+// Полёт переворота — свойство картинки, как TOSS у переноса: лист сжимается вдоль маха
+// (|cos πu|), поднимается и на середине пути показывает другую сторону. Торец в полёте
+// не рисуется; материал меняется один раз — при посадке.
+function drawDishFlight(g,sx,sy,pose){
+  const F=dishFlight, n=F.next, u=Math.max(0,Math.min(1,(performance.now()-F.t0)/1000/F.T));
+  const e=u*u*(3-2*u), nx=n.axis.nx, ny=n.axis.ny;
+  const cx=n.from.x+(n.to.x-n.from.x)*e, cy=n.from.y+(n.to.y-n.from.y)*e;
+  const squash=Math.abs(Math.cos(Math.PI*u)), rise=Math.sin(Math.PI*u);
+  const second=u>=.5, pivot=second ? n.to : n.from;
+  const place=(p,lift)=>{
+    const dx=p.x-pivot.x, dy=p.y-pivot.y, d=dx*nx+dy*ny;
+    const qx=cx+dx-d*nx*(1-squash), qy=cy+dy-d*ny*(1-squash);
+    const x=pose.x+qx*pose.scale, y=pose.y+qy*pose.scale-lift;
+    return {x:prX(x,y)*sx,y:prY(x,y)*sy};
+  };
+  // Тень остаётся на стали и слегка сжимается, пока лист в воздухе.
+  const c=place(pivot,0), r=(F.radius||.8)*.85*pose.scale*(1-.25*rise);
+  g.fillStyle="rgba(6,3,1,.32)"; g.beginPath();
+  g.ellipse(c.x,c.y,r*sx,r*TILT*sy,0,0,Math.PI*2); g.fill();
+  const lift=rise*.45*pose.scale;
+  drawDishFaces(g,second ? n.faces : F.from,p=>place(p,lift));
+}
+function drawDish(g,sx,sy){
+  const pose=dishPose();
+  if(dishFlight){ drawDishFlight(g,sx,sy,pose); return; }
+  const faces=dishGesture&&dishGesture.preview ? dishGesture.preview.faces : dish.faces;
+  const screen=p=>{const x=pose.x+p.x*pose.scale,y=pose.y+p.y*pose.scale;return{x:prX(x,y)*sx,y:prY(x,y)*sy};};
+  drawDishFaces(g,faces,screen);
   // Rebuild expensive boundary intersections only after a committed geometry
   // change. During a drag the existing flat preview remains immediate.
   if((dish.folds||dish.cuts.length)&&!(dishGesture&&dishGesture.preview)) drawDishSections(g,screen,faces,sx,sy);
@@ -788,7 +891,7 @@ function build(){
 
   layoutPan();
   phase = "TABLE"; xf = null;
-  dish = null; dishGesture = null; syncDishUI(); syncStepButtons();
+  dish = null; dishGesture = null; dishFlight = null; syncDishUI(); syncStepButtons();
   cook = new Float32Array(N); dry = new Float32Array(N);
   // Контакт с плитой пятнистый, а не идеальный: под листом микрозазоры, складки, плёнка
   // жира. Источники в один голос описывают ПЯТНА («some brown spots», «leopard-spotted»),
@@ -848,7 +951,7 @@ function step(dt){
   // В руке и в полёте узлы заморожены: перенос — движение картинки, запекаемое при посадке.
   // На таве лист схватился и стоит — только жарится.
   if(action.state==="CARRY" || action.state==="TOSS"){ updateAction(dt); return; }
-  if(dish){ cookDish(dt); return; }
+  if(dish){ updateDishFlight(); cookDish(dt); return; }
   if(phase==="PAN"){ cookStep(dt); return; }
   const h = dt / SUBSTEPS;
   // Затухание зависит от фазы: в полёте лист скользит свободнее, после удара,
@@ -1559,6 +1662,8 @@ function audioFrame(){
     // шипение громкое, пока в тесте вода, и глохнет к концу; потрескивание редкое
     // на мокром и частое на сухом; полоса шипения уезжает вверх — «суше и звонче».
     tenseGain.gain.setTargetAtTime(0, now, 0.05);
+    // Лист в воздухе: стали он не касается, шипение почти сходит на нет до посадки.
+    if(dishFlight){ sizzleGain.gain.setTargetAtTime(0.02, now, 0.06); return; }
     const d = Math.max(0, Math.min(1, meanDry())), moist = 1 - d;
     const lfo = 0.85 + 0.15*Math.sin(now*6.3);
     sizzleGain.gain.setTargetAtTime((0.03 + 0.24*moist)*lfo, now, 0.25);
@@ -1592,6 +1697,17 @@ function audioPanLand(){
   sizzleGain.gain.cancelScheduledValues(now);
   sizzleGain.gain.setValueAtTime(0.5, now);
   crackleNext = now + 0.15;
+}
+// Лопатка поддела край и лист пошёл вверх: короткий скрежет о сталь, шипение отступает.
+function audioFlipLift(){
+  if(!AC || condition==="sight" || !noiseBuf) return;
+  const s=AC.createBufferSource(); s.buffer=noiseBuf;
+  const f=AC.createBiquadFilter(); f.type="bandpass"; f.frequency.value=2600; f.Q.value=3;
+  const g=AC.createGain(); const t=AC.currentTime;
+  g.gain.setValueAtTime(0.0001,t); g.gain.exponentialRampToValueAtTime(0.26,t+0.02);
+  g.gain.exponentialRampToValueAtTime(0.001,t+0.16);
+  s.connect(f); f.connect(g); g.connect(master); s.start(t); s.stop(t+0.18);
+  sizzleGain.gain.cancelScheduledValues(t); sizzleGain.gain.setTargetAtTime(0.02,t,0.05);
 }
 // слой 3 — разрыв
 function audioSnap(){
@@ -1791,6 +1907,8 @@ document.getElementById("tear").addEventListener("click", pressNow);
 document.getElementById("reset").addEventListener("click", reset);
 document.getElementById("cutMode").addEventListener("click", startCutting);
 document.getElementById("undoDish").addEventListener("click", undoDish);
+// Технический вход переворота (как «к нарезке»): лист уходит от игрока и ложится обратно.
+document.getElementById("flipDish").addEventListener("click", ()=>startFlip({x:0,y:-1},{x:0,y:0}));
 document.getElementById("foldSample").addEventListener("click", ()=>{
   audioInit(); if(AC && AC.state==="suspended") AC.resume();
   stepNo=3; reset();
@@ -2258,7 +2376,7 @@ let pendingResize = false;
 // НИКОГДА после удачного броска: холст оставался в старом размере до «заново»
 // (найдено проверкой 08.09, обе формы окна). Полёт при этом всё равно защищён —
 // в нём `action.state === "TOSS"`.
-function gestureLive(){ return action.state !== "RESTING" || !!dishGesture; }
+function gestureLive(){ return action.state !== "RESTING" || !!dishGesture || !!dishFlight; }
 function resize(force){
   const r = stage.getBoundingClientRect(), dpr = Math.min(2, devicePixelRatio||1);
   const w = Math.max(64, Math.round(r.width*dpr)), h = Math.max(64, Math.round(r.height*dpr));
