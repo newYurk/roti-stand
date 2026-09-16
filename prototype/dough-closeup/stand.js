@@ -2203,6 +2203,17 @@ if(window.ResizeObserver) new ResizeObserver(()=>resize()).observe(stage);
 try{ const s=localStorage.getItem("dough_log"); if(s) log=JSON.parse(s); }catch(e){}
 try{ const s=localStorage.getItem("dough_gestures"); if(s) gestures=JSON.parse(s); }catch(e){}
 resize(true);
+// Предпросмотр рабочей ветки: локальный сервер отдаёт /__preview.json с веткой и коммитом.
+// Production на Pages такого адреса не знает — туда даже не ходим, значок остаётся скрытым.
+if(/^https?:$/.test(String(location.protocol)) && !/github\.io$/.test(location.hostname)){
+  fetch("/__preview.json", { cache:"no-store" }).then(r=>r.ok ? r.json() : null).then(info=>{
+    const el = document.getElementById("previewBadge");
+    if(!info || !el || !info.branch) return;
+    el.textContent = `предпросмотр · ${info.branch} · ${info.head}` +
+      (info.dirty ? ` + ${info.dirty} незакоммич.` : "") + ` · ${BUILD}`;
+    el.hidden = false;
+  }).catch(()=>{});
+}
 // Возврат из фона: rAF там стоял, и первый кадр после возврата — это секунды, а не просадка.
 addEventListener("visibilitychange", ()=>{ if(!document.hidden){ last = performance.now(); resetMeters(); } });
 requestAnimationFrame(loop);
