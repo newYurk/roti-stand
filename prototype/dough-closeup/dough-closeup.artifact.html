@@ -754,16 +754,21 @@ function undoDish(){
 // тепловая история не трогаются: стороны принадлежат тесту. dish.filling — раскладка
 // на момент посадки, её не отражаем (складка её тоже не трогает).
 function dishCentroid(faces=dish.faces){
+  // Складка отражает клапан, не меняя порядка вершин, поэтому у граней разная ориентация.
+  // Площадь и момент каждой грани берутся со знаком её собственной площади — иначе клапан
+  // вычитался бы из листа, и переворот после складки уносил лист с тавы.
   let a=0,cx=0,cy=0;
   for(const f of faces){
     if(f.kind!=="dough") continue;
-    const p=f.points;
+    const p=f.points; let fa=0,fx=0,fy=0;
     for(let i=0;i<p.length;i++){
       const u=p[i],v=p[(i+1)%p.length],c=u.x*v.y-v.x*u.y;
-      a+=c; cx+=(u.x+v.x)*c; cy+=(u.y+v.y)*c;
+      fa+=c; fx+=(u.x+v.x)*c; fy+=(u.y+v.y)*c;
     }
+    const sign=fa<0 ? -1 : 1;
+    a+=fa*sign; cx+=fx*sign; cy+=fy*sign;
   }
-  return Math.abs(a)>1e-12 ? {x:cx/(3*a),y:cy/(3*a)} : {x:0,y:0};
+  return a>1e-12 ? {x:cx/(3*a),y:cy/(3*a)} : {x:0,y:0};
 }
 const FLIP_REACH = 0.30;     // как у переноса: центр блюда не дальше 30 % радиуса тавы
 function flipGeometry(dir,landing={x:0,y:0}){
