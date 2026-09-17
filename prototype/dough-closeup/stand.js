@@ -11,7 +11,7 @@
 // до 400%+ и лист «рвётся» в середине от любого движения. Замер это обнаружил сразу.
 // Число узлов сохранено (1 060 после обрезки по кругу; прежняя оценка «~1150» была на глаз,
 // пересчитано 07.09.2026), однородность рёбер восстановлена.
-const BUILD = "2026-09-17 · пузыри · 17";
+const BUILD = "2026-09-17 · ломтики · 18";
 const GRID = 38;                   // 38x38, в круг попадает 1 060 узлов (посчитано, не оценка)
 let SUBSTEPS = 8;                  // T2: 8–10 подшагов, 1 итерация
 let DAMP = 0.986;
@@ -273,15 +273,21 @@ function startDish(){
   const b=dishBounds(), cx=(b.left+b.right)/2, cy=(b.top+b.bottom)/2;
   const span=Math.min(b.right-b.left,b.bottom-b.top), radius=span*.075;
   const base=faces.slice();
-  // Кружочки условной начинки обрезаются самим листом: через дырку не висит даже
-  // край порции. Случайны только центры и оттенок, далее все части сохраняют id.
-  for(let id=0;id<7;id++){
-    const angle=id*Math.PI*2/6, r=id===6 ? 0 : span*(.17+Math.random()*.025);
-    const x=cx+Math.cos(angle)*r+(Math.random()-.5)*radius*.4;
-    const y=cy+Math.sin(angle)*r+(Math.random()-.5)*radius*.4;
-    // Круг той же площади, что прежний эллипс 1 × 0,8: высота порции считается по кругу,
-    // и край эллипса по короткой оси обрывался ступенькой (ревью толщины 16.09, п. 9).
-    const rr=radius*Math.sqrt(.8);
+  // Начинка — ломтики банана, разложенные одним слоем пятном в середине листа (кадры уличного
+  // роти; владелица 17.09: семь горок «непонятно лежат группками»). Каждый ломтик — своя порция:
+  // круг радиусом ~1 см в масштабе роти, в середине и двумя неровными кольцами, часть мест пустует.
+  // Ломтик обрезается самим листом: через дырку не висит даже его край. Случайны места и пропуски,
+  // далее все части сохраняют id.
+  const slice=span*.05, spots=[[0,0]];
+  const turn1=Math.random()*Math.PI, turn2=Math.random()*Math.PI;
+  for(let j=0;j<6;j++) spots.push([Math.cos(turn1+j*Math.PI/3)*slice*2.15,Math.sin(turn1+j*Math.PI/3)*slice*2.15]);
+  for(let j=0;j<12;j++) spots.push([Math.cos(turn2+j*Math.PI/6)*slice*4.2,Math.sin(turn2+j*Math.PI/6)*slice*4.2]);
+  let id=0;
+  for(let k=0;k<spots.length;k++){
+    if(k>0 && Math.random()<.18) continue;             // просветы между ломтиками
+    const x=cx+spots[k][0]+(Math.random()-.5)*slice*.6;
+    const y=cy+spots[k][1]+(Math.random()-.5)*slice*.6;
+    const rr=slice*(.9+Math.random()*.2);
     const ring=Array.from({length:12},(_,j)=>({x:x+Math.cos(j*Math.PI/6)*rr,y:y+Math.sin(j*Math.PI/6)*rr}));
     let added=false;
     for(const face of base){
@@ -293,6 +299,7 @@ function startDish(){
       if(p.length){ faces.push({points:p,kind:"filling",source:id,tone:id%3,turned:false,pc:{x,y},pr:rr,ph:FILL_MM}); added=true; }
     }
     if(added) dish.filling.push({id,x,y,radius:rr});
+    id++;
   }
   // Даже у маленького/сильно порванного листа остаётся проверяемая порция на материале.
   if(!dish.filling.length){
@@ -331,18 +338,18 @@ function pointInFace(points,x,y){
 // подброшенное тесто пиццы 0,12–0,18 мм (docs/simulation-references.md, §в).
 const DOUGH_UNIT_MM = 14;     // толщина 1 (кусочек) ≈ 14 мм → лист у мишени (0,035) ≈ 0,5 мм
 const SHEET_REF_MM = 0.5;     // при такой толщине сушка идёт с базовой скоростью
-const FILL_MM = 4;            // высота порции начинки (ломтики банана с яйцом)
+const FILL_MM = 3;            // толщина ломтика банана (с 17.09 порция — один ломтик; было 4 мм на горку)
 const DOUGH_HEAT_MM = 1.05;   // тепло сквозь слой теста exp(−мм/1,05): лист 0,5 мм пропускает 0,62, как раньше
 const FILL_HEAT_MM = 5;       // сквозь начинку exp(−мм/5), и ещё её тень: порция 4 мм пропускает 0,45 × 0,2
 const COVER_MM = 1;           // тень начинки на слоях под ней 1/(1+мм/1): 4 мм дают ×0,2 (спецификация §1: ×0,15…0,25)
 const doughMM = tone => tone*DOUGH_UNIT_MM;
-// Высота начинки в точке: плато с мягким краем по внешней трети порции. Порция помнит свой
+// Высота начинки в точке: плато с узким мягким краем (ломтик — плоский кружок). Порция помнит свой
 // центр в текущих координатах (pc) — складка и переворот переносят его вместе с гранью.
 function fillHeight(f,p){
   const H = f.ph ?? FILL_MM*0.8;
   if(!f.pc || !(f.pr>0)) return H;
   const edge = 1 - Math.hypot(p.x-f.pc.x,p.y-f.pc.y)/f.pr;
-  return H*Math.sqrt(Math.max(0.15,Math.min(1,edge/0.35)));
+  return H*Math.sqrt(Math.max(0.15,Math.min(1,edge/0.15)));
 }
 function layerMM(f,p){ return f.kind==="filling" ? fillHeight(f,p) : doughMM(f.tone); }
 const fillPass = mm => Math.exp(-mm/FILL_HEAT_MM)/(1+mm/COVER_MM);
@@ -714,7 +721,7 @@ function serveDish(){
     `Снизу ${c.bottomWord} (${f(c.bottom)}) · сверху ${c.topWord} (${f(c.top)})`,
     `На таве ${c.panSeconds} с`,
     `Золото низа по сеансам: ${c.sessions.join(" / ")}`,
-    `Начинка: ${c.portions} порц. · ${c.holes ? `рваный узор, ${c.holes} яч.` : "без дырок"}`,
+    `Банан: ${c.portions} ломт. · ${c.holes ? `рваный узор, ${c.holes} яч.` : "без дырок"}`,
     `Толщина конверта до ${String(c.thickMM).replace(".",",")} мм`,
   ];
   if(!c.folds) lines.push("Не сложено");
@@ -1290,10 +1297,9 @@ const Z_EXAG = 3;        // тонкий лист и начинку иначе �
 const VIEW_UP = 0.83;    // вертикаль в кадре при наклоне стола, ≈ √(1 − TILT²)
 // Начинка — ломтики банана (владелица 17.09: жёлтые капли читались желтками). Мякоть кремовая;
 // у каждого ломтика тёмный ободок и семечки в середине. Желток появится отдельной начинкой.
-// Основа порции — бледная яичная заливка, по которой разложены ломтики (кадры уличного роти):
-// ярко-жёлтая основа с ломтиками сверху читалась желтком, обложенным бананом (владелица 17.09).
+// Мякоть ломтика и его бок (порция — один ломтик). Ярко-жёлтая горка читалась желтком (17.09).
 const FILL_COLORS = [[236,218,158],[232,213,150],[239,222,166]];
-const BANANA_FLESH = [[253,234,156],[249,228,146],[254,239,170]], BANANA_RIM = "rgba(178,132,48,.75)", BANANA_SEED = "rgba(112,80,40,.65)";
+const BANANA_FLESH = [[253,234,156],[249,228,146],[254,239,170]], BANANA_RIM = "rgba(196,156,78,.5)", BANANA_SEED = "rgba(128,96,54,.45)";
 // Высота стопки под каждой гранью и верх материала на сетке 48×48. Грани идут снизу
 // вверх; грань поднимается на высоту того, что уже лежит под её центром. Кэш — по массиву
 // граней, как у торца: снимок геометрии неизменяем. zb/zt — настоящие миллиметры (карточка,
@@ -1305,6 +1311,7 @@ function stackHeights(faces){
   for(const f of faces) for(const p of f.points){ if(p.x<L)L=p.x; if(p.x>R)R=p.x; if(p.y<T)T=p.y; if(p.y>B)B=p.y; }
   const size=48, dx=Math.max(1e-6,(R-L)/size), dy=Math.max(1e-6,(B-T)/size);
   const top=new Float32Array(size*size), under=new Float32Array(size*size), fill=new Uint8Array(size*size);
+  const doughTop=new Float32Array(size*size);   // верх последнего слоя теста в ячейке (под начинкой)
   const zb=new Float32Array(faces.length), zt=new Float32Array(faces.length);
   // В ячейке каждый слой материала считается один раз: общие диагонали треугольников
   // одного квадрата иначе удваивали толщину пятнами (рябь на ровном листе).
@@ -1335,9 +1342,10 @@ function stackHeights(faces){
       if(list.some(e=>e.key===key)) continue;
       const h=layerMM(f,q); list.push({key,h,idx:i});
       under[cell]=top[cell]; top[cell]+=h; fill[cell]=f.kind==="filling" ? 1 : 0;
+      if(f.kind==="dough") doughTop[cell]=top[cell];
     }
   }
-  const out=envelopeSurface({zb,zt,top,under,fill,L,T,dx,dy,size},faces); cache.set(faces,out); return out;
+  const out=envelopeSurface({zb,zt,top,under,fill,doughTop,L,T,dx,dy,size},faces); cache.set(faces,out); return out;
 }
 // Быстрые высоты предпросмотра складки (на каждое движение пальца точный расчёт дорог):
 // оставшаяся часть берёт высоты из последнего точного снимка; поднятая часть кладётся
@@ -1416,7 +1424,8 @@ function envelopeSurface(H,faces){
     cover[c]=1;
     if(!draped(c) || mask[c]<1e-6) surf[c]=top[c];
     else { const smooth=mass[c]/mask[c]; surf[c]=smooth+ENV_DETAIL*(top[c]-smooth); }
-    base[c]=fill[c] ? under[c] : surf[c];
+    // Под открытой начинкой тесто — на высоте своего верха, сколько бы ломтиков ни лежало сверху.
+    base[c]=fill[c] ? (H.doughTop ? H.doughTop[c] : under[c]) : surf[c];
   }
   // Свет сверху-слева-спереди по наклону поверхности: множитель яркости (0,72…1,22). Пустые
   // ячейки снаружи дают склон у края — это и есть скругление кромки на свету.
@@ -1556,8 +1565,8 @@ function drawDishFaces(g,faces,screen,H,zk,shadow=true,shift=null){
   g.globalAlpha=1;
   if(H && open.length) drawBananaSlices(g,faces,open,screen,H,zk);
 }
-// Ломтики поверх открытой начинки: по порции (и по куску стола) — обрезка по её открытым граням,
-// чтобы ломтик не лёг на клапан. Раскладка ломтиков постоянна для порции (от её номера).
+// Ломтик поверх открытой порции (порция и есть ломтик): обрезка по её открытым граням и куску
+// стола, чтобы ломтик не лёг на клапан.
 function drawBananaSlices(g,faces,open,screen,H,zk){
   const groups=new Map();
   for(const k of open){
@@ -1577,9 +1586,7 @@ function drawBananaSlices(g,faces,open,screen,H,zk){
       g.closePath();
     }
     g.clip();
-    const R=f.pr, spots=[];
-    for(let j=0;j<6;j++){ const a=(j*60+f.source*37)*Math.PI/180; spots.push([Math.cos(a)*R*.6,Math.sin(a)*R*.6,.42,j]); }
-    spots.push([0,0,.44,6]);
+    const R=f.pr, spots=[[0,0,.97,f.source]];
     for(const [ox,oy,rk,j] of spots){
       const c={x:f.pc.x+ox,y:f.pc.y+oy}, r=R*rk, lift=H.at(c)*zk;
       const ring=[];
@@ -1587,13 +1594,13 @@ function drawBananaSlices(g,faces,open,screen,H,zk){
       g.beginPath(); g.moveTo(ring[0].x,ring[0].y-lift);
       for(let j=1;j<ring.length;j++) g.lineTo(ring[j].x,ring[j].y-lift);
       g.closePath();
-      g.strokeStyle=BANANA_RIM; g.lineWidth=Math.max(.6,Math.hypot(ring[0].x-ring[7].x,ring[0].y-ring[7].y)*.06);
+      g.strokeStyle=BANANA_RIM; g.lineWidth=Math.max(.5,Math.hypot(ring[0].x-ring[7].x,ring[0].y-ring[7].y)*.04);
       g.fillStyle=rgb(BANANA_FLESH[(j+f.source)%3]); g.fill(); g.stroke();
       // семечки: три тёмные точки треугольником у середины
       g.fillStyle=BANANA_SEED;
       for(let j=0;j<3;j++){
-        const a=(j*120+f.source*53)*Math.PI/180, q=screen({x:c.x+Math.cos(a)*r*.28,y:c.y+Math.sin(a)*r*.28},f);
-        const d=Math.max(.5,Math.hypot(ring[0].x-ring[7].x,ring[0].y-ring[7].y)*.045);
+        const a=(j*120+f.source*53)*Math.PI/180, q=screen({x:c.x+Math.cos(a)*r*.16,y:c.y+Math.sin(a)*r*.16},f);
+        const d=Math.max(.4,Math.hypot(ring[0].x-ring[7].x,ring[0].y-ring[7].y)*.026);
         g.beginPath(); g.ellipse(q.x,q.y-lift,d,d*.7,0,0,Math.PI*2); g.fill();
       }
     }
