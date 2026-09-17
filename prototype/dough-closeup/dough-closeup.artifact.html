@@ -843,10 +843,10 @@ function syncDishUI(){
 // До 10 CSS px от точки касания жест не читается вовсе: это дрожание пальца
 // (iOS allowableMovement 10 pt, Android touch slop 8 dp). Числа — для пробы, не замер.
 const FOLD_MIN_DEPTH = 0.12, FOLD_MAX_ANGLE_COS = Math.cos(60*Math.PI/180), TOUCH_SLOP_CSS = 10;
-function beginDishGesture(id,p,client){
+function beginDishGesture(id,p,client,time){
   if(dishGesture || dishFlight) return;
-  const start=dishLocal(p), at=client || {x:0,y:0};
-  const samples=[{x:at.x,y:at.y,t:performance.now()}];
+  const start=dishLocal(p), at=client || {x:0,y:0}, t0=Number.isFinite(time) ? time : performance.now();
+  const samples=[{x:at.x,y:at.y,t:t0}];
   if(dish.mode==="cut"){ dishGesture={id,start,end:start,client:at,samples}; return; }
   let anchor=null,distance=Infinity,edge=null;
   for(let i=0;i<dish.hull.length;i++){
@@ -860,25 +860,44 @@ function beginDishGesture(id,p,client){
   const len=Math.hypot(edge.dx,edge.dy)||1, c=dish.hull.reduce((s,q)=>({x:s.x+q.x/dish.hull.length,y:s.y+q.y/dish.hull.length}),{x:0,y:0});
   let inward={x:-edge.dy/len,y:edge.dx/len};
   if((c.x-anchor.x)*inward.x+(c.y-anchor.y)*inward.y<0) inward={x:-inward.x,y:-inward.y};
-  dishGesture={id,start,end:start,anchor,inward,edge,preview:null,client:at,samples,moved:false};
+  dishGesture={id,start,end:start,anchor,inward,edge,preview:null,client:at,samples,moved:false,
+    stroke:{start:null,path:0,lastMoveT:t0,lastT:t0,pos:{x:at.x,y:at.y}}};
   audioScrape();                              // ответ инструмента: лопатка коснулась стали у края
 }
 function inwardFold(g){
   const vx=g.target.x-g.anchor.x, vy=g.target.y-g.anchor.y, depth=vx*g.inward.x+vy*g.inward.y;
   return depth>=FOLD_MIN_DEPTH && depth>=Math.hypot(vx,vy)*FOLD_MAX_ANGLE_COS;
 }
-function moveDishGesture(p,client){
+// Штрих — непрерывное движение пальца. Пауза длиннее STROKE_PAUSE_MS начинает новый штрих:
+// неподвижный палец событий не шлёт, и без этого пауза перед махом считалась бы его частью.
+// Начало штриха живёт в жесте, а не в буфере отсчётов, — длина буфера зависит от частоты событий.
+const STROKE_PAUSE_MS = 40, FOLD_PREVIEW_DELAY_MS = 110;
+function trackStroke(g,client,t){
+  const k=g.stroke, d=Math.hypot(client.x-k.pos.x,client.y-k.pos.y);
+  if(d>=0.5){
+    if(k.start===null || t-k.lastMoveT>STROKE_PAUSE_MS){ k.start=Math.max(k.lastT,t-17); k.path=0; }
+    k.path+=d; k.lastMoveT=t; k.pos={x:client.x,y:client.y};
+  }
+  k.lastT=t;
+}
+function moveDishGesture(p,client,time){
   const g=dishGesture; g.end=dishLocal(p);
+  const t=Number.isFinite(time) ? time : performance.now();
   if(client){
-    g.samples.push({x:client.x,y:client.y,t:performance.now()});
-    if(g.samples.length>24) g.samples.shift();
+    g.samples.push({x:client.x,y:client.y,t});
+    if(g.samples.length>64) g.samples.shift();
+    if(g.stroke) trackStroke(g,client,t);
     if(!g.moved && Math.hypot(client.x-g.client.x,client.y-g.client.y)>=TOUCH_SLOP_CSS) g.moved=true;
   } else g.moved=true;                       // вызов без экранных координат (проверки) — без мёртвой зоны
   if(dish.mode==="fold"){
     if(!g.moved){ g.target=null; g.preview=null; return; }
     // Сохраняем смещение пальца от выбранной кромки, чтобы лист не прыгал к нему.
     g.target={x:g.anchor.x+g.end.x-g.start.x,y:g.anchor.y+g.end.y-g.start.y};
-    g.preview=inwardFold(g) ? foldGeometry(g.anchor,g.target) : null;
+    // Первые 110 мс быстрого штриха складку не показываем: это может быть мах, и
+    // полсписта не должно мелькать перед переворотом.
+    const fresh=client && g.stroke && g.stroke.start!==null && t-g.stroke.start<FOLD_PREVIEW_DELAY_MS;
+    const fast=fresh && velocityOf(g,t).speed>=FLICK_MIN_CSS;
+    g.preview=!fast && inwardFold(g) ? foldGeometry(g.anchor,g.target) : null;
   }
 }
 // Переворот на таве — тот же глагол «поднять и шлёпнуть»: коснуться края и резко махнуть
@@ -886,13 +905,8 @@ function moveDishGesture(p,client){
 // за прижимом (решение 07.09). Скорость — регрессия по отсчётам в CSS px за последние
 // 80 мс, чтобы исход не зависел от частоты событий (урок #91). Все пороги — для пробы.
 const FLICK_MIN_CSS = 850, FLICK_MIN_PATH_CSS = 40, FLICK_MAX_MS = 300, FLICK_STALE_MS = 50, FLICK_WINDOW_MS = 80;
-function flickOf(g,tUp){
-  const S=g.samples, start=S[0];
-  let path=0, moveT0=null, lastMoveT=start.t;
-  for(let i=1;i<S.length;i++){
-    const d=Math.hypot(S[i].x-S[i-1].x,S[i].y-S[i-1].y);
-    if(d>0){ path+=d; lastMoveT=S[i].t; if(moveT0===null) moveT0=S[i-1].t; }
-  }
+function velocityOf(g,tUp){
+  const S=g.samples;
   const win=S.filter(q=>q.t>=tUp-FLICK_WINDOW_MS);
   const pts=win.length>=2 ? win : S.slice(-2);
   let vx=0, vy=0;
@@ -902,7 +916,11 @@ function flickOf(g,tUp){
     for(const q of pts){ const dt=q.t-mt; tt+=dt*dt; tx+=dt*(q.x-mx); ty+=dt*(q.y-my); }
     if(tt>1e-9){ vx=tx/tt*1000; vy=ty/tt*1000; }
   }
-  const speed=Math.hypot(vx,vy), duration=moveT0===null ? 0 : tUp-moveT0, stale=tUp-lastMoveT;
+  return {vx,vy,speed:Math.hypot(vx,vy)};
+}
+function flickOf(g,tUp){
+  const {vx,vy,speed}=velocityOf(g,tUp), k=g.stroke;
+  const path=k.path, duration=k.start===null ? 0 : tUp-k.start, stale=tUp-k.lastMoveT;
   const ok=speed>=FLICK_MIN_CSS && path>=FLICK_MIN_PATH_CSS && duration<=FLICK_MAX_MS && stale<=FLICK_STALE_MS;
   return {ok,vx,vy,speed,duration,path,stale};
 }
@@ -913,13 +931,13 @@ function logPanGesture(outcome,f){
   if(gestures.length>200) gestures.shift();
   try{ localStorage.setItem("dough_gestures", JSON.stringify(gestures)); }catch(e){}
 }
-function endDishGesture(){
+function endDishGesture(time){
   const g=dishGesture; dishGesture=null;
   if(dish.mode!=="fold"){
     if(!cutDish(g.start,g.end)) dish.message="Проведи лезвием через тесто";
     return;
   }
-  const last=g.samples[g.samples.length-1], f=flickOf(g,performance.now());
+  const last=g.samples[g.samples.length-1], f=flickOf(g,Number.isFinite(time) ? time : performance.now());
   if(f.ok){
     // Лист уходит по направлению маха: направление переводим из экрана в координаты блюда.
     const a=dishLocal(toLocal(last.x-f.vx*.05,last.y-f.vy*.05)), b=dishLocal(toLocal(last.x,last.y));
@@ -2150,12 +2168,19 @@ function toLocal(cx, cy){
 // напрямую и гасим жест через preventDefault; мышь идёт своим путём.
 let dbgDown = 0, dbgMove = 0, dbgKind = "ждёт";
 
-function onDown(id, cx, cy){
+// Время события, а не момент обработки: занятый главный поток склеивает touchmove,
+// и по времени обработки медленная складка читалась бы как мах. Берём e.timeStamp,
+// если он в той же шкале, что performance.now().
+function evTime(e){
+  const now=performance.now(), t=e && e.timeStamp;
+  return Number.isFinite(t) && Math.abs(t-now)<1000 ? t : now;
+}
+function onDown(id, cx, cy, t){
   dbgDown++;
   // iOS усыпляет AudioContext в фоне. Касание блюда тоже будит звук, иначе после
   // возврата шипение на таве молчало бы до «заново».
   if(dish){ audioInit(); if(AC && AC.state==="suspended") AC.resume();
-            beginDishGesture(id,toLocal(cx,cy),{x:cx,y:cy}); return; }
+            beginDishGesture(id,toLocal(cx,cy),{x:cx,y:cy},t); return; }
   if(action.pointerId !== null) return;              // один активный палец; второй игнорируется (audit §5)
   if(action.state === "SETTLING") finalizeGesture(); // быстрый повторный тап не ждёт хвоста успокоения
   if(action.state !== "RESTING") return;             // остальные фазы доигрывают автономно
@@ -2174,18 +2199,18 @@ function onDown(id, cx, cy){
   if(stackedLayout() ? p.y < w.y : p.x > w.x + w.w) return;
   armAction(id, p);                                  // только выбор края: тесто НЕ двигается
 }
-function onMove(id, cx, cy){
-  if(dishGesture && dishGesture.id===id){ dbgMove++; moveDishGesture(toLocal(cx,cy),{x:cx,y:cy}); return; }
+function onMove(id, cx, cy, t){
+  if(dishGesture && dishGesture.id===id){ dbgMove++; moveDishGesture(toLocal(cx,cy),{x:cx,y:cy},t); return; }
   if(action.pointerId !== id) return;
   dbgMove++;
   updateActionMove(toLocal(cx, cy));
 }
-function onUp(id, cx, cy){
+function onUp(id, cx, cy, t){
   if(dishGesture && dishGesture.id===id){
     // touchend несёт последнюю точку: быстрый участок может прийти только в нём.
     const L=dishGesture.samples[dishGesture.samples.length-1];
-    if(Number.isFinite(cx) && Number.isFinite(cy) && (cx!==L.x || cy!==L.y)) moveDishGesture(toLocal(cx,cy),{x:cx,y:cy});
-    endDishGesture(); return;
+    if(Number.isFinite(cx) && Number.isFinite(cy) && (cx!==L.x || cy!==L.y)) moveDishGesture(toLocal(cx,cy),{x:cx,y:cy},t);
+    endDishGesture(t); return;
   }
   if(action.pointerId !== id) return;
   releaseAction();
@@ -2216,17 +2241,20 @@ window.addEventListener("touchstart", e=>{
   rawTouch++;
   if(inUI(e.target)) return;
   e.preventDefault(); dbgKind = "touch";
-  for(const t of e.changedTouches) onDown("t"+t.identifier, t.clientX, t.clientY);
+  const at = evTime(e);
+  for(const t of e.changedTouches) onDown("t"+t.identifier, t.clientX, t.clientY, at);
 }, {passive:false, capture:true});
 
 window.addEventListener("touchmove", e=>{
   if(inUI(e.target)) return;
   e.preventDefault();
-  for(const t of e.changedTouches) onMove("t"+t.identifier, t.clientX, t.clientY);
+  const at = evTime(e);
+  for(const t of e.changedTouches) onMove("t"+t.identifier, t.clientX, t.clientY, at);
 }, {passive:false, capture:true});
 
 window.addEventListener("touchend", e=>{
-  for(const t of e.changedTouches) onUp("t"+t.identifier, t.clientX, t.clientY);
+  const at = evTime(e);
+  for(const t of e.changedTouches) onUp("t"+t.identifier, t.clientX, t.clientY, at);
 }, {passive:false, capture:true});
 
 window.addEventListener("touchcancel", e=>{
@@ -2236,13 +2264,13 @@ window.addEventListener("touchcancel", e=>{
 window.addEventListener("pointerdown", e=>{
   rawPointer++;
   if(e.pointerType === "touch" || inUI(e.target)) return;
-  dbgKind = "мышь"; onDown("p"+e.pointerId, e.clientX, e.clientY);
+  dbgKind = "мышь"; onDown("p"+e.pointerId, e.clientX, e.clientY, evTime(e));
 }, true);
 window.addEventListener("pointermove", e=>{
   if(e.pointerType === "touch" || inUI(e.target)) return;
-  onMove("p"+e.pointerId, e.clientX, e.clientY);
+  onMove("p"+e.pointerId, e.clientX, e.clientY, evTime(e));
 }, true);
-window.addEventListener("pointerup", e=>{ onUp("p"+e.pointerId, e.clientX, e.clientY); }, true);
+window.addEventListener("pointerup", e=>{ onUp("p"+e.pointerId, e.clientX, e.clientY, evTime(e)); }, true);
 window.addEventListener("pointercancel", e=>{ onCancel("p"+e.pointerId); }, true);
 // Уход в фон — та же отмена: не оставлять взведённый жест (audit §5).
 addEventListener("blur", ()=>{
