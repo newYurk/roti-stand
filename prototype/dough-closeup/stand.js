@@ -195,6 +195,12 @@ function layoutPan(){
 // материал: разорванные ячейки отсутствуют, складка отражает материал и порядок
 // слоёв. Это геометрический стенд, не симуляция самоконтакта или готовности блюда.
 let dish = null, dishGesture = null;
+// Жарка как действие (срез 17.09): прижим пальцем, купола и жир — модификаторы тепла по месту.
+// Живут вне dish.thermal (его целиком сравнивают проверки) и вне dish (его снимки — история):
+// panPress — точки прижима {x,y,level} в координатах блюда; domes — купола; fatMap — жир на
+// таве в долях PAN_R. Пустые — жарка идёт прежним быстрым путём.
+let panPress = [], domes = [], fatMap = null;
+let contactRebuilds = 0;        // счётчик пересборок контакта (проверка: действия её не вызывают)
 // Полёт при перевороте живёт вне dish: «заново» его сбрасывает, а снимки dish не меняются.
 let dishFlight = null;
 // Перелёт снятого блюда с тавы на стол: поза интерполируется от места на таве к столу.
@@ -251,6 +257,7 @@ function materialTriangles(p){
 }
 function startDish(){
   if(dish) return; // раскладка начинки ровно одна на посадку
+  panPress=[]; domes=[];          // жир на таве остаётся: он принадлежит сковороде
   const faces=[];
   for(let q=0;q<quads.length;q++){
     if(quadCons[q].some(c=>c.broken)) continue;
@@ -365,17 +372,23 @@ function rebuildDishContact(){
       if(!cell.some(a=>a.kind===f.kind && a.source===f.source && a.turned===f.turned)) cell.push(f);
     }
   }
+  contactRebuilds++;
   const n=dish.thermal.length, pair=()=>Array.from({length:n},()=>[0,0]);
   const dryD=pair(), cookD=pair(), contactW=pair(), topW=pair(), count=new Float64Array(n);
+  // Таблица образцов — тот же расчёт по месту, чтобы прижим, купола и жир меняли тепло в
+  // точке без пересборки сетки (heatSamples). Порядок записей — порядок сложения ниже.
+  const rows=[];
   // Один образец слоя: нижняя сторона получает тепло, прошедшее сквозь всё, что ниже;
   // открытая верхняя — долю UP_DRY на сушку; цвет — только прямой контакт со сталью.
-  const deposit=(f,heat,tr,top,weight)=>{
+  const deposit=(f,heat,tr,top,weight,pt,covered)=>{
     const t=dish.thermal[f.source]; if(!t) return;
     const s=f.source, down=f.turned ? 1 : 0, up=1-down, h=heat*t.contact*weight;
+    const steel=tr===1 && heat>0;
     count[s]+=weight;
     dryD[s][down]+=h*tr;
     if(top){ dryD[s][up]+=UP_DRY*h*tr; topW[s][up]+=weight; }
-    if(tr===1 && heat>0){ cookD[s][down]+=h; contactW[s][down]+=weight; }
+    if(steel){ cookD[s][down]+=h; contactW[s][down]+=weight; }
+    rows.push(s,down,(top?1:0)|(steel?2:0)|(covered?4:0),h,tr,pt.x,pt.y);
   };
   // Для крошечного фрагмента: та же стопка, но тепло кладётся только ему самому (индекс own).
   const stackHeatAt=(stack,own,pt,heat,weight)=>{
@@ -383,7 +396,7 @@ function rebuildDishContact(){
     let transmission=1, fillAbove=0;
     for(let k=own+1;k<stack.length;k++) if(stack[k].kind==="filling") fillAbove+=hs[k];
     for(let k=0;k<own;k++) transmission*=stack[k].kind==="dough" ? Math.exp(-hs[k]/DOUGH_HEAT_MM) : fillPass(hs[k]);
-    deposit(stack[own],heat/(1+fillAbove/COVER_MM),transmission,own===stack.length-1,weight);
+    deposit(stack[own],heat/(1+fillAbove/COVER_MM),transmission,own===stack.length-1,weight,pt,fillAbove>0);
   };
   // Стопка в точке, снизу вверх: слой теста пропускает exp(−мм/DOUGH_HEAT_MM), начинка —
   // exp(−мм/FILL_HEAT_MM)·тень; на всё, что лежит под начинкой, ложится её тень 1/(1+мм/COVER_MM).
@@ -397,7 +410,7 @@ function rebuildDishContact(){
     for(let k=0;k<stack.length;k++){
       const f=stack[k];
       if(f.kind==="dough"){
-        deposit(f,heat/(1+fillAbove[k]/COVER_MM),transmission,k===stack.length-1,weight);
+        deposit(f,heat/(1+fillAbove[k]/COVER_MM),transmission,k===stack.length-1,weight,pt,fillAbove[k]>0);
         transmission*=Math.exp(-hs[k]/DOUGH_HEAT_MM);
       } else transmission*=fillPass(hs[k]);   // влажная начинка задерживает тепло к клапану
     }
@@ -435,19 +448,47 @@ function rebuildDishContact(){
   dish.cookDrive=cookD.map(avg);
   dish.contactWeights=contactW;   // [s][сторона]: сколько образцов стороны лежит на стали
   dish.topWeights=topW;           // [s][сторона]: сколько образцов стороны открыто сверху
+  // Не перечисляемое: снимки и сравнения dish его не видят.
+  const m=rows.length/7, table={n:m,count,src:new Int32Array(m),side:new Uint8Array(m),flags:new Uint8Array(m),
+    h:new Float64Array(m),tr:new Float64Array(m),x:new Float64Array(m),y:new Float64Array(m)};
+  for(let i=0,k=0;i<m;i++,k+=7){
+    table.src[i]=rows[k]; table.side[i]=rows[k+1]; table.flags[i]=rows[k+2];
+    table.h[i]=rows[k+3]; table.tr[i]=rows[k+4]; table.x[i]=rows[k+5]; table.y[i]=rows[k+6];
+  }
+  Object.defineProperty(dish,"heatTable",{value:table,writable:true,configurable:true,enumerable:false});
+}
+// Модификаторы тепла по месту: множитель на каждый образец (1 — без изменений). Пока пусто.
+let FORCE_HEAT_TABLE = false;   // отладка: считать через таблицу и без модификаторов
+function panModsActive(){ return FORCE_HEAT_TABLE || panPress.length>0 || domes.length>0 || !!fatMap; }
+function sampleMultiplier(T,i){ return 1; }
+// Приводы с модификаторами: тот же порядок сложения, что в rebuildDishContact, поэтому при
+// множителях 1 результат побитово равен dish.dryDrive / dish.cookDrive.
+function moddedDrives(){
+  const T=dish.heatTable, n=dish.thermal.length;
+  const dryD=Array.from({length:n},()=>[0,0]), cookD=Array.from({length:n},()=>[0,0]);
+  for(let i=0;i<T.n;i++){
+    const s=T.src[i], down=T.side[i], fl=T.flags[i], h=T.h[i]*sampleMultiplier(T,i), tr=T.tr[i];
+    dryD[s][down]+=h*tr;
+    if(fl&1) dryD[s][1-down]+=UP_DRY*h*tr;
+    if(fl&2) cookD[s][down]+=h;
+  }
+  const avg=(v,s)=>T.count[s] ? [v[0]/T.count[s],v[1]/T.count[s]] : [0,0];
+  return {dryDrive:dryD.map(avg),cookDrive:cookD.map(avg)};
 }
 function cookDish(dt){
   if(!dish || dish.mode!=="fold" || phase!=="PAN" || !dish.thermal || dishFlight) return;
   if(dishGesture && dishGesture.slide) return;   // лист на лопатке — стали не касается
   if(!dish.dryDrive) rebuildDishContact();
+  // Быстрый путь: без прижима, куполов и жира — прежние приводы без перерасчёта.
+  const D=panModsActive() && dish.heatTable ? moddedDrives() : dish;
   for(let i=0;i<dish.thermal.length;i++){
     const t=dish.thermal[i]; if(!t) continue;
     // Толще листа-эталона — сохнет медленнее, тоньше — быстрее (время сушки ∝ толщине, §1).
     const thin=Math.max(.25,Math.min(2.5,SHEET_REF_MM/Math.max(.05,doughMM(t.tone))));
     for(let side=0;side<2;side++){
       // Сторона сначала сохнет, и только потом набирает цвет — как было для листа целиком.
-      if(t.dry[side]<1) t.dry[side]=Math.min(1,t.dry[side]+dt*DRY_RATE*dish.dryDrive[i][side]*thin);
-      else t.cook[side]+=dt*COOK_RATE*dish.cookDrive[i][side];
+      if(t.dry[side]<1) t.dry[side]=Math.min(1,t.dry[side]+dt*DRY_RATE*D.dryDrive[i][side]*thin);
+      else t.cook[side]+=dt*COOK_RATE*D.cookDrive[i][side];
     }
   }
   // Время на таве по «сеансам»: посадка и каждый переворот открывают новый. Золото низа
@@ -1465,6 +1506,7 @@ function build(){
   layoutPan();
   phase = "TABLE"; xf = null;
   dish = null; dishGesture = null; dishFlight = null; dishMove = null; syncDishUI(); syncStepButtons();
+  panPress = []; domes = []; fatMap = null;
   { const card = document.getElementById("card"); if(card) card.hidden = true; }
   cook = new Float32Array(N); dry = new Float32Array(N);
   // Контакт с плитой пятнистый, а не идеальный: под листом микрозазоры, складки, плёнка
