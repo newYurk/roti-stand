@@ -639,7 +639,7 @@ function cookDish(dt){
   // Время на таве по «сеансам»: посадка и каждый переворот открывают новый. Золото низа
   // (средний цвет прижатых сторон 0,4) — ответ на вопрос бюджета 30–60 с (#21).
   if(dish.sessions){
-    dish.panTime+=dt;
+    dish.panTime=(dish.panTime||0)+dt;
     const cur=dish.sessions[dish.sessions.length-1];
     if(cur.gold===null && dishSideMean("cook","contactWeights")>=0.4) cur.gold=dish.panTime-cur.start;
   }
@@ -663,7 +663,7 @@ function dishStatus(){
   if(phase!=="PAN") return parts.concat("на столе").join(" · ");
   parts.push(`низ: сушка ${meanDry().toFixed(2)} цвет ${meanCook().toFixed(2)}`);
   parts.push(`верх: цвет ${dishSideMean("cook","topWeights").toFixed(2)}`);
-  if(dish.sessions) parts.push("золото низа "+dish.sessions.map(x=>x.gold===null ? "—" : Math.round(x.gold)+" с").join(" / "));
+  if(dish.sessions) parts.push("золото низа "+dish.sessions.map(x=>x.gold===null ? "—" : typeof x.gold==="string" ? x.gold : Math.round(x.gold)+" с").join(" / "));
   return parts.join(" · ");
 }
 // Условность отрисовки, не физика: тонкий лист показывает сквозь себя цвет своей
@@ -792,7 +792,9 @@ function flipGeometry(dir,landing={x:0,y:0}){
   return {faces,axis:{nx,ny,c},from:c,to:{x:tx,y:ty}};
 }
 function startPanSession(){
-  if(dish.sessions) dish.sessions.push({flip:dish.flips||0,start:dish.panTime||0,gold:null});
+  // Если на сталь легла уже золотая сторона, «0 с» засоряло бы замер бюджета: пишем «уже».
+  if(dish.sessions) dish.sessions.push({flip:dish.flips||0,start:dish.panTime||0,
+    gold:dishSideMean("cook","contactWeights")>=0.4 ? "уже" : null});
 }
 function commitFlip(next){
   rememberDish(); dish.faces=next.faces; dish.flips=(dish.flips||0)+1;
@@ -805,7 +807,7 @@ const FLIP_T = 0.45;
 function startFlip(dir,landing){
   if(!dish || dish.mode!=="fold" || phase!=="PAN" || dishGesture || dishFlight) return false;
   const next=flipGeometry(dir,landing); if(!next) return false;
-  dishSectionGeometry(next.faces);        // дорогую геометрию торца считаем до посадки, а не в её кадре
+  if(dish.folds || dish.cuts.length) dishSectionGeometry(next.faces);   // торец считаем до посадки, если он рисуется
   let radius=0;
   for(const f of dish.faces) if(f.kind==="dough") for(const p of f.points)
     radius=Math.max(radius,Math.hypot(p.x-next.from.x,p.y-next.from.y));
@@ -816,8 +818,10 @@ function startFlip(dir,landing){
 function updateDishFlight(){
   if(!dishFlight) return;
   if((performance.now()-dishFlight.t0)/1000 < dishFlight.T) return;
+  const late=(performance.now()-dishFlight.t0)/1000 > dishFlight.T+0.5;   // вернулись из фона
   const next=dishFlight.next; dishFlight=null;
-  commitFlip(next); audioPanLand();
+  commitFlip(next);
+  if(!late) audioPanLand();                  // шлепок через минуты после взлёта — ложный звук
 }
 function syncDishUI(){
   document.getElementById("gDish").hidden=!dish;
@@ -848,25 +852,36 @@ function beginDishGesture(id,p,client,time){
   const start=dishLocal(p), at=client || {x:0,y:0}, t0=Number.isFinite(time) ? time : performance.now();
   const samples=[{x:at.x,y:at.y,t:t0}];
   if(dish.mode==="cut"){ dishGesture={id,start,end:start,client:at,samples}; return; }
-  let anchor=null,distance=Infinity,edge=null;
+  // У угла оболочки два ребра одинаково близки: сохраняем оба, иначе жест внутрь
+  // засчитывался бы у одного угла конверта и отклонялся у другого.
+  const near=[]; let distance=Infinity;
   for(let i=0;i<dish.hull.length;i++){
     const a=dish.hull[i],b=dish.hull[(i+1)%dish.hull.length],dx=b.x-a.x,dy=b.y-a.y;
     const t=Math.max(0,Math.min(1,((start.x-a.x)*dx+(start.y-a.y)*dy)/(dx*dx+dy*dy||1)));
     const q={x:a.x+t*dx,y:a.y+t*dy},d=Math.hypot(q.x-start.x,q.y-start.y);
-    if(d<distance){distance=d;anchor=q;edge={dx,dy};}
+    if(d<distance-1e-9){ distance=d; near.length=0; }
+    if(d<=distance+1e-9) near.push({q,dx,dy});
   }
   if(distance>.30){dish.message="Возьми край листа и веди к начинке";return;}
+  const anchor=near[0].q, edge={dx:near[0].dx,dy:near[0].dy};
   // Внутренняя нормаль кромки: перпендикуляр, повёрнутый к центру оболочки.
-  const len=Math.hypot(edge.dx,edge.dy)||1, c=dish.hull.reduce((s,q)=>({x:s.x+q.x/dish.hull.length,y:s.y+q.y/dish.hull.length}),{x:0,y:0});
-  let inward={x:-edge.dy/len,y:edge.dx/len};
-  if((c.x-anchor.x)*inward.x+(c.y-anchor.y)*inward.y<0) inward={x:-inward.x,y:-inward.y};
-  dishGesture={id,start,end:start,anchor,inward,edge,preview:null,client:at,samples,moved:false,
+  const c=dish.hull.reduce((s,q)=>({x:s.x+q.x/dish.hull.length,y:s.y+q.y/dish.hull.length}),{x:0,y:0});
+  const inwards=near.map(e=>{
+    const len=Math.hypot(e.dx,e.dy)||1; let n={x:-e.dy/len,y:e.dx/len};
+    if((c.x-anchor.x)*n.x+(c.y-anchor.y)*n.y<0) n={x:-n.x,y:-n.y};
+    return n;
+  });
+  const inward=inwards[0];
+  dishGesture={id,start,end:start,anchor,inward,inwards,edge,preview:null,client:at,samples,moved:false,
     stroke:{start:null,path:0,lastMoveT:t0,lastT:t0,pos:{x:at.x,y:at.y}}};
   audioScrape();                              // ответ инструмента: лопатка коснулась стали у края
 }
 function inwardFold(g){
-  const vx=g.target.x-g.anchor.x, vy=g.target.y-g.anchor.y, depth=vx*g.inward.x+vy*g.inward.y;
-  return depth>=FOLD_MIN_DEPTH && depth>=Math.hypot(vx,vy)*FOLD_MAX_ANGLE_COS;
+  const vx=g.target.x-g.anchor.x, vy=g.target.y-g.anchor.y, len=Math.hypot(vx,vy);
+  return (g.inwards || [g.inward]).some(n=>{
+    const depth=vx*n.x+vy*n.y;
+    return depth>=FOLD_MIN_DEPTH && depth>=len*FOLD_MAX_ANGLE_COS;
+  });
 }
 // Штрих — непрерывное движение пальца. Пауза длиннее STROKE_PAUSE_MS начинает новый штрих:
 // неподвижный палец событий не шлёт, и без этого пауза перед махом считалась бы его частью.
@@ -1142,7 +1157,7 @@ function drawSpatula(g,screen,d,sx,sy){
   g.closePath(); g.fill(); g.globalAlpha=1;
 }
 function drawLiftedEdge(g,screen,d,sx,sy){
-  const {tx,ty,a}=edgeFrame(d), half=.32, up=Math.max(2,4*sy);
+  const css=Math.min(2,devicePixelRatio||1)*sy, {tx,ty,a}=edgeFrame(d), half=.32, up=Math.max(1,3*css);
   const p=screen({x:a.x-tx*half,y:a.y-ty*half}), q=screen({x:a.x+tx*half,y:a.y+ty*half});
   // тень под приподнятой кромкой и сама кромка чуть выше
   g.fillStyle="rgba(6,3,1,.42)"; g.beginPath();
