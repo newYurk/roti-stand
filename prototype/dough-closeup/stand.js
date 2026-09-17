@@ -11,7 +11,7 @@
 // до 400%+ и лист «рвётся» в середине от любого движения. Замер это обнаружил сразу.
 // Число узлов сохранено (1 060 после обрезки по кругу; прежняя оценка «~1150» была на глаз,
 // пересчитано 07.09.2026), однородность рёбер восстановлена.
-const BUILD = "2026-09-17 · ломтики · 18";
+const BUILD = "2026-09-17 · маргарин · 19";
 const GRID = 38;                   // 38x38, в круг попадает 1 060 узлов (посчитано, не оценка)
 let SUBSTEPS = 8;                  // T2: 8–10 подшагов, 1 итерация
 let DAMP = 0.986;
@@ -257,7 +257,7 @@ function materialTriangles(p){
 }
 function startDish(){
   if(dish) return; // раскладка начинки ровно одна на посадку
-  panPress=[]; domes=[]; domeState={session:-1,left:0,next:0};   // жир на таве остаётся: он принадлежит сковороде
+  panPress=[]; domes=[]; domeState={session:-1,left:0,next:0}; dishCrisp=0;   // жир на таве остаётся: он принадлежит сковороде
   const faces=[];
   for(let q=0;q<quads.length;q++){
     if(quadCons[q].some(c=>c.broken)) continue;
@@ -470,6 +470,7 @@ function panModsActive(){ return FORCE_HEAT_TABLE || panPress.length>0 || domes.
 function sampleMultiplier(T,i){
   for(const d of domes) if(Math.hypot(T.x[i]-d.x,T.y[i]-d.y)<d.r) return 0;   // под куполом стали нет
   let m=1;
+  if(fatMap) m*=1+FAT_GAIN*fatAt(T.x[i]*targetR/PAN_R,T.y[i]*targetR/PAN_R);
   for(const p of panPress){
     if(!(p.level>0)) continue;
     const d=Math.hypot(T.x[i]-p.x,T.y[i]-p.y); if(d>=PRESS_R) continue;
@@ -513,6 +514,73 @@ function updatePanPress(dt){
   }
 }
 // Палец на тесте — с допуском r: у кромки палец часто чуть за ступенчатым краем листа.
+// ─── Маргарин (спецификация §4; решение 25.08: в v0 бесконечный). Кусок лежит у дальнего борта;
+// ведение пальцем от куска мажет жир по открытой стали — след виден сразу; у кромки листа (0,06)
+// жир затекает под лист, над листом его не видно и он не пишется (ресурс обязан быть видимым,
+// 07.09). Карта жира — на таве, в долях PAN_R (32×32): переживает складку, переворот, отмену;
+// новый лист начинает с чистой тавы. Жир под листом — до +10 % жара сверх базовой плёнки ×1,05
+// (спецификация: +5…15 %, inferred) и хруст «жир × сухость»: чаще треск и строка в карточке.
+// Жест от куска — предложение ассистента (круговой мах спецификации тоже не из источника).
+const FAT_N = 32, FAT_GAIN = 0.10/1.05, FAT_TAU = 25, FAT_BRUSH = .08, FAT_SEEP = .06;
+let fatGesture = null, fatUnder = 0, dishCrisp = 0, smearSoundAt = 0;
+function butterSpot(){
+  // дальний от стола борт: в портрете — вверх-вправо, в альбоме — вправо
+  const a = stackedLayout() ? -35*Math.PI/180 : 20*Math.PI/180;
+  return {x:panC.x+Math.cos(a)*PAN_R*.93, y:panC.y+Math.sin(a)*PAN_R*.93, a};
+}
+// Кусок берётся, только если палец не на тесте: край листа у борта остаётся складкой и снятием.
+function onButter(p){
+  const b=butterSpot();
+  if(Math.hypot(p.x-b.x,p.y-b.y)>PAN_R*.11) return false;
+  return !(dish && dish.mode==="fold" && onMaterial(dishLocal(p),.02));
+}
+function fatAt(u,v){
+  if(!fatMap) return 0;
+  const i=Math.floor((u+1)/2*FAT_N), j=Math.floor((v+1)/2*FAT_N);
+  return i<0||j<0||i>=FAT_N||j>=FAT_N ? 0 : fatMap[j*FAT_N+i];
+}
+function insideMaterial(p,r){
+  const pts=[p,{x:p.x+r,y:p.y},{x:p.x-r,y:p.y},{x:p.x,y:p.y+r},{x:p.x,y:p.y-r}];
+  return pts.every(q=>dish.faces.some(f=>f.kind==="dough" && pointInFace(f.points,q.x,q.y)));
+}
+// Мазок в точке стола: жир ложится на сталь, кроме места глубоко под листом.
+function smearAt(q){
+  const u=(q.x-panC.x)/PAN_R, v=(q.y-panC.y)/PAN_R;
+  if(Math.hypot(u,v)>1) return false;
+  if(dish && dish.mode==="fold" && !dishMove && !dishFlight){
+    const d=dishLocal(q);
+    if(insideMaterial(d,FAT_SEEP)) return false;
+  }
+  if(!fatMap) fatMap=new Float32Array(FAT_N*FAT_N);
+  const cell=2/FAT_N, rr=FAT_BRUSH;
+  for(let j=Math.max(0,Math.floor((v-rr+1)/cell));j<=Math.min(FAT_N-1,Math.floor((v+rr+1)/cell));j++)
+    for(let i=Math.max(0,Math.floor((u-rr+1)/cell));i<=Math.min(FAT_N-1,Math.floor((u+rr+1)/cell));i++){
+      const cu=-1+(i+.5)*cell, cv2=-1+(j+.5)*cell, d=Math.hypot(cu-u,cv2-v);
+      if(d>rr || Math.hypot(cu,cv2)>1) continue;
+      const k=j*FAT_N+i; fatMap[k]=Math.min(1,fatMap[k]+.35*(1-d/rr));
+    }
+  return true;
+}
+function smearStroke(a,b){
+  const len=Math.hypot(b.x-a.x,b.y-a.y), n=Math.max(1,Math.ceil(len/(PAN_R*.03)));
+  let wrote=false;
+  for(let k=1;k<=n;k++) wrote=smearAt({x:a.x+(b.x-a.x)*k/n,y:a.y+(b.y-a.y)*k/n})||wrote;
+  if(wrote && performance.now()-smearSoundAt>120){ smearSoundAt=performance.now(); audioSmear(); }
+}
+function updateFat(dt){
+  fatUnder=0;
+  if(!fatMap) return;
+  let max=0; const k=Math.exp(-dt/FAT_TAU);
+  for(let i=0;i<fatMap.length;i++){ fatMap[i]*=k; if(fatMap[i]>max) max=fatMap[i]; }
+  if(max<.01){ fatMap=null; return; }
+  const T=dish.heatTable; if(!T) return;
+  let s=0,n=0;
+  for(let i=0;i<T.n;i++){ if(!(T.flags[i]&2)) continue; s+=fatAt(T.x[i]*targetR/PAN_R,T.y[i]*targetR/PAN_R); n++; }
+  fatUnder=n ? s/n : 0;
+  dishCrisp+=dt*fatUnder*meanDry();
+}
+function crispWord(c){ return c<1.5 ? "мягкий" : c<5 ? "хрустит" : "сильно хрустит"; }
+
 // ─── Пузыри-купола (спецификация §2, решение 25.08: пузыри прижимаются). Пар поднимает тонкий
 // целый участок нижнего слоя, пока его сторона на стали сохнет; под куполом стали нет — пятно
 // остаётся бледным. Купол лопается от прижима, от складки, переворота и снятия, а сам — когда
@@ -603,6 +671,7 @@ function cookDish(dt){
   if(!dish.dryDrive) rebuildDishContact();
   updatePanPress(dt);
   updateDomes(dt);
+  updateFat(dt);
   // Быстрый путь: без прижима, куполов и жира — прежние приводы без перерасчёта.
   const D=panModsActive() && dish.heatTable ? moddedDrives() : dish;
   for(let i=0;i<dish.thermal.length;i++){
@@ -705,6 +774,7 @@ function dishCard(){
     portions:dish.filling.length, bottom, top,
     thickMM:+Math.max(0,...stackHeights(dish.faces).zt).toFixed(1),
     bottomWord:cookWord(bottom), topWord:cookWord(top), panSeconds:Math.round(dish.panTime||0),
+    crisp:+dishCrisp.toFixed(1), crispWord:crispWord(dishCrisp),
     sessions:(dish.sessions||[]).map(x=>x.gold===null ? "—" : typeof x.gold==="string" ? x.gold : Math.round(x.gold)+" с") };
 }
 function serveDish(){
@@ -722,7 +792,7 @@ function serveDish(){
     `На таве ${c.panSeconds} с`,
     `Золото низа по сеансам: ${c.sessions.join(" / ")}`,
     `Банан: ${c.portions} ломт. · ${c.holes ? `рваный узор, ${c.holes} яч.` : "без дырок"}`,
-    `Толщина конверта до ${String(c.thickMM).replace(".",",")} мм`,
+    `Толщина конверта до ${String(c.thickMM).replace(".",",")} мм · край ${c.crispWord}`,
   ];
   if(!c.folds) lines.push("Не сложено");
   else if(c.top<.05) lines.push("Верх не прожарен — конверт не переворачивали");
@@ -1789,7 +1859,7 @@ function build(){
   layoutPan();
   phase = "TABLE"; xf = null;
   dish = null; dishGesture = null; dishFlight = null; dishMove = null; syncDishUI(); syncStepButtons();
-  panPress = []; domes = []; fatMap = null;
+  panPress = []; domes = []; fatMap = null; fatGesture = null;
   { const card = document.getElementById("card"); if(card) card.hidden = true; }
   cook = new Float32Array(N); dry = new Float32Array(N);
   // Контакт с плитой пятнистый, а не идеальный: под листом микрозазоры, складки, плёнка
@@ -2601,7 +2671,8 @@ function audioFrame(){
     if(crackleNext < now - 1) crackleNext = now;
     while(crackleNext < now + 0.1){
       if(crackleNext >= now - 0.05) audioCrackle(Math.max(now, crackleNext), d + 0.5*Math.min(1,gold));
-      crackleNext += (0.9 - 0.75*d) * (1 - 0.5*Math.min(1,gold)) * (0.4 + Math.random()*1.2);
+      // жир под сухим низом — хруст: треск ещё чаще
+      crackleNext += (0.9 - 0.75*d) * (1 - 0.5*Math.min(1,gold)) * (1 - 0.45*Math.min(1,fatUnder*2)*d) * (0.4 + Math.random()*1.2);
     }
     return;
   }
@@ -2612,6 +2683,15 @@ function audioFrame(){
   const st = dish ? 0 : Math.min(1, avgStrain*2.5);
   tenseGain.gain.setTargetAtTime(dish ? 0 : Math.min(0.22, avgStrain*0.7), now, 0.04);
   tenseFilt.frequency.setTargetAtTime(260 + st*260, now, 0.05);
+}
+// Мазок маргарина по горячей стали — короткое шипение.
+function audioSmear(){
+  if(!AC || condition==="sight" || !noiseBuf) return;
+  const s=AC.createBufferSource(); s.buffer=noiseBuf;
+  const f=AC.createBiquadFilter(); f.type="bandpass"; f.frequency.value=3200; f.Q.value=1.1;
+  const g=AC.createGain(), t=AC.currentTime;
+  g.gain.setValueAtTime(0.0001,t); g.gain.exponentialRampToValueAtTime(0.09,t+.02); g.gain.exponentialRampToValueAtTime(0.001,t+.16);
+  s.connect(f); f.connect(g); g.connect(master); s.start(t); s.stop(t+.18);
 }
 // Купол растёт — тихое «пш» с подъёмом тона; лопается — щелчок и выдох.
 function audioDomeGrow(){
@@ -2794,7 +2874,11 @@ function onDown(id, cx, cy, t){
   // iOS усыпляет AudioContext в фоне. Касание блюда тоже будит звук, иначе после
   // возврата шипение на таве молчало бы до «заново».
   if(dish){ audioInit(); if(AC && AC.state==="suspended") AC.resume();
-            beginDishGesture(id,toLocal(cx,cy),{x:cx,y:cy},t); return; }
+            const p=toLocal(cx,cy);
+            // Порядок попадания: кусок маргарина → лист → сталь.
+            if(!fatGesture && !dishGesture && dish.mode==="fold" && onButter(p)){ fatGesture={id,last:p}; return; }
+            if(fatGesture) return;
+            beginDishGesture(id,p,{x:cx,y:cy},t); return; }
   if(action.pointerId !== null) return;              // один активный палец; второй игнорируется (audit §5)
   if(action.state === "SETTLING") finalizeGesture(); // быстрый повторный тап не ждёт хвоста успокоения
   if(action.state !== "RESTING") return;             // остальные фазы доигрывают автономно
@@ -2814,12 +2898,14 @@ function onDown(id, cx, cy, t){
   armAction(id, p);                                  // только выбор края: тесто НЕ двигается
 }
 function onMove(id, cx, cy, t){
+  if(fatGesture && fatGesture.id===id){ const p=toLocal(cx,cy); smearStroke(fatGesture.last,p); fatGesture.last=p; return; }
   if(dishGesture && dishGesture.id===id){ dbgMove++; moveDishGesture(toLocal(cx,cy),{x:cx,y:cy},t); return; }
   if(action.pointerId !== id) return;
   dbgMove++;
   updateActionMove(toLocal(cx, cy));
 }
 function onUp(id, cx, cy, t){
+  if(fatGesture && fatGesture.id===id){ fatGesture=null; return; }
   if(dishGesture && dishGesture.id===id){
     // touchend несёт последнюю точку: быстрый участок может прийти только в нём.
     const L=dishGesture.samples[dishGesture.samples.length-1];
@@ -2830,6 +2916,7 @@ function onUp(id, cx, cy, t){
   releaseAction();
 }
 function onCancel(id){
+  if(fatGesture && fatGesture.id===id){ fatGesture=null; return; }
   if(dishGesture && dishGesture.id===id){ releasePress(dishGesture); dishGesture=null; return; }
   if(action.pointerId !== id) return;
   // Отмена всегда возвращает покой из ARMED/LIFTING (audit §5);
@@ -2888,7 +2975,7 @@ window.addEventListener("pointerup", e=>{ onUp("p"+e.pointerId, e.clientX, e.cli
 window.addEventListener("pointercancel", e=>{ onCancel("p"+e.pointerId); }, true);
 // Уход в фон — та же отмена: не оставлять взведённый жест (audit §5).
 addEventListener("blur", ()=>{
-  releasePress(dishGesture); dishGesture=null;
+  releasePress(dishGesture); dishGesture=null; fatGesture=null;
   if(action.state==="CARRY"){ action.pointerId = null; dropCarry(); }
   else if(action.state==="ARMED"||action.state==="LIFTING") clearAction();
 });
@@ -3268,6 +3355,7 @@ function drawTable(g, sx, sy){   // пикселизация делается н
   ell(PAN_R*0.42, "#544a3c");
   ell(PAN_R*0.30, "#6b5a2a");               // лужица маргарина в центре вогнутого дна
   ell(PAN_R*0.16, "#8a7436", -PAN_R*0.02);  // блик на масле
+  drawFatAndButter(g, sx, sy);
 
   // мишень: докуда растянуть лист — только пока лист на столе
   if(phase !== "TABLE") return;
@@ -3278,6 +3366,30 @@ function drawTable(g, sx, sy){   // пикселизация делается н
   g.beginPath();
   g.ellipse(R_(prX(c2.x,c2.y)), D_(prY(c2.x,c2.y)), R_(tR), D_(tR*TILT), 0, 0, Math.PI*2);
   g.stroke(); g.setLineDash([]);
+}
+
+// Жир на стали — глянцевые светлые пятна; кусок маргарина у борта — жёлтый брусок с тенью.
+function drawFatAndButter(g, sx, sy){
+  const P=(x,y)=>({x:prX(x,y)*sx,y:prY(x,y)*sy});
+  if(fatMap){
+    const cell=2/FAT_N, rr=PAN_R*cell*1.35;   // пятна перекрываются — мазок, а не бусы
+    for(let j=0;j<FAT_N;j++) for(let i=0;i<FAT_N;i++){
+      const f=fatMap[j*FAT_N+i]; if(f<.04) continue;
+      const c=P(panC.x+(-1+(i+.5)*cell)*PAN_R, panC.y+(-1+(j+.5)*cell)*PAN_R);
+      g.fillStyle=`rgba(236,206,120,${(.13*f).toFixed(3)})`;
+      g.beginPath(); g.ellipse(c.x,c.y,rr*sx,rr*TILT*sy,0,0,Math.PI*2); g.fill();
+    }
+  }
+  const b=butterSpot(), tx=-Math.sin(b.a), ty=Math.cos(b.a), nx=Math.cos(b.a), ny=Math.sin(b.a);
+  const L=PAN_R*.09, W=PAN_R*.06, H=PAN_R*.035*TILT;
+  const corner=(u,v)=>P(b.x+tx*u+nx*v, b.y+ty*u+ny*v);
+  const base=[corner(-L,-W),corner(L,-W),corner(L,W),corner(-L,W)];
+  // fill() замыкает контур сам; без closePath брусок не считается «гранью» в счётчике отрисовки.
+  const poly=(pts,dy)=>{ g.beginPath(); g.moveTo(pts[0].x,pts[0].y-dy); for(let k=1;k<pts.length;k++) g.lineTo(pts[k].x,pts[k].y-dy); g.fill(); };
+  g.fillStyle="rgba(10,6,2,.35)"; poly(base.map(q=>({x:q.x+2*sx,y:q.y+2*sy})),0);
+  g.fillStyle="#c9a64a"; poly(base,0);
+  g.fillStyle="#e8cc72"; poly(base,H*sy);
+  g.fillStyle="rgba(255,244,190,.5)"; poly([corner(-L*.7,-W*.6),corner(L*.2,-W*.6),corner(L*.2,-W*.1),corner(-L*.7,-W*.1)],H*sy);
 }
 
 function shade(t){ const c = mix(t); return `rgb(${c[0]},${c[1]},${c[2]})`; }
@@ -3399,7 +3511,7 @@ let pendingResize = false;
 // НИКОГДА после удачного броска: холст оставался в старом размере до «заново»
 // (найдено проверкой 08.09, обе формы окна). Полёт при этом всё равно защищён —
 // в нём `action.state === "TOSS"`.
-function gestureLive(){ return action.state !== "RESTING" || !!dishGesture || !!dishFlight || !!dishMove; }
+function gestureLive(){ return action.state !== "RESTING" || !!dishGesture || !!dishFlight || !!dishMove || !!fatGesture; }
 function resize(force){
   const r = stage.getBoundingClientRect(), dpr = Math.min(2, devicePixelRatio||1);
   const w = Math.max(64, Math.round(r.width*dpr)), h = Math.max(64, Math.round(r.height*dpr));
