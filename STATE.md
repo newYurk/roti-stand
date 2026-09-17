@@ -81,8 +81,7 @@ https://newyurk.github.io/branches/roti-stand/codex/roti-continuation/prototype/
 1. `docs/roti-design-doc.md` — действующий дизайн; старше `review/raw/*.json` и `docs/archive/*`.
 2. `docs/decisions-log.md` — почему решено так; решения ⚑ владелица может пересмотреть.
 3. `review/review-2026-08-21.md` — что в корпусе было неверно.
-4. `DECISION.md` — стек; `docs/requirements.md`; `docs/cooking-model.md` — модель готовки;
-   `docs/frying-mechanics.md` — жарка.
+4. `DECISION.md` — стек; `docs/requirements.md`; `docs/cooking-model.md` — модель готовки; `docs/frying-mechanics.md` — жарка.
 5. `docs/corpus-map.md` — что существует и чему верить; `docs/journal.md` — хроника.
 6. Доска: milestones «Выбор стека», «v0 · вертикальный срез» (отпуск 3–25 октября), «v1»; метки `gate:A…D`, «ждёт решения», «блокирует архитектуру». Счётчик задач — только на доске.
 
