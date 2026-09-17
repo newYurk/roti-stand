@@ -11,7 +11,7 @@
 // до 400%+ и лист «рвётся» в середине от любого движения. Замер это обнаружил сразу.
 // Число узлов сохранено (1 060 после обрезки по кругу; прежняя оценка «~1150» была на глаз,
 // пересчитано 07.09.2026), однородность рёбер восстановлена.
-const BUILD = "2026-09-17 · видимые резы · 23";
+const BUILD = "2026-09-17 · объёмный срез · 24";
 const GRID = 38;                   // 38x38, в круг попадает 1 060 узлов (посчитано, не оценка)
 let SUBSTEPS = 8;                  // T2: 8–10 подшагов, 1 итерация
 let DAMP = 0.986;
@@ -1466,12 +1466,24 @@ function drawDishSections(g,screen,faces,sx,sy,zk=0,H=null){
     if(!hit || hit.key!==key || hit.shift!==shift){ const path=new Path2D(); build(path); hit={key,shift,path}; cache.set(faces,hit); }
     g.clip(hit.path);
   } else { g.beginPath(); build(g); g.clip(); }
-  const walls=sections.walls.map(w=>{
+  // Торец рисуется только там, где тесто кончается целиком (внешний край, разрез): кромка клапана
+  // внутри конверта лежит под сплошной «подушкой» и торцом не видна (17.09: жёлтые пятна на кусках).
+  const outer=w=>{
+    if(w.outer===undefined){
+      const mid={x:(w.a.x+w.b.x)/2,y:(w.a.y+w.b.y)/2};
+      w.outer=!onMaterial({x:mid.x-w.inward.x*.012,y:mid.y-w.inward.y*.012});
+    }
+    return w.outer;
+  };
+  const walls=sections.walls.filter(w=>!zk || w.cut || outer(w)).map(w=>{
     const own=w.stack[0];   // стенка принадлежит куску своей стопки
     const a=screen(w.a,own),b=screen(w.b,own),mid={x:(w.a.x+w.b.x)/2,y:(w.a.y+w.b.y)/2};
     const m=screen(mid,own),n=screen({x:mid.x+w.inward.x*.001,y:mid.y+w.inward.y*.001},own);
-    const l=Math.hypot(n.x-m.x,n.y-m.y)||1;return {w,a,b,nx:(n.x-m.x)/l,ny:(n.y-m.y)/l};
-  }).filter(s=>-(s.nx*.4+s.ny)>.06).sort((a,b)=>(a.a.y+a.b.y)-(b.a.y+b.b.y));
+    const l=Math.hypot(n.x-m.x,n.y-m.y)||1;
+    // В объёмном виде верх поднят строго вверх, поэтому и стенка — вертикальная полоса у кромки,
+    // обращённой к зрителю; боковые кромки видны ребром и не рисуются.
+    return zk ? {w,a,b,nx:0,ny:-1,face:-(n.y-m.y)/l} : {w,a,b,nx:(n.x-m.x)/l,ny:(n.y-m.y)/l};
+  }).filter(s=>zk ? s.face>.35 : -(s.nx*.4+s.ny)>.06).sort((a,b)=>(a.a.y+a.b.y)-(b.a.y+b.b.y));
   for(const s of walls){
     const {w,a,b,nx,ny}=s;
     if(!w.cut&&w.stack.length<2) continue; // no artificial thick rim around a bare sheet
@@ -1480,11 +1492,13 @@ function drawDishSections(g,screen,faces,sx,sy,zk=0,H=null){
     // Со сглаженной поверхностью конверта стенка доходит ровно до её края, а слои делят
     // эту высоту в своей настоящей пропорции.
     const mid={x:(w.a.x+w.b.x)/2,y:(w.a.y+w.b.y)/2};
-    const trueMM=w.stack.reduce((s,f)=>s+layerMM(f,mid),0), fit=H&&trueMM>0 ? H.at(mid)/trueMM : 1;
-    const weights=zk ? w.stack.map(f=>Math.max(f.kind==="filling" ? unit*1.5 : unit, layerMM(f,mid)*fit*zk))
-                     : w.stack.map(f=>f.kind==="filling"?1.65:1);
+    // Полосы делят ровно высоту нарисованной поверхности у края: срез не вылезает на верх куска
+    // (17.09: жёлтые прямоугольники поверх кусков). Начинке — не меньше трети высоты.
+    const raw=w.stack.map(f=>Math.max(f.kind==="filling" ? .8 : .25, layerMM(f,mid)));
+    const weights=zk ? raw : w.stack.map(f=>f.kind==="filling"?1.65:1);
     const sum=weights.reduce((a,b)=>a+b,0);
-    const height=zk ? sum : Math.min(Math.max(3,14*pixel),unit*sum), step=height/sum;
+    const surfPx=zk ? (H ? H.at(mid)*zk : raw.reduce((a,b)=>a+b,0)*zk) : 0;
+    const height=zk ? Math.max(unit*w.stack.length*.6,surfPx) : Math.min(Math.max(3,14*pixel),unit*sum), step=height/sum;
     const band=(from,to,color)=>{
       g.fillStyle=rgb(color);g.beginPath();
       g.moveTo(a.x+nx*from,a.y+ny*from);g.lineTo(b.x+nx*from,b.y+ny*from);
@@ -1493,14 +1507,25 @@ function drawDishSections(g,screen,faces,sx,sy,zk=0,H=null){
     let bottom=0;
     for(let i=0;i<w.stack.length;i++){
       const f=w.stack[i],top=bottom+weights[i]*step;
-      if(f.kind==="filling"){ band(bottom,top,FILL_COLORS[Math.round(f.tone)%3].map(c=>c*.9)); bottom=top; continue; }
+      if(f.kind==="filling"){
+        // Начинка в срезе — банан в яйце: насыщенно-жёлтая полоса с бледными овалами ломтиков,
+        // чтобы отличаться от мякиша (владелица 17.09: «начинка в резах не видна»).
+        band(bottom,top,SECTION_FILL);
+        const L=Math.hypot(b.x-a.x,b.y-a.y), n=Math.floor(L/Math.max(6,10*pixel)), hh=(top-bottom)*.32;
+        g.fillStyle=rgb(BANANA_FLESH[0]);
+        for(let k=0;k<n;k++){
+          const t=(k+.5+(f.source%3)*.2)/n, cx=a.x+(b.x-a.x)*t+nx*(bottom+top)/2, cy=a.y+(b.y-a.y)*t+ny*(bottom+top)/2;
+          g.beginPath(); g.ellipse(cx,cy,Math.max(1,L/n*.32),Math.max(.6,hh),Math.atan2(b.y-a.y,b.x-a.x),0,Math.PI*2); g.fill();
+        }
+        bottom=top; continue;
+      }
       // Мякиш светлее корочек. Корочки — настоящие стороны слоя: снизу та, что смотрит
       // вниз, сверху — та, что вверх; у каждой свой цвет (в виде A слой ~0,5 px — не разглядеть).
       // Нижний слой на таве показывает свою корочку широкой полосой: по кромке видно, как
       // румянится низ (владелица 17.09: жарку снизу не было видно).
       const down=f.turned ? 1 : 0, crust=i===0 && phase==="PAN" ? (top-bottom)*.55 : Math.min((top-bottom)*.3,Math.max(.5,1.2*pixel));
       const crumb=dishCookColor(f,down,false).map((c,k)=>(c+dishCookColor(f,1-down,false)[k])/2);
-      band(bottom,top,crumb.map(c=>Math.round(c*.82+18)));
+      band(bottom,top,crumb.map(c=>Math.round(c*.7+62)));   // мякиш светлее — жёлтая начинка читается рядом
       band(bottom,bottom+crust,dishCookColor(f,down,false));
       band(top-crust,top,dishCookColor(f,1-down,false));
       bottom=top;
@@ -1516,12 +1541,13 @@ function drawDishSections(g,screen,faces,sx,sy,zk=0,H=null){
 // ─── Вид толщины (решение владелицы 16.09). Условности отрисовки, не физика:
 // высота на экране преувеличена в Z_EXAG раз, мм переводятся в доли роти через ROTI_R_MM.
 const ROTI_R_MM = 110;   // радиус роти ≈ 11 см (inferred): 1 targetR ≈ 110 мм
-const Z_EXAG = 3;        // тонкий лист и начинку иначе не разглядеть на телефоне
+const Z_EXAG = 5;        // тонкий лист и начинку иначе не разглядеть на телефоне (×3 владелице показалось плоско, 17.09)
 const VIEW_UP = 0.83;    // вертикаль в кадре при наклоне стола, ≈ √(1 − TILT²)
 // Начинка — ломтики банана (владелица 17.09: жёлтые капли читались желтками). Мякоть кремовая;
 // у каждого ломтика тёмный ободок и семечки в середине. Желток появится отдельной начинкой.
 // Мякоть ломтика и его бок (порция — один ломтик). Ярко-жёлтая горка читалась желтком (17.09).
 const FILL_COLORS = [[236,218,158],[232,213,150],[239,222,166]];
+const SECTION_FILL = [232,176,58];
 const BANANA_FLESH = [[253,234,156],[249,228,146],[254,239,170]], BANANA_RIM = "rgba(196,156,78,.5)", BANANA_SEED = "rgba(128,96,54,.45)";
 // Высота стопки под каждой гранью и верх материала на сетке 48×48. Грани идут снизу
 // вверх; грань поднимается на высоту того, что уже лежит под её центром. Кэш — по массиву
@@ -1616,7 +1642,8 @@ function previewHeights(faces){
 const ENV_BLUR = 0.3;     // радиус сглаживания в долях короткой стороны рамки (inferred)
 const ENV_DETAIL = 0.12;  // доля исходного рельефа под тестом: волна над порциями, ступень клапана
 const WALL_MIN_MM = 1.2;
-const LIGHT_SLOPE = 0.5;   // доля наклона поверхности, которую видит свет  // тоньше — это одиночный лист: его ступенчатый край без стенки
+const FILL_VIS = 0.45;      // доля высоты открытого ломтика в картинке (при общем ×5)
+const LIGHT_SLOPE = 0.3;   // доля наклона поверхности, которую видит свет (при ×5 по высоте)  // тоньше — это одиночный лист: его ступенчатый край без стенки
 function boxBlur(a,n,rx,ry){
   // Скользящее среднее по строкам, затем по столбцам; окно у края обрезается, делитель
   // постоянный — поэтому сглаживать надо и массу, и маску, и делить одно на другое.
@@ -1695,7 +1722,15 @@ function envelopeSurface(H,faces){
   return {...H, surf, light,
     at,
     // Высоты вершин грани (мм) — одна поверхность на все грани: у общих точек соседей высота одна.
-    vert(i){ return verts[i] || (verts[i]=Float32Array.from(faces[i].points,faces[i].kind==="dough" ? atDough : at)); },
+    vert(i){
+      if(verts[i]) return verts[i];
+      const f=faces[i];
+      // Открытый ломтик — плоский диск на тесте: высота теста плюс профиль ломтика (ниже, чем ×5
+      // остального: иначе ломтики торчали колючими бочонками, 17.09).
+      if(f.kind==="filling" && (flagsOf(i)&1)) return verts[i]=Float32Array.from(f.points,p=>atDough(p)+fillHeight(f,p)*FILL_VIS);
+      return verts[i]=Float32Array.from(f.points,f.kind==="dough" ? atDough : at);
+    },
+    atBase:p=>atDough(p),
     lightAt(i){
       if(Number.isNaN(lights[i])){
         const ps=faces[i].points; let x=0,y=0; for(const p of ps){x+=p.x;y+=p.y;}
@@ -1734,10 +1769,12 @@ function drawDishFaces(g,faces,screen,H,zk,shadow=true,shift=null){
   };
   const faceScreen=f=>p=>screen(p,f);
   if(H){
-    g.fillStyle="rgba(18,10,4,.34)";
+    // На столе тень гуще и длиннее: куски читаются отдельными брусками (владелица 17.09: «плоско»).
+    const onTable=dish && dish.mode!=="fold";
+    g.fillStyle=onTable ? "rgba(12,7,3,.5)" : "rgba(18,10,4,.34)";
     for(let i=0;i<faces.length && shadow;i++){
       if(faces[i].kind!=="dough" || H.zb[i]>.3) continue;
-      const hs=H.vert(i), drop=zk*Math.max(...hs)*.25;
+      const hs=H.vert(i), drop=zk*Math.max(...hs)*(onTable ? .45 : .25);
       if(drop<.3) continue;
       const ps=faces[i].points, p=screen(ps[0],faces[i]); g.beginPath(); g.moveTo(p.x+drop,p.y);
       for(let k=1;k<ps.length;k++){ const q=screen(ps[k],faces[i]); g.lineTo(q.x+drop,q.y); }
@@ -1780,7 +1817,7 @@ function drawDishFaces(g,faces,screen,H,zk,shadow=true,shift=null){
   }
   g.globalAlpha=1;
   for(const k of open){
-    const f=faces[k], hs=H.vert(k), base=hs.map((h,m)=>Math.max(0,h-fillHeight(f,f.points[m])));
+    const f=faces[k], hs=H.vert(k), base=f.points.map((p,m)=>Math.min(hs[m],H.atBase(p)));
     g.fillStyle=rgb(tone(f,.88));
     drawFaceWalls(g,f.points,faceScreen(f),hs,zk,base);
   }
