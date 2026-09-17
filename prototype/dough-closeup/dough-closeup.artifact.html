@@ -269,7 +269,7 @@
 // до 400%+ и лист «рвётся» в середине от любого движения. Замер это обнаружил сразу.
 // Число узлов сохранено (1 060 после обрезки по кругу; прежняя оценка «~1150» была на глаз,
 // пересчитано 07.09.2026), однородность рёбер восстановлена.
-const BUILD = "2026-09-17 · маргарин · 19";
+const BUILD = "2026-09-17 · пузыри по источникам · 20";
 const GRID = 38;                   // 38x38, в круг попадает 1 060 узлов (посчитано, не оценка)
 let SUBSTEPS = 8;                  // T2: 8–10 подшагов, 1 итерация
 let DAMP = 0.986;
@@ -839,13 +839,15 @@ function updateFat(dt){
 }
 function crispWord(c){ return c<1.5 ? "мягкий" : c<5 ? "хрустит" : "сильно хрустит"; }
 
-// ─── Пузыри-купола (спецификация §2, решение 25.08: пузыри прижимаются). Пар поднимает тонкий
-// целый участок нижнего слоя, пока его сторона на стали сохнет; под куполом стали нет — пятно
-// остаётся бледным. Купол лопается от прижима, от складки, переворота и снятия, а сам — когда
-// вокруг досохло (дизайн-док: «лопаются сами на сухом»), через ~2 с. Не под начинкой и не у
-// края или дырки (вокруг купола должно быть тесто). Числа — inferred, на пробу.
+// ─── Пузыри-купола (спецификация §2, решение 25.08: пузыри прижимаются). Пар отрывает целый
+// участок нижнего слоя от стали, пока его сторона сохнет; под куполом стали нет — пятно остаётся
+// бледным (измерено у оладий: Sanz-Serrano 2017). Место — случайное на целом голом тесте: «купол на
+// тонком» источниками не подтверждён, а дырки выпускают пар (разбор источников 17.09,
+// runs/continuation/notes/bubbles-research.json). Купол временный: пар уходит, и он опадает сам
+// через 2–4 с после роста — или раньше, если вокруг досохло (дизайн-док: «на сухом»). Лопается от
+// прижима, от складки, переворота и снятия. Не под начинкой и не у края. Числа — inferred.
 let DOMES = true;                         // выключатель для старых проверок модели
-const DOME_COUNT = [3,5], DOME_R = [.06,.14], DOME_GROW_S = 4, DOME_SELF_POP_S = 2;
+const DOME_COUNT = [3,5], DOME_R = [.06,.14], DOME_GROW_S = 3, DOME_SELF_POP_S = 2, DOME_HOLD_S = [2,4];
 let domeState = {session:-1, left:0, next:0};
 function domeRingDry(d){
   const T=dish.heatTable; let s=0,n=0;
@@ -857,15 +859,11 @@ function domeRingDry(d){
   return n ? s/n : 1;
 }
 function spawnDome(){
-  const T=dish.heatTable, tones=[];
-  for(let i=0;i<T.n;i++) if((T.flags[i]&6)===2){ const t=dish.thermal[T.src[i]]; if(t) tones.push(t.tone); }
-  if(!tones.length) return false;
-  tones.sort((a,b)=>a-b);
-  const thin=tones[Math.floor(tones.length*.4)];      // купола — на тонком: нижние 40 % по толщине
+  const T=dish.heatTable;
   for(let k=0;k<30;k++){
     const i=Math.floor(Math.random()*T.n);
     if((T.flags[i]&6)!==2) continue;
-    const t=dish.thermal[T.src[i]]; if(!t || t.tone>thin || t.dry[T.side[i]]>=.95) continue;
+    const t=dish.thermal[T.src[i]]; if(!t || t.dry[T.side[i]]>=.95) continue;
     const r=DOME_R[0]+(DOME_R[1]-DOME_R[0])*Math.random(), c={x:T.x[i],y:T.y[i]};
     if(domes.some(d=>Math.hypot(d.x-c.x,d.y-c.y)<d.rMax+r+.02)) continue;
     if(panPress.some(p=>Math.hypot(p.x-c.x,p.y-c.y)<PRESS_R+r)) continue;
@@ -874,7 +872,7 @@ function spawnDome(){
     let ok=true;
     for(let j=0;j<8 && ok;j++){ const a=j*Math.PI/4; ok=onMaterial({x:c.x+Math.cos(a)*(r+.05),y:c.y+Math.sin(a)*(r+.05)}); }
     if(!ok) continue;
-    domes.push({x:c.x,y:c.y,rMax:r,r:r*.35,grow:0,dryFor:0});
+    domes.push({x:c.x,y:c.y,rMax:r,r:r*.35,grow:0,dryFor:0,hold:DOME_HOLD_S[0]+Math.random()*(DOME_HOLD_S[1]-DOME_HOLD_S[0])});
     audioDomeGrow();
     return true;
   }
@@ -901,7 +899,9 @@ function updateDomes(dt){
     if(panPress.some(p=>p.level>.2 && Math.hypot(p.x-d.x,p.y-d.y)<d.r+PRESS_R*.5)){ popDome(d); continue; }
     const ring=domeRingDry(d);
     if(ring<.98){ d.grow=Math.min(1,d.grow+dt/DOME_GROW_S); d.dryFor=0; }
-    else if((d.dryFor+=dt)>=DOME_SELF_POP_S){ popDome(d); continue; }
+    else if((d.dryFor+=dt)>=DOME_SELF_POP_S){ popDome(d,false); audioDomeSigh(); continue; }
+    // пар выходит: выросший купол держится недолго и опадает сам
+    if(d.grow>=1 && (d.hold-=dt)<=0){ popDome(d,false); audioDomeSigh(); continue; }
     d.r=d.rMax*(.35+.65*d.grow);
   }
 }
@@ -2960,6 +2960,14 @@ function audioDomeGrow(){
   f.frequency.setValueAtTime(1200,t); f.frequency.exponentialRampToValueAtTime(2600,t+.6);
   g.gain.setValueAtTime(0.0001,t); g.gain.exponentialRampToValueAtTime(0.05,t+.2); g.gain.exponentialRampToValueAtTime(0.001,t+.65);
   s.connect(f); f.connect(g); g.connect(master); s.start(t); s.stop(t+.7);
+}
+// Купол опал сам — только тихий выдох, без щелчка.
+function audioDomeSigh(){
+  if(!AC || condition==="sight" || !noiseBuf) return;
+  const t=AC.currentTime, x=AC.createBufferSource(); x.buffer=noiseBuf;
+  const f=AC.createBiquadFilter(); f.type="bandpass"; f.frequency.value=700; f.Q.value=1;
+  const g=AC.createGain(); g.gain.setValueAtTime(0.0001,t); g.gain.exponentialRampToValueAtTime(0.035,t+.05); g.gain.exponentialRampToValueAtTime(0.001,t+.35);
+  x.connect(f); f.connect(g); g.connect(master); x.start(t); x.stop(t+.37);
 }
 function audioDomePop(size){
   if(!AC || condition==="sight" || !noiseBuf) return;
