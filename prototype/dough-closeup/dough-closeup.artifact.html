@@ -781,6 +781,7 @@ function dishCard(){
   const bottom=+dishSideMean("cook","contactWeights").toFixed(2), top=+dishSideMean("cook","topWeights").toFixed(2);
   return { folds:dish.folds, flips:dish.flips||0, cuts:dish.cuts.length, holes:dish.holes||0,
     portions:dish.filling.length, bottom, top,
+    thickMM:+Math.max(0,...stackHeights(dish.faces).zt).toFixed(1),
     bottomWord:cookWord(bottom), topWord:cookWord(top), panSeconds:Math.round(dish.panTime||0),
     sessions:(dish.sessions||[]).map(x=>x.gold===null ? "—" : typeof x.gold==="string" ? x.gold : Math.round(x.gold)+" с") };
 }
@@ -799,6 +800,7 @@ function serveDish(){
     `На таве ${c.panSeconds} с`,
     `Золото низа по сеансам: ${c.sessions.join(" / ")}`,
     `Начинка: ${c.portions} порц. · ${c.holes ? `рваный узор, ${c.holes} яч.` : "без дырок"}`,
+    `Толщина конверта до ${String(c.thickMM).replace(".",",")} мм`,
   ];
   if(!c.folds) lines.push("Не сложено");
   else if(c.top<.05) lines.push("Верх не прожарен — конверт не переворачивали");
