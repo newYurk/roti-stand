@@ -11,7 +11,7 @@
 // до 400%+ и лист «рвётся» в середине от любого движения. Замер это обнаружил сразу.
 // Число узлов сохранено (1 060 после обрезки по кругу; прежняя оценка «~1150» была на глаз,
 // пересчитано 07.09.2026), однородность рёбер восстановлена.
-const BUILD = "2026-09-17 · быстрая жарка · 14";
+const BUILD = "2026-09-17 · резы и бананы · 15";
 const GRID = 38;                   // 38x38, в круг попадает 1 060 узлов (посчитано, не оценка)
 let SUBSTEPS = 8;                  // T2: 8–10 подшагов, 1 итерация
 let DAMP = 0.986;
@@ -1043,8 +1043,37 @@ function dishSectionGeometry(faces, cuts=dish.cuts){
   }
   const result={walls,stackAt,bounds};cache.set(faces,result);return result;
 }
+// Куски на столе чуть раздвинуты — условность отрисовки (владелица 17.09: после «одного
+// конверта» резы не читались: гладкий верх шёл поверх узкой щели ножа). Каждый сквозной рез
+// отодвигает свои стороны на PIECE_SPREAD поперёк себя; надрез, не дошедший до края, кусков
+// не разделяет и ничего не двигает. Материал, резы и торцы считаются по настоящей геометрии.
+const PIECE_SPREAD = 0.035;
+function dishPieceShift(faces){
+  if(!dish || !dish.cuts.length) return null;
+  const cache=dishPieceShift.cache||(dishPieceShift.cache=new WeakMap());
+  if(cache.has(faces)) return cache.get(faces);
+  const inDough=p=>faces.some(f=>f.kind==="dough" && pointInFace(f.points,p.x,p.y));
+  const full=dish.cuts.filter(c=>!inDough(c.a) && !inDough(c.b)).map(c=>{
+    const len=Math.hypot(c.b.x-c.a.x,c.b.y-c.a.y)||1;
+    return {a:c.a,nx:-(c.b.y-c.a.y)/len,ny:(c.b.x-c.a.x)/len};
+  });
+  let out=null;
+  if(full.length){
+    out=new Map();
+    for(const f of faces){
+      let cx=0,cy=0; for(const p of f.points){ cx+=p.x; cy+=p.y; }
+      cx/=f.points.length; cy/=f.points.length;
+      let x=0,y=0;
+      for(const c of full){ const side=Math.sign((cx-c.a.x)*c.nx+(cy-c.a.y)*c.ny); x+=side*PIECE_SPREAD*c.nx; y+=side*PIECE_SPREAD*c.ny; }
+      out.set(f,{x,y});
+    }
+  }
+  cache.set(faces,out); return out;
+}
 function drawDishSections(g,screen,faces,sx,sy,zk=0,H=null){
   const sections=dishSectionGeometry(faces),pixel=Math.min(2,devicePixelRatio||1)*Math.min(sx,sy);
+  const shift=dishPieceShift(faces);
+  if(shift){ const base=screen; screen=(p,f)=>{ const o=f && shift.get(f); return base(o ? {x:p.x+o.x,y:p.y+o.y} : p); }; }
   const unit=Math.max(.55,1.7*pixel);
   // Magnified cross sections sit just INSIDE their real material edge. Otherwise
   // a .018 kerf on a phone hides every layer behind its neighbouring piece. This
@@ -1054,13 +1083,14 @@ function drawDishSections(g,screen,faces,sx,sy,zk=0,H=null){
     if(f.kind!=="dough") continue;
     const signed=f.points.reduce((s,p,i)=>{const q=f.points[(i+1)%f.points.length];return s+p.x*q.y-q.x*p.y;},0);
     const ps=signed<0?f.points.slice().reverse():f.points;
-    const a=screen(ps[0]);g.moveTo(a.x,a.y);
-    for(let i=1;i<ps.length;i++){const p=screen(ps[i]);g.lineTo(p.x,p.y);}g.closePath();
+    const a=screen(ps[0],f);g.moveTo(a.x,a.y);
+    for(let i=1;i<ps.length;i++){const p=screen(ps[i],f);g.lineTo(p.x,p.y);}g.closePath();
   }
   g.clip();
   const walls=sections.walls.map(w=>{
-    const a=screen(w.a),b=screen(w.b),mid={x:(w.a.x+w.b.x)/2,y:(w.a.y+w.b.y)/2};
-    const m=screen(mid),n=screen({x:mid.x+w.inward.x*.001,y:mid.y+w.inward.y*.001});
+    const own=w.stack[0];   // стенка принадлежит куску своей стопки
+    const a=screen(w.a,own),b=screen(w.b,own),mid={x:(w.a.x+w.b.x)/2,y:(w.a.y+w.b.y)/2};
+    const m=screen(mid,own),n=screen({x:mid.x+w.inward.x*.001,y:mid.y+w.inward.y*.001},own);
     const l=Math.hypot(n.x-m.x,n.y-m.y)||1;return {w,a,b,nx:(n.x-m.x)/l,ny:(n.y-m.y)/l};
   }).filter(s=>-(s.nx*.4+s.ny)>.06).sort((a,b)=>(a.a.y+a.b.y)-(b.a.y+b.b.y));
   for(const s of walls){
@@ -1107,7 +1137,10 @@ function drawDishSections(g,screen,faces,sx,sy,zk=0,H=null){
 const ROTI_R_MM = 110;   // радиус роти ≈ 11 см (inferred): 1 targetR ≈ 110 мм
 const Z_EXAG = 3;        // тонкий лист и начинку иначе не разглядеть на телефоне
 const VIEW_UP = 0.83;    // вертикаль в кадре при наклоне стола, ≈ √(1 − TILT²)
-const FILL_COLORS = [[223,185,85],[234,198,109],[217,170,75]];
+// Начинка — ломтики банана (владелица 17.09: жёлтые капли читались желтками). Мякоть кремовая;
+// у каждого ломтика тёмный ободок и семечки в середине. Желток появится отдельной начинкой.
+const FILL_COLORS = [[228,204,128],[222,196,118],[233,211,140]];
+const BANANA_FLESH = [[250,236,178],[247,231,168],[252,240,188]], BANANA_RIM = "rgba(186,146,66,.7)", BANANA_SEED = "rgba(112,80,40,.65)";
 // Высота стопки под каждой гранью и верх материала на сетке 48×48. Грани идут снизу
 // вверх; грань поднимается на высоту того, что уже лежит под её центром. Кэш — по массиву
 // граней, как у торца: снимок геометрии неизменяем. zb/zt — настоящие миллиметры (карточка,
@@ -1198,7 +1231,8 @@ function previewHeights(faces){
 // чего-то, рельеф сглаживается широко; одиночный лист и открытая начинка остаются как есть.
 const ENV_BLUR = 0.3;     // радиус сглаживания в долях короткой стороны рамки (inferred)
 const ENV_DETAIL = 0.12;  // доля исходного рельефа под тестом: волна над порциями, ступень клапана
-const WALL_MIN_MM = 1.2;  // тоньше — это одиночный лист: его ступенчатый край без стенки
+const WALL_MIN_MM = 1.2;
+const LIGHT_SLOPE = 0.5;   // доля наклона поверхности, которую видит свет  // тоньше — это одиночный лист: его ступенчатый край без стенки
 function boxBlur(a,n,rx,ry){
   // Скользящее среднее по строкам, затем по столбцам; окно у края обрезается, делитель
   // постоянный — поэтому сглаживать надо и массу, и маску, и делить одно на другое.
@@ -1235,7 +1269,8 @@ function envelopeSurface(H,faces){
   // ячейки снаружи дают склон у края — это и есть скругление кромки на свету.
   // За рамкой сетки — пусто: рамка облегает конверт, и его край лежит в крайних ячейках.
   const get=(grid,i,j)=>i<0||j<0||i>=n||j>=n ? 0 : grid[j*n+i];
-  let light=new Float32Array(N), s=Z_EXAG/ROTI_R_MM;
+  // Свет вполовину от преувеличенной высоты: на столе крупные куски иначе мнутся бликами (17.09).
+  let light=new Float32Array(N), s=Z_EXAG/ROTI_R_MM*LIGHT_SLOPE;
   const lx=-.42,ly=-.5,lz=.76;
   for(let j=0;j<n;j++) for(let i=0;i<n;i++){
     const c=j*n+i;
@@ -1299,7 +1334,8 @@ function drawFaceWalls(g,ps,screen,hs,zk,base){
     g.beginPath(); g.moveTo(a.x,a.y-la); g.lineTo(b.x,b.y-lb); g.lineTo(b.x,b.y-hb); g.lineTo(a.x,a.y-ha); g.closePath(); g.fill();
   }
 }
-function drawDishFaces(g,faces,screen,H,zk,shadow=true){
+function drawDishFaces(g,faces,screen,H,zk,shadow=true,shift=null){
+  if(shift){ const base=screen; screen=(p,f)=>{ const o=f && shift.get(f); return base(o ? {x:p.x+o.x,y:p.y+o.y} : p); }; }
   // Тень конверта на стали и боковая сторона у его края. Отдельные заливки мелких
   // треугольников: один общий путь из тысяч наложенных контуров растеризуется в разы дольше.
   const tone=(f,k)=>{
@@ -1307,24 +1343,25 @@ function drawDishFaces(g,faces,screen,H,zk,shadow=true){
     return k===1 ? color : color.map(c=>Math.min(255,c*k));
   };
   const top=(i,off)=>{
-    const f=faces[i], p=screen(f.points[0]); g.beginPath(); g.moveTo(p.x,p.y-off(0));
-    for(let k=1;k<f.points.length;k++){ const q=screen(f.points[k]); g.lineTo(q.x,q.y-off(k)); }
+    const f=faces[i], p=screen(f.points[0],f); g.beginPath(); g.moveTo(p.x,p.y-off(0));
+    for(let k=1;k<f.points.length;k++){ const q=screen(f.points[k],f); g.lineTo(q.x,q.y-off(k)); }
     g.closePath(); g.fill();
   };
+  const faceScreen=f=>p=>screen(p,f);
   if(H){
     g.fillStyle="rgba(18,10,4,.34)";
     for(let i=0;i<faces.length && shadow;i++){
       if(faces[i].kind!=="dough" || H.zb[i]>.3) continue;
-      const hs=H.vert(i), shift=zk*Math.max(...hs)*.25;
-      if(shift<.3) continue;
-      const ps=faces[i].points, p=screen(ps[0]); g.beginPath(); g.moveTo(p.x+shift,p.y);
-      for(let k=1;k<ps.length;k++){ const q=screen(ps[k]); g.lineTo(q.x+shift,q.y); }
+      const hs=H.vert(i), drop=zk*Math.max(...hs)*.25;
+      if(drop<.3) continue;
+      const ps=faces[i].points, p=screen(ps[0],faces[i]); g.beginPath(); g.moveTo(p.x+drop,p.y);
+      for(let k=1;k<ps.length;k++){ const q=screen(ps[k],faces[i]); g.lineTo(q.x+drop,q.y); }
       g.closePath(); g.fill();
     }
     for(let i=0;i<faces.length;i++){
       if(faces[i].kind!=="dough" || !H.rim(i) || Math.max(...H.vert(i))<WALL_MIN_MM) continue;
       g.fillStyle=rgb(tone(faces[i],.66));
-      drawFaceWalls(g,faces[i].points,screen,H.vert(i),zk);
+      drawFaceWalls(g,faces[i].points,faceScreen(faces[i]),H.vert(i),zk);
     }
   }
   // Прозрачность накладывает настоящие слои друг на друга, а не смешивает каждый слой с
@@ -1349,10 +1386,55 @@ function drawDishFaces(g,faces,screen,H,zk,shadow=true){
   for(const k of open){
     const f=faces[k], hs=H.vert(k), base=hs.map((h,m)=>Math.max(0,h-fillHeight(f,f.points[m])));
     g.fillStyle=rgb(tone(f,.78));
-    drawFaceWalls(g,f.points,screen,hs,zk,base);
+    drawFaceWalls(g,f.points,faceScreen(f),hs,zk,base);
   }
   for(const k of open) paint(k);
   g.globalAlpha=1;
+  if(H && open.length) drawBananaSlices(g,faces,open,screen,H,zk);
+}
+// Ломтики поверх открытой начинки: по порции (и по куску стола) — обрезка по её открытым граням,
+// чтобы ломтик не лёг на клапан. Раскладка ломтиков постоянна для порции (от её номера).
+function drawBananaSlices(g,faces,open,screen,H,zk){
+  const groups=new Map();
+  for(const k of open){
+    const f=faces[k]; if(!f.pc || !(f.pr>0)) continue;
+    // Один кусок стола — один сдвиг: сравниваем точку со сдвигом куска и без него.
+    const probe=screen(f.points[0],f), bare=screen(f.points[0]);
+    const gk=f.source+"|"+f.turned+"|"+Math.round(probe.x-bare.x)+","+Math.round(probe.y-bare.y);
+    if(!groups.has(gk)) groups.set(gk,{f,list:[]});
+    groups.get(gk).list.push(k);
+  }
+  for(const {f,list} of groups.values()){
+    g.save(); g.beginPath();
+    for(const k of list){
+      const ps=faces[k].points, hs=H.vert(k);
+      const p=screen(ps[0],faces[k]); g.moveTo(p.x,p.y-hs[0]*zk);
+      for(let m=1;m<ps.length;m++){ const q=screen(ps[m],faces[k]); g.lineTo(q.x,q.y-hs[m]*zk); }
+      g.closePath();
+    }
+    g.clip();
+    const R=f.pr, spots=[];
+    for(let j=0;j<6;j++){ const a=(j*60+f.source*37)*Math.PI/180; spots.push([Math.cos(a)*R*.58,Math.sin(a)*R*.58,.4,j]); }
+    spots.push([0,0,.42,6]);
+    for(const [ox,oy,rk,j] of spots){
+      const c={x:f.pc.x+ox,y:f.pc.y+oy}, r=R*rk, lift=H.at(c)*zk;
+      const ring=[];
+      for(let j=0;j<14;j++){ const a=j*Math.PI/7; const q=screen({x:c.x+Math.cos(a)*r,y:c.y+Math.sin(a)*r},f); ring.push(q); }
+      g.beginPath(); g.moveTo(ring[0].x,ring[0].y-lift);
+      for(let j=1;j<ring.length;j++) g.lineTo(ring[j].x,ring[j].y-lift);
+      g.closePath();
+      g.strokeStyle=BANANA_RIM; g.lineWidth=Math.max(.6,Math.hypot(ring[0].x-ring[7].x,ring[0].y-ring[7].y)*.06);
+      g.fillStyle=rgb(BANANA_FLESH[(j+f.source)%3]); g.fill(); g.stroke();
+      // семечки: три тёмные точки треугольником у середины
+      g.fillStyle=BANANA_SEED;
+      for(let j=0;j<3;j++){
+        const a=(j*120+f.source*53)*Math.PI/180, q=screen({x:c.x+Math.cos(a)*r*.28,y:c.y+Math.sin(a)*r*.28},f);
+        const d=Math.max(.5,Math.hypot(ring[0].x-ring[7].x,ring[0].y-ring[7].y)*.045);
+        g.beginPath(); g.ellipse(q.x,q.y-lift,d,d*.7,0,0,Math.PI*2); g.fill();
+      }
+    }
+    g.restore();
+  }
 }
 // Полёт переворота — свойство картинки, как TOSS у переноса: лист сжимается вдоль маха
 // (|cos πu|), поднимается и на середине пути показывает другую сторону. Торец в полёте
@@ -1416,7 +1498,7 @@ function drawDish(g,sx,sy){
   const lift=dishGesture && dish.mode==="fold" && dishGesture.anchor && !dishGesture.preview ? dishGesture : null;
   const H=faces===dish.faces ? stackHeights(faces) : previewHeights(faces), zk=pose.scale*Z_EXAG/ROTI_R_MM*VIEW_UP*sy;
   if(lift) drawSpatula(g,screen,lift,sx,sy);
-  drawDishFaces(g,faces,screen,H,zk);
+  drawDishFaces(g,faces,screen,H,zk,true,dishPieceShift(faces));
   if(lift) drawLiftedEdge(g,screen,lift,sx,sy);
   // Rebuild expensive boundary intersections only after a committed geometry
   // change. During a drag the existing flat preview remains immediate.
@@ -1952,12 +2034,15 @@ function bakeTransform(ox, oy, th){
 //  • контакт пятнистый (см. contactF) — отсюда «leopard spots» вместо гладкого градиента.
 // Сжатие игрового времени (владелица 16.09: «жарка слишком долгая»; принято 30–60 с на всё
 // роти, frying-mechanics.md §8). Условность, не физика: сушку ускоряем мало (×1,25 к прежним
-// 0,13), чтобы схватывание осталось в окне 2–4 с и шипению было что сказать, а цвет — сильно
-// (×6 к прежним 0,008). На пробе конверта первая сторона золотится за ~20 с, вторая за ~12–15 с,
-// роти ~40–44 с; от золота до тёмного ~25 с. Разбор четырьмя линзами 16.09 отверг один общий
-// множитель: равномерное ×4 сжимало и мокрую фазу — переворот садил на сталь уже сухую сторону.
-let DRY_RATE = 0.1625;  // 1/с: лист 0,5 мм схватывается за 2–3 с и сохнет за ~7 с
-let COOK_RATE = 0.048;  // 1/с после сушки: золото первой стороны пробы к ~20 с
+// 0,13), чтобы схватывание осталось в окне 2–4 с и шипению было что сказать, а цвет — сильнее.
+// Разбор четырьмя линзами 16.09 отверг один общий множитель: равномерное ×4 сжимало и мокрую
+// фазу — переворот садил на сталь уже сухую сторону. Цвет ×6 (сборка 14, роти ~40 с) владелице
+// показался слишком быстрым (17.09); по умолчанию ×3,5 — первая сторона ~30 с, роти ~55–59 с.
+// Прибор «жарка» переключает цвет: ×6 / ×3,5 / ×2 ≈ роти 40 / 60 / 85 с.
+const COOK_BASE = 0.008, FRY_SPEEDS = {40:6, 60:3.5, 85:2};
+let FRY_SECONDS = 60;
+let DRY_RATE = 0.1625;                         // 1/с: лист 0,5 мм схватывается за 2–3 с и сохнет за ~7 с
+let COOK_RATE = COOK_BASE*FRY_SPEEDS[60];      // 1/с после сушки: золото первой стороны пробы к ~30 с
 function panHeat(r){
   if(r < 0.45) return 0.90 + 0.10*(r/0.45);                     // центр внутри кольца пламени — чуть слабее
   if(r < 0.70) return 1.00 - 0.25*((r-0.45)/0.25);              // горб на среднем радиусе
@@ -2682,6 +2767,21 @@ document.querySelectorAll("[data-k]").forEach(b=>{
     SHOW_THROUGH=+b.dataset.k;
     try{ localStorage.setItem("dough_through", String(SHOW_THROUGH)); }catch(e){}
     document.querySelectorAll("[data-k]").forEach(x=>x.classList.toggle("on",x===b));
+    setTools(false);
+  });
+});
+// Скорость жарки — прибор для пробы (владелица 17.09: «хочется подольше»); переживает перезагрузку.
+function setFrySeconds(sec){
+  if(!FRY_SPEEDS[sec]) return;
+  FRY_SECONDS=sec; COOK_RATE=COOK_BASE*FRY_SPEEDS[sec];
+  document.querySelectorAll("[data-f]").forEach(x=>x.classList.toggle("on",+x.dataset.f===sec));
+}
+try{ const f=localStorage.getItem("dough_fry"); if(f!==null) setFrySeconds(+f); }catch(e){}
+document.querySelectorAll("[data-f]").forEach(b=>{
+  b.classList.toggle("on", +b.dataset.f===FRY_SECONDS);
+  b.addEventListener("click",()=>{
+    setFrySeconds(+b.dataset.f);
+    try{ localStorage.setItem("dough_fry", String(FRY_SECONDS)); }catch(e){}
     setTools(false);
   });
 });

@@ -50,7 +50,7 @@
      группам исходный порядок панели: шаг · вид · судишь · порвётся · ощущение · служебные · статистика. */
   #core, #tools{ display:contents; }
   #gStep{ order:1 } #gView{ order:2 } #gCond{ order:3 } #tear{ order:4 }
-  #gTune{ order:5 } #gThrough{ order:5 } #gSrv{ order:6 } #stats{ order:7 }
+  #gTune{ order:5 } #gThrough{ order:5 } #gFry{ order:5 } #gSrv{ order:6 } #stats{ order:7 }
   #toolsBtn, #mini{ display:none; }
   #hint{ position:absolute; left:10px; top:10px; right:10px; color:var(--dim);
     pointer-events:none; font-size:11px; }
@@ -149,7 +149,7 @@
        Проверка 08.09: панели нужно 379 px, а Safari в ландшафте отдаёт меньше 393 —
        тулбар и home-indicator съедают разницу первыми. */
     #gStep{ order:1 } #gView{ order:2 } #tear{ order:3 } #mini{ order:4 } #toolsBtn{ order:5 }
-    #gCond{ order:1 } #gTune{ order:2 } #gThrough{ order:2 } #gSrv{ order:3 } #stats{ order:4 }
+    #gCond{ order:1 } #gTune{ order:2 } #gThrough{ order:2 } #gFry{ order:2 } #gSrv{ order:3 } #stats{ order:4 }
     #tools .tune label{ width:100%; }
     #core .grp{ flex-direction:column; align-items:stretch; gap:3px; }
     #core .grp b{ margin:0; font-size:10px; }
@@ -229,6 +229,12 @@
       <button data-c="both" class="on">обоим</button>
       <button data-c="sight">картинке</button>
     </div>
+    <!-- Скорость жарки для пробы (17.09): сколько длится роти целиком. -->
+    <div class="grp measure" id="gFry"><b>жарка, роти</b>
+      <button data-f="40">40 с</button>
+      <button data-f="60" class="on">60 с</button>
+      <button data-f="85">85 с</button>
+    </div>
     <!-- Условность отрисовки (#21): сколько цвета нижней стороны видно сквозь тонкий лист. -->
     <div class="grp measure" id="gThrough"><b>низ сквозь лист</b>
       <button data-k="0">0</button>
@@ -244,6 +250,6 @@
   </div>
 </div>
 
-<script src="stand.js?v=2026-09-17-fast-14"></script>
+<script src="stand.js?v=2026-09-17-cuts-15"></script>
 </body>
 </html>
