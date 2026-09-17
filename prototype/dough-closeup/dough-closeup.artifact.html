@@ -245,7 +245,7 @@
 // до 400%+ и лист «рвётся» в середине от любого движения. Замер это обнаружил сразу.
 // Число узлов сохранено (1 060 после обрезки по кругу; прежняя оценка «~1150» была на глаз,
 // пересчитано 07.09.2026), однородность рёбер восстановлена.
-const BUILD = "2026-09-16 · переворот · 4";
+const BUILD = "2026-09-16 · складка внутрь · 5";
 const GRID = 38;                   // 38x38, в круг попадает 1 060 узлов (посчитано, не оценка)
 let SUBSTEPS = 8;                  // T2: 8–10 подшагов, 1 итерация
 let DAMP = 0.986;
@@ -831,31 +831,53 @@ function syncDishUI(){
     ? "На таве: жарится. Край → внутрь — складка."
     : "Нарезка: проведи через конверт прямым жестом.";
 }
-function beginDishGesture(id,p){
+// Складка — только ВНУТРЬ листа. Раньше линия сгиба строилась по любому сдвигу длиннее
+// 0,12, и сдвиг пальца вдоль кромки на 10 CSS px складывал полсписта (портрет: сгиб
+// поперёк движения проходил через середину листа). Теперь сдвиг меряется вдоль
+// внутренней нормали кромки и должен смотреть внутрь не дальше 60° от неё.
+// До 10 CSS px от точки касания жест не читается вовсе: это дрожание пальца
+// (iOS allowableMovement 10 pt, Android touch slop 8 dp). Числа — для пробы, не замер.
+const FOLD_MIN_DEPTH = 0.12, FOLD_MAX_ANGLE_COS = Math.cos(60*Math.PI/180), TOUCH_SLOP_CSS = 10;
+function beginDishGesture(id,p,client){
   if(dishGesture || dishFlight) return;
-  const start=dishLocal(p);
-  if(dish.mode==="cut"){ dishGesture={id,start,end:start}; return; }
-  let anchor=null,distance=Infinity;
+  const start=dishLocal(p), at=client || {x:0,y:0};
+  const samples=[{x:at.x,y:at.y,t:performance.now()}];
+  if(dish.mode==="cut"){ dishGesture={id,start,end:start,client:at,samples}; return; }
+  let anchor=null,distance=Infinity,edge=null;
   for(let i=0;i<dish.hull.length;i++){
     const a=dish.hull[i],b=dish.hull[(i+1)%dish.hull.length],dx=b.x-a.x,dy=b.y-a.y;
     const t=Math.max(0,Math.min(1,((start.x-a.x)*dx+(start.y-a.y)*dy)/(dx*dx+dy*dy||1)));
     const q={x:a.x+t*dx,y:a.y+t*dy},d=Math.hypot(q.x-start.x,q.y-start.y);
-    if(d<distance){distance=d;anchor=q;}
+    if(d<distance){distance=d;anchor=q;edge={dx,dy};}
   }
   if(distance>.30){dish.message="Возьми край листа и веди к начинке";return;}
-  dishGesture={id,start,end:start,anchor,preview:null};
+  // Внутренняя нормаль кромки: перпендикуляр, повёрнутый к центру оболочки.
+  const len=Math.hypot(edge.dx,edge.dy)||1, c=dish.hull.reduce((s,q)=>({x:s.x+q.x/dish.hull.length,y:s.y+q.y/dish.hull.length}),{x:0,y:0});
+  let inward={x:-edge.dy/len,y:edge.dx/len};
+  if((c.x-anchor.x)*inward.x+(c.y-anchor.y)*inward.y<0) inward={x:-inward.x,y:-inward.y};
+  dishGesture={id,start,end:start,anchor,inward,preview:null,client:at,samples,moved:false};
 }
-function moveDishGesture(p){
+function inwardFold(g){
+  const vx=g.target.x-g.anchor.x, vy=g.target.y-g.anchor.y, depth=vx*g.inward.x+vy*g.inward.y;
+  return depth>=FOLD_MIN_DEPTH && depth>=Math.hypot(vx,vy)*FOLD_MAX_ANGLE_COS;
+}
+function moveDishGesture(p,client){
   const g=dishGesture; g.end=dishLocal(p);
+  if(client){
+    g.samples.push({x:client.x,y:client.y,t:performance.now()});
+    if(g.samples.length>24) g.samples.shift();
+    if(!g.moved && Math.hypot(client.x-g.client.x,client.y-g.client.y)>=TOUCH_SLOP_CSS) g.moved=true;
+  } else g.moved=true;                       // вызов без экранных координат (проверки) — без мёртвой зоны
   if(dish.mode==="fold"){
+    if(!g.moved){ g.target=null; g.preview=null; return; }
     // Сохраняем смещение пальца от выбранной кромки, чтобы лист не прыгал к нему.
     g.target={x:g.anchor.x+g.end.x-g.start.x,y:g.anchor.y+g.end.y-g.start.y};
-    g.preview=foldGeometry(g.anchor,g.target);
+    g.preview=inwardFold(g) ? foldGeometry(g.anchor,g.target) : null;
   }
 }
 function endDishGesture(){
   const g=dishGesture; dishGesture=null;
-  const ok=dish.mode==="fold" ? g.target&&foldDish(g.anchor,g.target) : cutDish(g.start,g.end);
+  const ok=dish.mode==="fold" ? g.target&&inwardFold(g)&&foldDish(g.anchor,g.target) : cutDish(g.start,g.end);
   if(!ok) dish.message=dish.mode==="fold" ? "Потяни край дальше внутрь листа" : "Проведи лезвием через тесто";
 }
 // Section geometry belongs to a material snapshot, not to its screen size or heat.
@@ -2042,7 +2064,7 @@ function onDown(id, cx, cy){
   // iOS усыпляет AudioContext в фоне. Касание блюда тоже будит звук, иначе после
   // возврата шипение на таве молчало бы до «заново».
   if(dish){ audioInit(); if(AC && AC.state==="suspended") AC.resume();
-            beginDishGesture(id,toLocal(cx,cy)); return; }
+            beginDishGesture(id,toLocal(cx,cy),{x:cx,y:cy}); return; }
   if(action.pointerId !== null) return;              // один активный палец; второй игнорируется (audit §5)
   if(action.state === "SETTLING") finalizeGesture(); // быстрый повторный тап не ждёт хвоста успокоения
   if(action.state !== "RESTING") return;             // остальные фазы доигрывают автономно
@@ -2062,7 +2084,7 @@ function onDown(id, cx, cy){
   armAction(id, p);                                  // только выбор края: тесто НЕ двигается
 }
 function onMove(id, cx, cy){
-  if(dishGesture && dishGesture.id===id){ dbgMove++; moveDishGesture(toLocal(cx,cy)); return; }
+  if(dishGesture && dishGesture.id===id){ dbgMove++; moveDishGesture(toLocal(cx,cy),{x:cx,y:cy}); return; }
   if(action.pointerId !== id) return;
   dbgMove++;
   updateActionMove(toLocal(cx, cy));
