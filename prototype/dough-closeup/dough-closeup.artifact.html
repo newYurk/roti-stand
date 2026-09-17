@@ -269,7 +269,7 @@
 // до 400%+ и лист «рвётся» в середине от любого движения. Замер это обнаружил сразу.
 // Число узлов сохранено (1 060 после обрезки по кругу; прежняя оценка «~1150» была на глаз,
 // пересчитано 07.09.2026), однородность рёбер восстановлена.
-const BUILD = "2026-09-17 · объёмный срез · 24";
+const BUILD = "2026-09-17 · рельеф на столе · 26";
 const GRID = 38;                   // 38x38, в круг попадает 1 060 узлов (посчитано, не оценка)
 let SUBSTEPS = 8;                  // T2: 8–10 подшагов, 1 итерация
 let DAMP = 0.986;
@@ -1642,50 +1642,6 @@ function dishPieceShift(faces){
   if(any){ out=new Map(); faces.forEach((f,i)=>out.set(f,dir.get(piece[i])||{x:0,y:0})); }
   cache.set(faces,out); return out;
 }
-// Щель ножа видна и там, где рез не разделил тесто (надрез): вдоль пропила, где по обе стороны
-// одно и то же тесто, рисуется тёмная линия на высоте поверхности (проба 17.09: из трёх резов
-// читался один). Где куски разошлись, щель и так видна.
-function dishSlits(faces){
-  const cache=dishSlits.cache||(dishSlits.cache=new WeakMap());
-  if(cache.has(faces)) return cache.get(faces);
-  const piece=dishPieces(faces), boxes=faces.map(f=>{
-    let x0=Infinity,x1=-Infinity,y0=Infinity,y1=-Infinity;
-    for(const p of f.points){ if(p.x<x0)x0=p.x; if(p.x>x1)x1=p.x; if(p.y<y0)y0=p.y; if(p.y>y1)y1=p.y; }
-    return [x0,x1,y0,y1];
-  });
-  const pieceAt=q=>{
-    for(let i=0;i<faces.length;i++){
-      const b=boxes[i]; if(faces[i].kind!=="dough" || q.x<b[0]||q.x>b[1]||q.y<b[2]||q.y>b[3]) continue;
-      if(pointInFace(faces[i].points,q.x,q.y)) return {piece:piece[i],face:faces[i]};
-    }
-    return null;
-  };
-  const runs=[];
-  for(const c of dish.cuts){
-    const dx=c.b.x-c.a.x, dy=c.b.y-c.a.y, len=Math.hypot(dx,dy)||1, ux=dx/len, uy=dy/len, nx=-uy, ny=ux, off=c.width/2+.006;
-    let run=null;
-    const n=Math.max(2,Math.ceil(len/.015));
-    for(let k=0;k<=n;k++){
-      const t=len*k/n, m={x:c.a.x+ux*t,y:c.a.y+uy*t};
-      const L=pieceAt({x:m.x+nx*off,y:m.y+ny*off}), R=pieceAt({x:m.x-nx*off,y:m.y-ny*off});
-      if(L && R && L.piece===R.piece){ if(!run){ run={face:L.face,pts:[]}; runs.push(run); } run.pts.push(m); }
-      else run=null;
-    }
-  }
-  const out=runs.filter(r=>r.pts.length>1);
-  cache.set(faces,out); return out;
-}
-function drawDishSlits(g,screen,faces,H,zk,sx,sy){
-  if(!dish.cuts.length) return;
-  const shift=dishPieceShift(faces), pixel=Math.min(2,devicePixelRatio||1)*Math.min(sx,sy);
-  for(const r of dishSlits(faces)){
-    const o=shift && shift.get(r.face) || {x:0,y:0};
-    const pts=r.pts.map(p=>{ const q=screen({x:p.x+o.x,y:p.y+o.y}); return {x:q.x,y:q.y-(H ? H.at(p)*zk : 0)}; });
-    const line=(w,style,dy)=>{ g.strokeStyle=style; g.lineWidth=w; g.beginPath(); g.moveTo(pts[0].x,pts[0].y+dy); for(let i=1;i<pts.length;i++) g.lineTo(pts[i].x,pts[i].y+dy); g.stroke(); };
-    line(Math.max(1.4,2.2*pixel),"rgba(26,15,6,.82)",0);
-    line(Math.max(.6,.8*pixel),"rgba(255,236,190,.45)",Math.max(1,1.4*pixel));
-  }
-}
 // Точка жеста на столе → точка материала: из нарисованного (сдвинутого) куска под пальцем.
 function unshiftCutPoint(p){
   const shift=dishPieceShift(dish.faces); if(!shift) return {p,o:{x:0,y:0}};
@@ -1989,6 +1945,7 @@ function envelopeSurface(H,faces){
       return verts[i]=Float32Array.from(f.points,f.kind==="dough" ? atDough : at);
     },
     atBase:p=>atDough(p),
+    lightPoint:p=>sample(light,p,true).value||1,
     lightAt(i){
       if(Number.isNaN(lights[i])){
         const ps=faces[i].points; let x=0,y=0; for(const p of ps){x+=p.x;y+=p.y;}
@@ -2186,6 +2143,292 @@ function drawDomes(g,screen,H,zk){
     g.beginPath(); g.ellipse(c.x-rx*.28,y0-up*.8-ry*.28,rx*.42,ry*.26,-.35,0,Math.PI*2); g.fill();
   }
 }
+// ─── Стол: куски выдавлены по пикселям (владелица 17.09 о сборках 24–25: «как-то не очень
+// выглядит» — стенки по рёбрам граней торчали «ножками» и ложились на соседние куски).
+// Каждый пиксель основания знает верхнюю грань, высоту и стопку слоёв под собой. Столбец
+// пикселей рисуется от ближнего края к дальнему, как рельеф в воксельных движках: стенка идёт
+// ровно по контуру куска и сама прячется за ближними кусками. Картинка считается один раз на
+// рез (кэш) и дальше только копируется.
+// Условности, не физика: высота ×Z_EXAG и подушка ×1,4 (потолок 5 мм); стенка разреза делит
+// высоту по настоящим толщинам слоёв в этом месте; у разреза начинка видна полоской по верху
+// (так читаются щели с бананом на видео уличного роти); сгиб — гладкий бок теста без слоёв.
+const SLAB_MM = 5, SLAB_GAIN = 1.4;
+const slabTop = (H,p) => Math.min(SLAB_MM, Math.max(0, H.at(p))*SLAB_GAIN);
+const CUT_RIM = 0.014;                 // ширина полоски начинки у разреза, доли роти (≈4 CSS px)
+const SHADOW_DX = .45, SHADOW_DY = .12; // тень на столе: сдвиг на единицу высоты
+const TABLE_K = 8;                     // сколько слоёв помнит пиксель
+const TABLE_RELIEF = 0.25;             // доля мелкого рельефа верха (остальное — крупно сглажено)
+let tableCanvas = null;
+function tableVertexData(faces,H,zk){
+  // Цвет вершины — среднее цветов граней того же слоя в этой точке: иначе верх — мозаика
+  // квадратиков сетки жарки. Свет подушки — вполсилы, верх куска почти ровный.
+  const key=(p,f)=>Math.round(p.x*2e4)+","+Math.round(p.y*2e4)+(f.turned ? "t" : "f");
+  const acc=new Map();
+  for(const f of faces){
+    if(f.kind!=="dough") continue;
+    const c=dishCookColor(f);
+    for(const p of f.points){ const k=key(p,f), a=acc.get(k); if(a){ a[0]+=c[0]; a[1]+=c[1]; a[2]+=c[2]; a[3]++; } else acc.set(k,[c[0],c[1],c[2],1]); }
+  }
+  return faces.map(f=>{
+    const hs=new Float32Array(f.points.length), cs=new Float32Array(f.points.length*3);
+    f.points.forEach((p,m)=>{
+      hs[m]=(slabTop(H,p)+(f.kind==="filling" ? .3 : 0))*zk;
+      let c;
+      if(f.kind==="filling") c=BANANA_FLESH[f.source%3];
+      else { const a=acc.get(key(p,f)); c=[a[0]/a[3],a[1]/a[3],a[2]/a[3]]; }
+      const l=1+((H.lightPoint ? H.lightPoint(p) : 1)-1)*.5;
+      cs[m*3]=c[0]*l; cs[m*3+1]=c[1]*l; cs[m*3+2]=c[2]*l;
+    });
+    return {hs,cs};
+  });
+}
+// Полосы стенки разреза: стопка снизу вверх делит высоту по своим толщинам (мм); у теста —
+// мякиш и две корочки: снизу сторона, что смотрит вниз, сверху — что вверх.
+function cutWallBands(stack,p){
+  const bands=[]; let tot=0;
+  for(const f of stack){ const w=Math.max(f.kind==="filling" ? .8 : .3, layerMM(f,p)); bands.push({f,w}); tot+=w; }
+  let acc=0;
+  for(const b of bands){
+    b.from=acc/tot; acc+=b.w; b.to=acc/tot;
+    if(b.f.kind==="dough"){
+      const d=b.f.turned ? 1 : 0, c0=dishCookColor(b.f,d,false), c1=dishCookColor(b.f,1-d,false);
+      b.c0=c0; b.c1=c1; b.crumb=c0.map((v,k)=>(v+c1[k])/2*.7+62);
+    }
+  }
+  return bands;
+}
+function renderDishTable(faces,screen,H,zk,W,Hc,s){
+  const t0=performance.now(), n=faces.length, shift=dishPieceShift(faces);
+  const P=new Array(n);
+  let X0=Infinity,X1=-Infinity,Y0=Infinity,Y1=-Infinity;
+  for(let i=0;i<n;i++){
+    const f=faces[i], o=shift && shift.get(f);
+    const q=P[i]=f.points.map(p=>screen(o ? {x:p.x+o.x,y:p.y+o.y} : p));
+    for(const p of q){ if(p.x<X0)X0=p.x; if(p.x>X1)X1=p.x; if(p.y<Y0)Y0=p.y; if(p.y>Y1)Y1=p.y; }
+  }
+  X0=Math.max(0,Math.floor(X0)); X1=Math.min(W,Math.ceil(X1)); Y0=Math.max(0,Math.floor(Y0)); Y1=Math.min(Hc*2,Math.ceil(Y1));
+  const bw=X1-X0, bh=Y1-Y0;
+  if(!(bw>0 && bh>0) || bw*bh>8e6) return null;
+  const N=bw*bh, K=TABLE_K, V=tableVertexData(faces,H,zk);
+  const tf=new Int32Array(N).fill(-1), th=new Float32Array(N), tu=new Float32Array(N), tv=new Float32Array(N);
+  const col=new Float32Array(N*3), pf=new Int32Array(N*K), pn=new Uint8Array(N), pd=new Uint8Array(N);
+  const layer=new Int32Array(n); { const m=new Map(); faces.forEach((f,i)=>{ const k=f.kind+":"+f.source+":"+f.turned; if(!m.has(k)) m.set(k,m.size); layer[i]=m.get(k); }); }
+  // Грани идут снизу вверх: последняя накрывшая пиксель — его верх.
+  for(let i=0;i<n;i++){
+    const q=P[i], ps=faces[i].points, {hs,cs}=V[i], dough=faces[i].kind==="dough";
+    for(let t=1;t+1<q.length;t++){
+      const A=q[0], B=q[t], C=q[t+1];
+      const area=(B.x-A.x)*(C.y-A.y)-(B.y-A.y)*(C.x-A.x);
+      if(Math.abs(area)<1e-9) continue;
+      // Барицентрики линейны по x: считаем на начале отрезка строки и шагаем.
+      const inv=1/area, dax=-(C.y-B.y)*inv, dbx=-(A.y-C.y)*inv;
+      const y0=Math.max(Y0,Math.floor(Math.min(A.y,B.y,C.y))), y1=Math.min(Y1-1,Math.ceil(Math.max(A.y,B.y,C.y)));
+      for(let y=y0;y<=y1;y++){
+        const py=y+.5;
+        // отрезок строки внутри треугольника: пересечения строки с рёбрами
+        let xl=Infinity, xr=-Infinity;
+        for(const [P1,P2] of [[A,B],[B,C],[C,A]]){
+          if((P1.y<=py && P2.y>=py) || (P2.y<=py && P1.y>=py)){
+            if(P1.y===P2.y){ if(P1.x<xl)xl=P1.x; if(P2.x<xl)xl=P2.x; if(P1.x>xr)xr=P1.x; if(P2.x>xr)xr=P2.x; continue; }
+            const x=P1.x+(P2.x-P1.x)*(py-P1.y)/(P2.y-P1.y);
+            if(x<xl)xl=x; if(x>xr)xr=x;
+          }
+        }
+        const xa=Math.max(X0,Math.ceil(xl-.5)), xb=Math.min(X1-1,Math.floor(xr-.5));
+        if(xa>xb) continue;
+        let la=((C.x-B.x)*(py-B.y)-(C.y-B.y)*(xa+.5-B.x))*inv, lb=((A.x-C.x)*(py-C.y)-(A.y-C.y)*(xa+.5-C.x))*inv;
+        const row=(y-Y0)*bw-X0;
+        for(let x=xa;x<=xb;x++, la+=dax, lb+=dbx){
+          const lc=1-la-lb, c=row+x;
+          let cnt=pn[c], dup=false;
+          for(let k=0;k<cnt;k++) if(layer[pf[c*K+k]]===layer[i]){ dup=true; break; }
+          if(!dup){
+            if(cnt<K){ pf[c*K+cnt]=i; pn[c]=cnt+1; } else { pf.copyWithin(c*K,c*K+1,c*K+K); pf[c*K+K-1]=i; }
+            if(dough && pd[c]<255) pd[c]++;
+          }
+          tf[c]=i;
+          th[c]=la*hs[0]+lb*hs[t]+lc*hs[t+1];
+          tu[c]=la*ps[0].x+lb*ps[t].x+lc*ps[t+1].x;
+          tv[c]=la*ps[0].y+lb*ps[t].y+lc*ps[t+1].y;
+          col[c*3]=la*cs[0]+lb*cs[t*3]+lc*cs[(t+1)*3];
+          col[c*3+1]=la*cs[1]+lb*cs[t*3+1]+lc*cs[(t+1)*3+1];
+          col[c*3+2]=la*cs[2]+lb*cs[t*3+2]+lc*cs[(t+1)*3+2];
+        }
+      }
+    }
+  }
+  const t1=performance.now();
+  // Верх сглаживается в пределах материала: мелко (~2 CSS px) — грани сетки иначе видны
+  // ступеньками; крупно (~30 CSS px) — при ×5 однослойные места конверта читались ямами, а
+  // края клапанов — хребтами (проба 17.09). Остаётся TABLE_RELIEF мелкого рельефа: волна над
+  // начинкой; края клапанов видны тенью.
+  {
+    const m=new Float32Array(N), v=new Float32Array(N);
+    for(let c=0;c<N;c++) if(tf[c]>=0){ m[c]=1; v[c]=th[c]; }
+    const box=(a,r)=>{ const o=new Float32Array(N), o2=new Float32Array(N);
+      for(let y=0;y<bh;y++){ let acc=0; const row=y*bw; for(let x=-r;x<bw;x++){ if(x+r<bw) acc+=a[row+x+r]; if(x-r-1>=0) acc-=a[row+x-r-1]; if(x>=0) o[row+x]=acc; } }
+      for(let x=0;x<bw;x++){ let acc=0; for(let y=-r;y<bh;y++){ if(y+r<bh) acc+=o[(y+r)*bw+x]; if(y-r-1>=0) acc-=o[(y-r-1)*bw+x]; if(y>=0) o2[y*bw+x]=acc; } }
+      return o2; };
+    const r1=Math.max(1,Math.round(2*s)), r2=Math.max(3,Math.round(30*s));
+    const v1=box(v,r1), m1=box(m,r1), v2=box(v,r2), m2=box(m,r2);
+    for(let c=0;c<N;c++) if(tf[c]>=0 && m1[c]>0) th[c]=TABLE_RELIEF*v1[c]/m1[c]+(1-TABLE_RELIEF)*v2[c]/m2[c];
+  }
+  // Размер пикселя в долях роти — допуск «у разреза».
+  const o0=screen({x:0,y:0}), o1=screen({x:1,y:0}), unit=1/(Math.hypot(o1.x-o0.x,o1.y-o0.y)||1);
+  const cuts=dish.cuts.map(c=>{ const dx=c.b.x-c.a.x, dy=c.b.y-c.a.y, len=Math.hypot(dx,dy)||1; return {ax:c.a.x,ay:c.a.y,half:c.width/2,ux:dx/len,uy:dy/len,len}; });
+  // Полоска начинки — не уже пикселя: в пиксельных видах A/B она иначе пропадает.
+  const rimW=Math.max(CUT_RIM,unit*1.05);
+  // Грани далеко от резов не проверяются попиксельно.
+  const cutFace=new Uint8Array(n);
+  if(cuts.length) for(let i=0;i<n;i++){
+    const ps=faces[i].points; let x0=Infinity,x1=-Infinity,y0=Infinity,y1=-Infinity;
+    for(const p of ps){ if(p.x<x0)x0=p.x; if(p.x>x1)x1=p.x; if(p.y<y0)y0=p.y; if(p.y>y1)y1=p.y; }
+    const cx=(x0+x1)/2, cy=(y0+y1)/2, rad=Math.hypot(x1-x0,y1-y0)/2+rimW+unit*3+.01;
+    for(const k of cuts){
+      const ax=cx-k.ax, ay=cy-k.ay, along=ax*k.ux+ay*k.uy;
+      if(along<-rad || along>k.len+rad) continue;
+      if(Math.abs(-ax*k.uy+ay*k.ux)-k.half<rad){ cutFace[i]=1; break; }
+    }
+  }
+  let ncD=0, ncAlong=0;
+  const nearCut=(u,v)=>{
+    let hit=false;
+    for(const k of cuts){
+      const ax=u-k.ax, ay=v-k.ay, along=ax*k.ux+ay*k.uy;
+      if(along<-unit || along>k.len+unit) continue;
+      const d=Math.abs(-ax*k.uy+ay*k.ux)-k.half;
+      if(d>-unit*2 && (!hit || d<ncD)){ hit=true; ncD=Math.max(0,d); ncAlong=along; }
+    }
+    return hit;
+  };
+  const hasFill=c=>{ for(let k=0;k<pn[c];k++) if(faces[pf[c*K+k]].kind==="filling") return true; return false; };
+  let UP=1; for(let c=0;c<N;c++) if(th[c]>UP) UP=th[c];
+  UP=Math.ceil(UP)+2;
+  const padX=Math.ceil(SHADOW_DX*UP)+4, padY=Math.ceil(SHADOW_DY*UP)+4;
+  const OW=bw+padX, OH=bh+UP+padY, out=new Uint8ClampedArray(OW*OH*4);
+  // Тень: силуэт, сдвинутый на свою высоту (и на половину — без просветов), размытый.
+  let sh=new Float32Array(OW*OH);
+  for(let j=0;j<bh;j++) for(let i=0;i<bw;i++){
+    const c=j*bw+i; if(tf[c]<0) continue;
+    const h=th[c];
+    let x=Math.round(i+SHADOW_DX*h), y=Math.round(j+UP+SHADOW_DY*h); if(x<OW && y<OH) sh[y*OW+x]=1;
+    x=Math.round(i+SHADOW_DX*h*.5); y=Math.round(j+UP+SHADOW_DY*h*.5); if(x<OW && y<OH) sh[y*OW+x]=1;
+  }
+  const rb=Math.max(1,Math.round(1.5*s));
+  const blur=(a,w,h,r)=>{ const o=new Float32Array(a.length);
+    for(let y=0;y<h;y++){ let acc=0; for(let x=-r;x<w+r;x++){ if(x+r<w) acc+=a[y*w+x+r]; if(x-r-1>=0) acc-=a[y*w+x-r-1]; if(x>=0 && x<w) o[y*w+x]=acc/(2*r+1); } }
+    const o2=new Float32Array(a.length);
+    for(let x=0;x<w;x++){ let acc=0; for(let y=-r;y<h+r;y++){ if(y+r<h) acc+=o[(y+r)*w+x]; if(y-r-1>=0) acc-=o[(y-r-1)*w+x]; if(y>=0 && y<h) o2[y*w+x]=acc/(2*r+1); } }
+    return o2; };
+  sh=blur(sh,OW,OH,rb);
+  for(let q=0;q<OW*OH;q++) if(sh[q]>0){ out[q*4]=12; out[q*4+1]=7; out[q*4+2]=3; out[q*4+3]=Math.round(Math.min(1,sh[q]*1.6)*.5*255); }
+  const t2=performance.now();
+  const cp=Math.max(.7,1.1*s), seam=Math.max(1,Math.round(1.2*s)), stat={fill:0,wallFill:0,rim:0,cutWall:0,crustDown:0,crustUp:0,low:0};
+  const flesh=BANANA_FLESH[0], FILL=SECTION_FILL, per=Math.max(8,14*s), cutSeed=dish.cuts.length*.37;
+  let R=0,G=0,B=0;
+  // Цвет верха: гладкий цвет вершин, ломтики, полоска начинки у разреза, тень клапана, наклон.
+  const topColor=(c,i,j,dl,light)=>{
+    const f=faces[tf[c]]; let m=light;
+    R=col[c*3]; G=col[c*3+1]; B=col[c*3+2];
+    if(f.kind==="filling" && f.pc && f.pr>0){
+      const d=Math.hypot(tu[c]-f.pc.x,tv[c]-f.pc.y)/f.pr;
+      if(d>.84){ R=R*.6+78.4; G=G*.6+62.4; B=B*.6+31.2; }
+      for(let k=0;k<3;k++){ const a=(k*120+f.source*53)*Math.PI/180;
+        if(Math.hypot(tu[c]-f.pc.x-Math.cos(a)*f.pr*.16,tv[c]-f.pc.y-Math.sin(a)*f.pr*.16)<f.pr*.055){ R=R*.55+57.6; G=G*.55+43.2; B=B*.55+24.3; } }
+      stat.fill++;
+    } else if(cutFace[tf[c]] && nearCut(tu[c],tv[c]) && ncD<rimW && hasFill(c)){
+      // полоска начинки: жёлто-яичная с бледными ломтиками вдоль реза, у самой кромки темнее
+      // ломтики неровные: у каждого свой сдвиг, размер, часть мест пустует
+      const pu=per*unit, k=Math.floor(ncAlong/pu), hsh=Math.abs(Math.sin(k*12.9898+cutSeed)*43758.5453)%1;
+      const ph=((ncAlong%pu)+pu)%pu/pu-.5-(hsh-.5)*.3, across=ncD/rimW-.5-(hsh-.5)*.2, sz=.26+.16*hsh;
+      const ban=hsh>.18 && (ph/sz)**2+(across/.44)**2<1, src=ban ? BANANA_FLESH[k&3 ? 0 : 2] : FILL;
+      R=src[0]; G=src[1]; B=src[2];
+      if(ncD<unit*1.2) m*=.75;
+      stat.rim++;
+    }
+    if(f.kind==="dough" && s>=.5){
+      // клапан выше соседа: у его кромки мягкая тень вниз-вправо, на самой кромке — светлая губа
+      // (в пиксельных видах A/B пиксель крупнее кромки — там это шум)
+      if(i>=seam && j>=seam){ const nb=c-seam*bw-seam; if(tf[nb]>=0 && pd[nb]>pd[c]) m*=.87; }
+      if(i+seam<bw && j+seam<bh){ const nb=c+seam*bw+seam; if(tf[nb]>=0 && pd[nb]<pd[c] && faces[tf[nb]].kind==="dough") m*=1.05; }
+    }
+    m*=1-.3*dl; R*=m; G*=m; B*=m;
+  };
+  // Стенка: у разреза — слои стопки, у сгиба — бок теста с поджаристым низом.
+  const wallOf=c=>{
+    const f=faces[tf[c]], cut=cutFace[tf[c]] && nearCut(tu[c],tv[c]) && ncD<unit*3+.004;
+    const bottom=faces[pf[c*K]] || f;
+    const low=dishCookColor(bottom,bottom.turned ? 1 : 0,false).map(v=>v*.82);
+    if(!cut){
+      const side=f.kind==="filling" ? flesh.map(v=>v*.82) : [col[c*3]*.8,col[c*3+1]*.8,col[c*3+2]*.8];
+      return {cut:false,side,low};
+    }
+    return {cut:true,bands:cutWallBands(Array.from(pf.subarray(c*K,c*K+pn[c]),k=>faces[k]),{x:tu[c],y:tv[c]})};
+  };
+  const wallColor=(w,z,h,i)=>{
+    const phi=Math.max(0,Math.min(.9999,z/h)), ao=.84+.16*phi;
+    let c;
+    if(!w.cut){ if(z<Math.max(1.2*s,.22*h)){ c=w.low; stat.low++; } else c=w.side; }
+    else {
+      let b=w.bands[w.bands.length-1];
+      for(const x of w.bands) if(phi<x.to){ b=x; break; }
+      const zf=b.from*h, zt=b.to*h;
+      if(b.f.kind==="filling"){
+        const ph=(((i%per)+per)%per)/per-.5, dz=(z-(zf+zt)/2)/Math.max(.5,(zt-zf)/2);
+        c=(ph/.34)**2+(dz/.62)**2<1 ? flesh : FILL;
+        stat.wallFill++;
+      } else if(z-zf<cp && zt-zf>2.5*cp){ c=b.c0; stat.crustDown++; }
+      else if(zt-z<cp && zt-zf>2.5*cp){ c=b.c1; stat.crustUp++; }
+      else c=b.crumb;
+      stat.cutWall++;
+    }
+    R=c[0]*ao; G=c[1]*ao; B=c[2]*ao;
+  };
+  // Наклон верха → свет слева-сверху-издалека (как у подушки на таве), вполсилы.
+  const slopeK=.5*TILT/Math.max(.2,VIEW_UP);
+  for(let i=0;i<bw;i++){
+    let ymin=Infinity;
+    for(let j=bh-1;j>=0;j--){
+      const c=j*bw+i; if(tf[c]<0) continue;
+      const h=th[c], rt=Math.round(j-h);
+      if(rt>=ymin) continue;
+      const rEnd=Math.min(j,ymin-1), lip=Math.min(1.6*s+.4,h*.2);
+      // Кромка — только там, где ближний сосед заметно ниже: иначе пологий склон рисовался
+      // полосами, как горы на карте (проба 17.09).
+      const near=j+1<bh && tf[c+bw]>=0 ? th[c+bw] : 0, edge=h-near>lip+1.5;
+      const far=j>0 && tf[c-bw]>=0 ? th[c-bw] : h, left=i>0 && tf[c-1]>=0 ? th[c-1] : h, right=i+1<bw && tf[c+1]>=0 ? th[c+1] : h;
+      const gy=((edge ? h : near)-far)*.5*slopeK, gx=(right-left)*.5*slopeK;
+      const light=Math.max(.8,Math.min(1.15,(.42*gx+.5*gy+.76)/Math.hypot(gx,gy,1)/.76));
+      let w=null;
+      for(let r=rt;r<=rEnd;r++){
+        const z=j-r;
+        if(!edge || z>=h-lip-.5) topColor(c,i,j,edge ? Math.max(0,Math.min(1,(h-z)/(lip+.5))) : 0,light);
+        else { if(!w) w=wallOf(c); wallColor(w,z,h,i+X0); }
+        const q=((r+UP)*OW+i)*4; out[q]=R; out[q+1]=G; out[q+2]=B; out[q+3]=255;
+      }
+      ymin=rt;
+    }
+  }
+  const t3=performance.now();
+  return {x:X0,y:Y0-UP,w:OW,h:OH,up:UP,bw,bh,th,tf,data:out,ms:t3-t0,stages:[t1-t0,t2-t1,t3-t2].map(v=>+v.toFixed(1)),stat,texels:N};
+}
+function drawDishTable(g,screen,faces,H,zk,sx,sy){
+  const W=Math.round(cv.width*sx), Hc=Math.round(cv.height*sy), s=Math.min(2,devicePixelRatio||1)*Math.min(sx,sy);
+  const o=screen({x:0,y:0}), e=screen({x:1,y:1});
+  const key=[W,Hc,o.x,o.y,e.x,e.y,zk,s,dish.panTime||0,dish.flips||0,SHOW_THROUGH].map(v=>+(+v).toFixed(3)).join(",");
+  let C=drawDishTable.cache;
+  if(!C || C.faces!==faces || C.key!==key){
+    const R=renderDishTable(faces,screen,H,zk,W,Hc,s);
+    C=drawDishTable.cache={faces,key,R,drawn:false};
+    if(R && typeof document!=="undefined"){
+      if(!tableCanvas) tableCanvas=document.createElement("canvas");
+      tableCanvas.width=R.w; tableCanvas.height=R.h;
+      const tc=tableCanvas.getContext("2d");
+      if(tc && tc.createImageData && tc.putImageData){ const img=tc.createImageData(R.w,R.h); img.data.set(R.data); tc.putImageData(img,0,0); C.drawn=true; }
+    }
+  }
+  if(C.R && C.drawn) g.drawImage(tableCanvas,C.R.x,C.R.y);
+}
 // Вмятина под пальцем: мягкое тёмное пятно на поверхности, глубже с силой прижима.
 function drawPressDents(g,screen,H,zk,pose,sx,sy){
   for(const p of panPress){
@@ -2215,12 +2458,14 @@ function drawDish(g,sx,sy){
   const lift=dishGesture && dish.mode==="fold" && dishGesture.anchor && !dishGesture.preview && !dishGesture.press ? dishGesture : null;
   const H=faces===dish.faces ? stackHeights(faces) : previewHeights(faces), zk=pose.scale*Z_EXAG/ROTI_R_MM*VIEW_UP*sy;
   if(lift) drawSpatula(g,screen,lift,sx,sy);
-  drawDishFaces(g,faces,screen,H,zk,true,dishPieceShift(faces));
-  if(lift) drawLiftedEdge(g,screen,lift,sx,sy);
-  // Rebuild expensive boundary intersections only after a committed geometry
-  // change. During a drag the existing flat preview remains immediate.
-  if(!moving&&(dish.folds||dish.cuts.length)&&!(dishGesture&&dishGesture.preview)) drawDishSections(g,screen,faces,sx,sy,zk,H);
-  if(!moving && dish.cuts.length && faces===dish.faces) drawDishSlits(g,screen,faces,H,zk,sx,sy);
+  if(dish.mode!=="fold" && !moving && faces===dish.faces) drawDishTable(g,screen,faces,H,zk,sx,sy);
+  else {
+    drawDishFaces(g,faces,screen,H,zk,true,dishPieceShift(faces));
+    if(lift) drawLiftedEdge(g,screen,lift,sx,sy);
+    // Rebuild expensive boundary intersections only after a committed geometry
+    // change. During a drag the existing flat preview remains immediate.
+    if(!moving&&(dish.folds||dish.cuts.length)&&!(dishGesture&&dishGesture.preview)) drawDishSections(g,screen,faces,sx,sy,zk,H);
+  }
   if(dish.mode==="fold" && !(dishGesture && dishGesture.preview)) drawDomes(g,screen,H,zk);
   if(dish.mode==="fold") drawPressDents(g,screen,H,zk,pose,sx,sy);
   if(dishGesture && !slide && dishGesture.zone!=="middle" && !(dishGesture.press && !dishGesture.moved)){
