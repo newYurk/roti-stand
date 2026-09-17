@@ -11,7 +11,7 @@
 // до 400%+ и лист «рвётся» в середине от любого движения. Замер это обнаружил сразу.
 // Число узлов сохранено (1 060 после обрезки по кругу; прежняя оценка «~1150» была на глаз,
 // пересчитано 07.09.2026), однородность рёбер восстановлена.
-const BUILD = "2026-09-16 · жест переворота · 7";
+const BUILD = "2026-09-16 · снятие на стол · 8";
 const GRID = 38;                   // 38x38, в круг попадает 1 060 узлов (посчитано, не оценка)
 let SUBSTEPS = 8;                  // T2: 8–10 подшагов, 1 итерация
 let DAMP = 0.986;
@@ -197,6 +197,8 @@ function layoutPan(){
 let dish = null, dishGesture = null;
 // Полёт при перевороте живёт вне dish: «заново» его сбрасывает, а снимки dish не меняются.
 let dishFlight = null;
+// Перелёт снятого блюда с тавы на стол: поза интерполируется от места на таве к столу.
+let dishMove = null;
 const polyArea = p => Math.abs(p.reduce((s,a,i)=>{ const b=p[(i+1)%p.length]; return s+a.x*b.y-b.x*a.y; },0))/2;
 function clipPoly(points, nx, ny, offset, positive=true){
   const out=[], sign=positive ? 1 : -1;
@@ -505,7 +507,7 @@ function cutDish(a,b){
   syncDishUI(); return true;
 }
 function undoDish(){
-  if(!dish || dishGesture || dishFlight || !dish.history.length) return;
+  if(!dish || dishGesture || dishFlight || dishMove || !dish.history.length) return;
   const flipsBefore=dish.flips||0;
   Object.assign(dish,dish.history.pop()); dish.hull=dishHull(); rebuildDishContact();
   // Отмена переворота кладёт на сталь другую сторону — это новый сеанс, а не откат времени.
@@ -598,12 +600,12 @@ function syncDishUI(){
   const cut=document.getElementById("cutMode");
   cut.disabled=!dish || !dish.folds || dish.mode==="cut";
   cut.textContent=dish && dish.mode==="cut" ? "нарезка на столе" : "к нарезке →";
-  cut.disabled=cut.disabled || !!dishFlight;
+  cut.disabled=cut.disabled || !!dishFlight || !!dishMove;
   document.getElementById("undoDish").disabled=!dish || !dish.history.length || !!dishFlight;
   const flip=document.getElementById("flipDish");
   if(flip) flip.disabled=!dish || dish.mode!=="fold" || !!dishFlight;
   if(dish) hintEl.textContent=dish.mode==="fold"
-    ? "На таве: жарится. Край → внутрь — складка; резкий мах от края — переворот."
+    ? "край: внутрь — складка · мах — переворот · на стол — снять"
     : "Нарезка: проведи через конверт прямым жестом.";
 }
 // Складка — только ВНУТРЬ листа. Раньше линия сгиба строилась по любому сдвигу длиннее
@@ -614,7 +616,7 @@ function syncDishUI(){
 // (iOS allowableMovement 10 pt, Android touch slop 8 dp). Числа — для пробы, не замер.
 const FOLD_MIN_DEPTH = 0.12, FOLD_MAX_ANGLE_COS = Math.cos(60*Math.PI/180), TOUCH_SLOP_CSS = 10;
 function beginDishGesture(id,p,client,time){
-  if(dishGesture || dishFlight) return;
+  if(dishGesture || dishFlight || dishMove || dish.mode==="served") return;
   const start=dishLocal(p), at=client || {x:0,y:0}, t0=Number.isFinite(time) ? time : performance.now();
   const samples=[{x:at.x,y:at.y,t:t0}];
   if(dish.mode==="cut"){ dishGesture={id,start,end:start,client:at,samples}; return; }
@@ -679,7 +681,37 @@ function moveDishGesture(p,client,time){
     const fresh=client && g.stroke && g.stroke.start!==null && t-g.stroke.start<FOLD_PREVIEW_DELAY_MS;
     const fast=fresh && velocityOf(g,t).speed>=FLICK_MIN_CSS;
     g.preview=!fast && inwardFold(g) ? foldGeometry(g.anchor,g.target) : null;
+    // Ведение НАРУЖУ — снятие (решение владелицы 16.09): лист едет за лопаткой.
+    g.slide=!g.preview && outwardSlide(g) ? {x:g.end.x-g.start.x,y:g.end.y-g.start.y} : null;
   }
+}
+function outwardSlide(g){
+  const vx=g.target.x-g.anchor.x, vy=g.target.y-g.anchor.y, len=Math.hypot(vx,vy);
+  return (g.inwards || [g.inward]).some(n=>{
+    const out=-(vx*n.x+vy*n.y);
+    return out>=FOLD_MIN_DEPTH && out>=len*FOLD_MAX_ANGLE_COS;
+  });
+}
+// Лист снят, если палец отпущен над рабочей частью стола и за бортом тавы.
+function slideEndsOnTable(client){
+  const p=toLocal(client.x,client.y), w=zone("work");
+  const onTable=p.x>=w.x && p.x<=w.x+w.w && p.y>=w.y && p.y<=w.y+w.h;
+  return onTable && Math.hypot(p.x-panC.x,p.y-panC.y)>PAN_R*1.08;
+}
+const MOVE_T = 0.35;
+function startRemoval(slide={x:0,y:0}){
+  if(!dish || dish.mode!=="fold" || dishFlight || dishMove) return false;
+  const from=dishPose(); from.x+=slide.x*from.scale; from.y+=slide.y*from.scale;
+  startCutting();
+  if(dish.mode!=="cut") return false;
+  dishMove={from,t0:performance.now(),T:MOVE_T};
+  dish.message="На столе · режь прямым движением";
+  syncDishUI();
+  return true;
+}
+function updateDishMove(){
+  if(!dishMove || (performance.now()-dishMove.t0)/1000<dishMove.T) return;
+  dishMove=null; audioSlap(1.0); syncDishUI();
 }
 // Переворот на таве — тот же глагол «поднять и шлёпнуть»: коснуться края и резко махнуть
 // (вариант A для пробы владелицы, #21). Удержание здесь не используется — оно закреплено
@@ -730,6 +762,12 @@ function endDishGesture(time){
       logPanGesture(ok ? "flip" : "flip-refused",f);
       if(ok) return;
     }
+  }
+  if(g.slide){
+    if(!slideEndsOnTable(last)){ logPanGesture("slide-back",f); dish.message="Веди дальше — на стол"; return; }
+    if(!dish.folds){ logPanGesture("slide-unfolded",f); dish.message="Сначала сверни края — потом на стол"; return; }
+    logPanGesture(startRemoval(g.slide) ? "remove" : "slide-refused",f);
+    return;
   }
   const ok=g.target&&inwardFold(g)&&foldDish(g.anchor,g.target);
   logPanGesture(ok ? "fold" : "none",f);
@@ -932,8 +970,16 @@ function drawLiftedEdge(g,screen,d,sx,sy){
   g.beginPath(); g.moveTo(p.x,p.y-up); g.lineTo(q.x,q.y-up); g.stroke();
 }
 function drawDish(g,sx,sy){
-  const pose=dishPose();
+  let pose=dishPose(), moving=false;
   if(dishFlight){ drawDishFlight(g,sx,sy,pose); return; }
+  if(dishMove){
+    // Перелёт на стол: плавно от места на таве к позе нарезки, с небольшим подъёмом.
+    const u=Math.max(0,Math.min(1,(performance.now()-dishMove.t0)/1000/dishMove.T)), e=u*u*(3-2*u), f=dishMove.from;
+    pose={x:f.x+(pose.x-f.x)*e, y:f.y+(pose.y-f.y)*e-Math.sin(Math.PI*u)*.25*pose.scale, scale:f.scale+(pose.scale-f.scale)*e};
+    moving=true;
+  }
+  const slide=dishGesture && dishGesture.slide;
+  if(slide) pose={x:pose.x+slide.x*pose.scale, y:pose.y+slide.y*pose.scale, scale:pose.scale};
   const faces=dishGesture&&dishGesture.preview ? dishGesture.preview.faces : dish.faces;
   const screen=p=>{const x=pose.x+p.x*pose.scale,y=pose.y+p.y*pose.scale;return{x:prX(x,y)*sx,y:prY(x,y)*sy};};
   const lift=dishGesture && dish.mode==="fold" && dishGesture.anchor && !dishGesture.preview ? dishGesture : null;
@@ -942,8 +988,8 @@ function drawDish(g,sx,sy){
   if(lift) drawLiftedEdge(g,screen,lift,sx,sy);
   // Rebuild expensive boundary intersections only after a committed geometry
   // change. During a drag the existing flat preview remains immediate.
-  if((dish.folds||dish.cuts.length)&&!(dishGesture&&dishGesture.preview)) drawDishSections(g,screen,faces,sx,sy);
-  if(dishGesture){
+  if(!moving&&(dish.folds||dish.cuts.length)&&!(dishGesture&&dishGesture.preview)) drawDishSections(g,screen,faces,sx,sy);
+  if(dishGesture && !slide){
     const d=dishGesture, a=screen(d.anchor||d.start),b=screen(d.target||d.end);
     g.strokeStyle=dish.mode==="fold" ? "#eab562" : "#f5ead6";g.lineWidth=Math.max(1,2*sx);
     g.beginPath();g.moveTo(a.x,a.y);g.lineTo(b.x,b.y);g.stroke();
@@ -1027,7 +1073,7 @@ function build(){
 
   layoutPan();
   phase = "TABLE"; xf = null;
-  dish = null; dishGesture = null; dishFlight = null; syncDishUI(); syncStepButtons();
+  dish = null; dishGesture = null; dishFlight = null; dishMove = null; syncDishUI(); syncStepButtons();
   cook = new Float32Array(N); dry = new Float32Array(N);
   // Контакт с плитой пятнистый, а не идеальный: под листом микрозазоры, складки, плёнка
   // жира. Источники в один голос описывают ПЯТНА («some brown spots», «leopard-spotted»),
@@ -1087,7 +1133,7 @@ function step(dt){
   // В руке и в полёте узлы заморожены: перенос — движение картинки, запекаемое при посадке.
   // На таве лист схватился и стоит — только жарится.
   if(action.state==="CARRY" || action.state==="TOSS"){ updateAction(dt); return; }
-  if(dish){ updateDishFlight(); cookDish(dt); return; }
+  if(dish){ updateDishFlight(); updateDishMove(); cookDish(dt); return; }
   if(phase==="PAN"){ cookStep(dt); return; }
   const h = dt / SUBSTEPS;
   // Затухание зависит от фазы: в полёте лист скользит свободнее, после удара,
@@ -2066,7 +2112,8 @@ addEventListener("keydown", e=>{
 });
 document.getElementById("tear").addEventListener("click", pressNow);
 document.getElementById("reset").addEventListener("click", reset);
-document.getElementById("cutMode").addEventListener("click", startCutting);
+// Техническое снятие — тот же перелёт на стол, что и у жеста.
+document.getElementById("cutMode").addEventListener("click", ()=>startRemoval());
 document.getElementById("undoDish").addEventListener("click", undoDish);
 // Технический вход переворота (как «к нарезке»): лист уходит от игрока и ложится обратно.
 document.getElementById("flipDish").addEventListener("click", ()=>startFlip({x:0,y:-1},{x:0,y:0}));
@@ -2537,7 +2584,7 @@ let pendingResize = false;
 // НИКОГДА после удачного броска: холст оставался в старом размере до «заново»
 // (найдено проверкой 08.09, обе формы окна). Полёт при этом всё равно защищён —
 // в нём `action.state === "TOSS"`.
-function gestureLive(){ return action.state !== "RESTING" || !!dishGesture || !!dishFlight; }
+function gestureLive(){ return action.state !== "RESTING" || !!dishGesture || !!dishFlight || !!dishMove; }
 function resize(force){
   const r = stage.getBoundingClientRect(), dpr = Math.min(2, devicePixelRatio||1);
   const w = Math.max(64, Math.round(r.width*dpr)), h = Math.max(64, Math.round(r.height*dpr));
