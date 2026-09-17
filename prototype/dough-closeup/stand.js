@@ -11,7 +11,7 @@
 // до 400%+ и лист «рвётся» в середине от любого движения. Замер это обнаружил сразу.
 // Число узлов сохранено (1 060 после обрезки по кругу; прежняя оценка «~1150» была на глаз,
 // пересчитано 07.09.2026), однородность рёбер восстановлена.
-const BUILD = "2026-09-17 · высота кнопками · 33";
+const BUILD = "2026-09-17 · разлёт кусков · 34";
 const GRID = 38;                   // 38x38, в круг попадает 1 060 узлов (посчитано, не оценка)
 let SUBSTEPS = 8;                  // T2: 8–10 подшагов, 1 итерация
 let DAMP = 0.986;
@@ -212,6 +212,12 @@ let dishMove = null;
 let dishTwist = null;
 const TWIST_HINT = "повернуть: два пальца, колесо или ⌥ + перетаскивание";
 const dishTouches = new Map();   // касания поля при блюде: id → точка стола (второй палец — поворот)
+// Развести куски двумя пальцами и заглянуть в срезы (владелица 17.09: «два пальца развести, и
+// кусочки разлетятся… а потом отпускаешь — обычный масштаб»). Щель живая, геометрию не трогает:
+// на отпускании куски съезжаются обратно, резать и поворачивать можно и разведённым.
+let dishPinch = null;            // идущее разведение: пальцы и базовое расстояние
+let dishSpread = 1;              // во сколько раз щель шире обычной
+const SPREAD_MAX = 6, SPREAD_GAIN = 1.8, SPREAD_BACK = 9;
 let twistDbg = {gestures:0, cancels:0, last:"—"};   // что видел поворот на устройстве (строка отладки, лог)
 const polyArea = p => Math.abs(p.reduce((s,a,i)=>{ const b=p[(i+1)%p.length]; return s+a.x*b.y-b.x*a.y; },0))/2;
 function clipPoly(points, nx, ny, offset, positive=true){
@@ -1082,8 +1088,13 @@ function endTwist(commit=true){
   logTwist(T.input,ok ? T.angle : 0);
   return ok;
 }
-function updateDishTwist(){
+function updateDishTwist(dt){
   if(dishTwist && dishTwist.input==="wheel" && performance.now()-dishTwist.lastT>=TWIST_IDLE_MS) endTwist(true);
+  // Отпустили пальцы — куски съезжаются обратно к обычной щели.
+  if(!dishPinch && dishSpread>1){
+    dishSpread=1+(dishSpread-1)*Math.exp(-(dt||0)*SPREAD_BACK);
+    if(dishSpread<1.02) dishSpread=1;
+  }
 }
 function syncDishUI(){
   document.getElementById("gDish").hidden=!dish;
@@ -1105,7 +1116,7 @@ function syncDishUI(){
   if(dish) hintEl.textContent=dish.mode==="fold"
     ? "край: внутрь — складка · мах — переворот · на стол — снять · держи — прижим"+(dish.folds ? " · "+TWIST_HINT : "")
     : dish.mode==="served" ? "Подано · «следующий роти» — новый кусочек"
-    : "Нарезка: проведи через конверт прямым жестом · "+TWIST_HINT+" · «подать» — когда готово";
+    : "Нарезка: проведи через конверт прямым жестом · "+TWIST_HINT+" · развести два пальца — заглянуть в срезы · «подать» — когда готово";
 }
 // Складка — только ВНУТРЬ листа. Раньше линия сгиба строилась по любому сдвигу длиннее
 // 0,12, и сдвиг пальца вдоль кромки на 10 CSS px складывал полсписта (портрет: сгиб
@@ -1498,9 +1509,24 @@ function dishPieceShift(faces){
   if(any){ out=new Map(); faces.forEach((f,i)=>out.set(f,dir.get(piece[i])||{x:0,y:0})); }
   cache.set(faces,out); return out;
 }
+// Живой сдвиг кусков: обычная щель, умноженная на разведение пальцами.
+function pieceShiftLive(faces){
+  const base=dishPieceShift(faces);
+  if(!base || dishSpread===1) return base;
+  const c=pieceShiftLive.c;
+  if(c && c.faces===faces && c.k===dishSpread && c.base===base) return c.m;
+  // Вглубь стола движение сжато наклоном (TILT), поэтому поперечные резы раскрывались хуже
+  // продольных: доля сверх обычной щели по y делится на TILT, и щели расходятся поровну на экране.
+  const ky=1+(dishSpread-1)/TILT;
+  const m=new Map();
+  for(const [f,o] of base) m.set(f,{x:o.x*dishSpread,y:o.y*ky});
+  pieceShiftLive.c={faces,base,k:dishSpread,m}; return m;
+}
+function canSpread(){ return !!dish && dish.mode==="cut" && dish.cuts.length>0 && !dishFlight && !dishMove; }
+function spreadTo(k){ dishSpread=Math.max(1,Math.min(SPREAD_MAX,k)); }
 // Точка жеста на столе → точка материала: из нарисованного (сдвинутого) куска под пальцем.
 function unshiftCutPoint(p){
-  const shift=dishPieceShift(dish.faces); if(!shift) return {p,o:{x:0,y:0}};
+  const shift=pieceShiftLive(dish.faces); if(!shift) return {p,o:{x:0,y:0}};
   for(const f of dish.faces){
     if(f.kind!=="dough") continue;
     const o=shift.get(f);
@@ -1510,7 +1536,7 @@ function unshiftCutPoint(p){
 }
 function drawDishSections(g,screen,faces,sx,sy,zk=0,H=null){
   const sections=dishSectionGeometry(faces),pixel=Math.min(2,devicePixelRatio||1)*Math.min(sx,sy);
-  const shift=dishPieceShift(faces);
+  const shift=pieceShiftLive(faces);
   if(shift){ const base=screen; screen=(p,f)=>{ const o=f && shift.get(f); return base(o ? {x:p.x+o.x,y:p.y+o.y} : p); }; }
   const unit=Math.max(.55,1.7*pixel);
   // Magnified cross sections sit just INSIDE their real material edge. Otherwise
@@ -2178,7 +2204,7 @@ function boxSum(a,o,tmp,bw,bh,r){
   return o;
 }
 function renderDishTable(faces,screen,H,zk,W,Hc,s,opts={}){
-  const t0=performance.now(), n=faces.length, shift=dishPieceShift(faces), D=tableFaceData(faces,H);
+  const t0=performance.now(), n=faces.length, shift=pieceShiftLive(faces), D=tableFaceData(faces,H);
   const P=new Array(n);
   let X0=Infinity,X1=-Infinity,Y0=Infinity,Y1=-Infinity;
   for(let i=0;i<n;i++){
@@ -2432,9 +2458,9 @@ function drawDishTable(g,screen,faces,H,zk,sx,sy){
   const W=Math.round(cv.width*sx), Hc=Math.round(cv.height*sy), s=Math.min(2,devicePixelRatio||1)*Math.min(sx,sy);
   // Пока блюдо крутят, рельеф считается каждый кадр — вполовину разрешения (вчетверо дешевле);
   // на отпускании — полный.
-  const q=dishTwist && W>400 ? .5 : 1, sc=q===1 ? screen : p=>{ const a=screen(p); return {x:a.x*q,y:a.y*q}; };
+  const q=(dishTwist||dishPinch) && W>400 ? .5 : 1, sc=q===1 ? screen : p=>{ const a=screen(p); return {x:a.x*q,y:a.y*q}; };
   const o=screen({x:0,y:0}), e=screen({x:1,y:1});
-  const key=[W,Hc,o.x,o.y,e.x,e.y,zk,s,q,dish.panTime||0,dish.flips||0,SHOW_THROUGH].map(v=>+(+v).toFixed(3)).join(",");
+  const key=[W,Hc,o.x,o.y,e.x,e.y,zk,s,q,dish.panTime||0,dish.flips||0,SHOW_THROUGH,dishSpread].map(v=>+(+v).toFixed(3)).join(",");
   const lru=drawDishTable.lru||(drawDishTable.lru=[]);
   let C=drawDishTable.cache;
   if(!C || C.faces!==faces || C.key!==key){
@@ -2497,7 +2523,7 @@ function drawDish(g,sx,sy){
   if(lift) drawSpatula(g,screen,lift,sx,sy);
   if(dish.mode!=="fold" && !moving && faces===dish.faces) drawDishTable(g,screen,faces,H,zk,sx,sy);
   else {
-    drawDishFaces(g,faces,screen,H,zk,true,dishPieceShift(faces));
+    drawDishFaces(g,faces,screen,H,zk,true,pieceShiftLive(faces));
     if(lift) drawLiftedEdge(g,screen,lift,sx,sy);
     // Rebuild expensive boundary intersections only after a committed geometry
     // change. During a drag the existing flat preview remains immediate.
@@ -2591,7 +2617,7 @@ function build(){
 
   layoutPan();
   phase = "TABLE"; xf = null;
-  dish = null; dishGesture = null; dishFlight = null; dishMove = null; dishTwist = null; dishTouches.clear(); syncDishUI(); syncStepButtons();
+  dish = null; dishGesture = null; dishFlight = null; dishMove = null; dishTwist = null; dishPinch = null; dishSpread = 1; dishTouches.clear(); syncDishUI(); syncStepButtons();
   panPress = []; domes = []; fatMap = null; fatGesture = null;
   { const card = document.getElementById("card"); if(card) card.hidden = true; }
   cook = new Float32Array(N); dry = new Float32Array(N);
@@ -2660,7 +2686,7 @@ function step(dt){
   // В руке и в полёте узлы заморожены: перенос — движение картинки, запекаемое при посадке.
   // На таве лист схватился и стоит — только жарится.
   if(action.state==="CARRY" || action.state==="TOSS"){ updateAction(dt); return; }
-  if(dish){ updateDishFlight(); updateDishMove(); updateDishTwist(); cookDish(dt); return; }
+  if(dish){ updateDishFlight(); updateDishMove(); updateDishTwist(dt); cookDish(dt); return; }
   if(phase==="PAN"){ cookStep(dt); return; }
   const h = dt / SUBSTEPS;
   // Затухание зависит от фазы: в полёте лист скользит свободнее, после удара,
@@ -3631,6 +3657,10 @@ function onDown(id, cx, cy, t){
             // Второй палец на поле — поворот (владелица 17.09): начатая складка или рез отменяются.
             if(id[0]==="t" && dishTouches.size===2){
               const ids=[...dishTouches.keys()], can=canTwist();
+              if(!fatGesture && canSpread()){
+                const a=dishTouches.get(ids[0]), b=dishTouches.get(ids[1]);
+                dishPinch={ids,d0:Math.max(.04,Math.hypot(b.x-a.x,b.y-a.y))};
+              }
               if(!fatGesture && can && beginTwist("touch",{ids})){ dishTwist.raw=tableAngle(dishTouches.get(ids[0]),dishTouches.get(ids[1])); twistDbg.last="два пальца"; return; }
               logTwistTry(fatGesture ? "маргарин" : !can ? "нельзя: "+dishModeWord() : "не начался");
             }
@@ -3658,6 +3688,11 @@ function onDown(id, cx, cy, t){
 }
 function onMove(id, cx, cy, t){
   if(dishTouches.has(id)) dishTouches.set(id,toLocal(cx,cy));
+  if(dishPinch && dishPinch.ids && dishPinch.ids.includes(id)){
+    const a=dishTouches.get(dishPinch.ids[0]), b=dishTouches.get(dishPinch.ids[1]);
+    if(a && b) spreadTo(1+(Math.hypot(b.x-a.x,b.y-a.y)/dishPinch.d0-1)*SPREAD_GAIN);
+    else dishPinch=null;
+  }
   if(dishTwist){
     const T=dishTwist;
     if(T.ids && T.ids.includes(id)){ twistTo(tableAngle(dishTouches.get(T.ids[0]),dishTouches.get(T.ids[1]))); return; }
@@ -3671,6 +3706,7 @@ function onMove(id, cx, cy, t){
 }
 function onUp(id, cx, cy, t){
   dishTouches.delete(id);
+  if(dishPinch && dishPinch.ids && dishPinch.ids.includes(id)) dishPinch=null;
   if(dishTwist && ((dishTwist.ids && dishTwist.ids.includes(id)) || dishTwist.id===id)){ endTwist(true); return; }
   if(fatGesture && fatGesture.id===id){ fatGesture=null; return; }
   if(dishGesture && dishGesture.id===id){
@@ -3762,9 +3798,12 @@ for(const type of ["gesturestart","gesturechange","gestureend"]) window.addEvent
   e.preventDefault();
   if(type==="gesturestart"){
     twistDbg.gestures++;
+    if(canSpread()) dishPinch={gesture:true};
     if(!dishTwist && canTwist() && beginTwist("gesture",{})){ dishTwist.raw=0; twistDbg.last="жест Safari"; }
     return;
   }
+  if(type==="gesturechange" && dishPinch && dishPinch.gesture && Number.isFinite(e.scale)) spreadTo(1+(e.scale-1)*SPREAD_GAIN);
+  if(type==="gestureend" && dishPinch && dishPinch.gesture) dishPinch=null;
   if(!dishTwist || dishTwist.input!=="gesture") return;
   if(type==="gesturechange" && Number.isFinite(e.rotation)) twistTo(e.rotation*Math.PI/180);
   else if(type==="gestureend") endTwist(true);
