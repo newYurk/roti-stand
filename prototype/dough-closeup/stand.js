@@ -11,7 +11,7 @@
 // до 400%+ и лист «рвётся» в середине от любого движения. Замер это обнаружил сразу.
 // Число узлов сохранено (1 060 после обрезки по кругу; прежняя оценка «~1150» была на глаз,
 // пересчитано 07.09.2026), однородность рёбер восстановлена.
-const BUILD = "2026-09-17 · разлёт кусков · 34";
+const BUILD = "2026-09-17 · кромка реза · 35";
 const GRID = 38;                   // 38x38, в круг попадает 1 060 узлов (посчитано, не оценка)
 let SUBSTEPS = 8;                  // T2: 8–10 подшагов, 1 итерация
 let DAMP = 0.986;
@@ -2293,14 +2293,14 @@ function renderDishTable(faces,screen,H,zk,W,Hc,s,opts={}){
   // Полоска начинки — не уже пикселя: в пиксельных видах A/B она иначе пропадает.
   const rimW=Math.max(CUT_RIM,unit*1.05);
   const cutFace=tableCutFaces(D,cuts,rimW+unit*3+.01);
-  let ncD=0, ncAlong=0;
+  let ncD=0, ncAlong=0, ncFace=0;   // ncFace — насколько рез смотрит на зрителя (стенка столбца)
   const nearCut=(u,v)=>{
     let hit=false;
     for(const k of cuts){
       const ax=u-k.ax, ay=v-k.ay, along=ax*k.ux+ay*k.uy;
       if(along<-unit || along>k.len+unit) continue;
       const d=Math.abs(-ax*k.uy+ay*k.ux)-k.half;
-      if(d>-unit*2 && (!hit || d<ncD)){ hit=true; ncD=Math.max(0,d); ncAlong=along; }
+      if(d>-unit*2 && (!hit || d<ncD)){ hit=true; ncD=Math.max(0,d); ncAlong=along; ncFace=Math.abs(k.ux); }
     }
     return hit;
   };
@@ -2342,7 +2342,7 @@ function renderDishTable(faces,screen,H,zk,W,Hc,s,opts={}){
       const ph=((ncAlong%pu)+pu)%pu/pu-.5-(hsh-.5)*.3, across=ncD/rimW-.5-(hsh-.5)*.2, sz=.26+.16*hsh;
       const ban=hsh>.18 && (ph/sz)**2+(across/.44)**2<1, src=ban ? BANANA_FLESH[k&3 ? 0 : 2] : FILL;
       R=src[0]; G=src[1]; B=src[2];
-      if(ncD<unit*1.2) m*=.75;
+      if(ncD<Math.min(unit*1.2,rimW*.45)) m*=.75;   // в пиксельных видах затемнение съедало всю полоску (оливковый цвет)
       stat.rim++;
     }
     if(f.kind==="dough" && s>=.9){
@@ -2355,7 +2355,10 @@ function renderDishTable(faces,screen,H,zk,W,Hc,s,opts={}){
   };
   // Стенка: у разреза — слои стопки, у сгиба — бок теста с поджаристым низом.
   const wallOf=c=>{
-    const f=faces[tf[c]], cut=cutFace[tf[c]] && nearCut(tu[c],tv[c]) && ncD<unit*3+.004;
+    // Стенка столбца всегда смотрит на зрителя, поэтому слои среза показывает только рез,
+    // который идёт поперёк взгляда (нормаль вдоль y материала). У продольного реза рядом стоит
+    // бок сгиба, и с палитрой среза он читался бледными язычками (проверка сборки 31).
+    const f=faces[tf[c]], cut=cutFace[tf[c]] && nearCut(tu[c],tv[c]) && ncD<unit*1.2+.004;
     let bottom=f;
     for(let k=0;k<pn[c];k++){ const g_=faces[pf[c*K+k]]; if(g_.kind==="dough"){ bottom=g_; break; } }
     const low=dishCookColor(bottom,bottom.turned ? 1 : 0,false).map(v=>v*.82);
