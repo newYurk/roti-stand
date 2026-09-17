@@ -23,8 +23,9 @@
   что чему старше и что в доке спорно — `docs/corpus-map.md` и раздел «Сверки» самого дока.
 - Устройство стенда — `prototype/dough-closeup/MECHANICS.md`, находки и опровержения — `RESULT.md`
   рядом, гипотеза — `HYPOTHESIS.md` (не редактируется).
-- Артефакты (приватные; истина — git): обзор https://claude.ai/code/artifact/4f303d10-1e8d-45a2-97d8-2d825fa1a475
-  (`docs/overview.html`, отстал — #92), стенд https://claude.ai/code/artifact/9f56d5c6-253b-4e09-b04c-1804c263aa20.
+- `docs/overview.html` — витрина на 5 КБ: что за игра и куда идти (17.09; прежний пересказ корпуса на
+  148 КБ снят — молча отставал, #92). Артефакты (приватные): стенд https://claude.ai/code/artifact/9f56d5c6-253b-4e09-b04c-1804c263aa20,
+  обзор https://claude.ai/code/artifact/4f303d10-1e8d-45a2-97d8-2d825fa1a475 — снимок старой страницы.
 - **Рабочие материалы, регрессия, логи и профиль своего браузера — в `runs/`** (не в git; в
   `~/Desktop/SDV` личные проекты не кладутся — Home/CLAUDE.md). Регрессия —
   `runs/continuation/regression/`, предпросмотр ветки — порт 8781.
