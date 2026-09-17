@@ -11,7 +11,7 @@
 // до 400%+ и лист «рвётся» в середине от любого движения. Замер это обнаружил сразу.
 // Число узлов сохранено (1 060 после обрезки по кругу; прежняя оценка «~1150» была на глаз,
 // пересчитано 07.09.2026), однородность рёбер восстановлена.
-const BUILD = "2026-09-17 · правки проверки 26–28 · 29";
+const BUILD = "2026-09-17 · без башен · 30";
 const GRID = 38;                   // 38x38, в круг попадает 1 060 узлов (посчитано, не оценка)
 let SUBSTEPS = 8;                  // T2: 8–10 подшагов, 1 итерация
 let DAMP = 0.986;
@@ -1546,7 +1546,12 @@ function drawDishSections(g,screen,faces,sx,sy,zk=0,H=null){
     }
     return w.outer;
   };
-  const walls=sections.walls.filter(w=>!zk || w.cut || outer(w)).map(w=>{
+  // Дыра внутри конверта (снаружи от кромки — всё ещё внутри его оболочки) стенки не получает:
+  // на скомканном рваном листе такие стенки стояли белыми столбиками поверх теста (17.09).
+  const hull=dish.hull||[];
+  const insideHull=p=>hull.length>2 && pointInFace(hull,p.x,p.y);
+  const hole=w=>{ const mid={x:(w.a.x+w.b.x)/2,y:(w.a.y+w.b.y)/2}; return insideHull({x:mid.x-w.inward.x*.06,y:mid.y-w.inward.y*.06}); };
+  const walls=sections.walls.filter(w=>!zk || w.cut || (outer(w) && !hole(w))).map(w=>{
     const own=w.stack[0];   // стенка принадлежит куску своей стопки
     const a=screen(w.a,own),b=screen(w.b,own),mid={x:(w.a.x+w.b.x)/2,y:(w.a.y+w.b.y)/2};
     const m=screen(mid,own),n=screen({x:mid.x+w.inward.x*.001,y:mid.y+w.inward.y*.001},own);
@@ -1578,6 +1583,9 @@ function drawDishSections(g,screen,faces,sx,sy,zk=0,H=null){
     let bottom=0;
     for(let i=0;i<w.stack.length;i++){
       const f=w.stack[i],top=bottom+weights[i]*step;
+      // Начинка в торце — только на разрезе ножом; у рваного края дыры торец теста (17.09: оранжевые
+      // бруски по краям разрывов).
+      if(f.kind==="filling" && !w.cut){ band(bottom,top,dishCookColor(w.stack[0],1,false).map(c=>Math.round(c*.7+62))); bottom=top; continue; }
       if(f.kind==="filling"){
         // Начинка в срезе — банан в яйце: насыщенно-жёлтая полоса с бледными овалами ломтиков,
         // чтобы отличаться от мякиша (владелица 17.09: «начинка в резах не видна»).
@@ -1714,6 +1722,10 @@ const ENV_BLUR = 0.3;     // радиус сглаживания в долях �
 const ENV_DETAIL = 0.12;  // доля исходного рельефа под тестом: волна над порциями, ступень клапана
 const WALL_MIN_MM = 1.2;
 const FILL_VIS = 0.45;      // доля высоты открытого ломтика в картинке (при общем ×5)
+// Укрощение толстых мест (см. envelopeSurface): одиночное пятно не выше соседей + SPIKE_MM; на экране
+// высота насыщается — visMM(h) = VIS_SAT_MM·(1 − e^(−h/VIS_SAT_MM)): 0,5 мм → 0,48, 5 мм → 3,2, 14 мм → 4,7.
+const SPIKE_MM = 1, SPIKE_R = 3, VIS_SAT_MM = 5;
+const visMM = h => h>0 ? VIS_SAT_MM*(1-Math.exp(-h/VIS_SAT_MM)) : 0;
 const LIGHT_SLOPE = 0.3;   // доля наклона поверхности, которую видит свет (при ×5 по высоте)  // тоньше — это одиночный лист: его ступенчатый край без стенки
 function boxBlur(a,n,rx,ry){
   // Скользящее среднее по строкам, затем по столбцам; окно у края обрезается, делитель
@@ -1747,6 +1759,22 @@ function envelopeSurface(H,faces){
     else { const smooth=mass[c]/mask[c]; surf[c]=smooth+ENV_DETAIL*(top[c]-smooth); }
     // Под открытой начинкой тесто — на высоте своего верха, сколько бы ломтиков ни лежало сверху.
     base[c]=fill[c] ? (H.doughTop ? H.doughTop[c] : under[c]) : surf[c];
+  }
+  // Одиночные толстые пятна — несмятый или скомканный при неаккуратном переносе кусок тонкого
+  // листа (толщина до 14 мм) — при ×5 стояли башнями, а ломтики на них — столбами (владелица
+  // 17.09). Условность картинки: клетка не выше средней по соседям + SPIKE_MM, и на экране высота
+  // насыщается (visMM) — толстое пятно пологий бугор, а не гора. Толщина в карточке и тепло считаются
+  // по настоящим миллиметрам.
+  {
+    const r=SPIKE_R, cw=boxBlur(boxBlur(cover,n,r,r),n,r,r);
+    for(const g of [surf,base]){
+      const m=new Float32Array(N); for(let c=0;c<N;c++) m[c]=cover[c]?g[c]:0;
+      const mean=boxBlur(boxBlur(m,n,r,r),n,r,r);
+      for(let c=0;c<N;c++){
+        if(!cover[c]) continue;
+        g[c]=visMM(Math.min(g[c], (cw[c]>1e-6 ? mean[c]/cw[c] : g[c])+SPIKE_MM));
+      }
+    }
   }
   // Свет сверху-слева-спереди по наклону поверхности: множитель яркости (0,72…1,22). Пустые
   // ячейки снаружи дают склон у края — это и есть скругление кромки на свету.
@@ -1793,7 +1821,7 @@ function envelopeSurface(H,faces){
     }
     return flags[i];
   };
-  return {...H, surf, light, gxg, gyg,
+  return {...H, surf, base, light, gxg, gyg,
     at,
     // Высоты вершин грани (мм) — одна поверхность на все грани: у общих точек соседей высота одна.
     vert(i){
@@ -1801,7 +1829,9 @@ function envelopeSurface(H,faces){
       const f=faces[i];
       // Открытый ломтик — плоский диск на тесте: высота теста плюс профиль ломтика (ниже, чем ×5
       // остального: иначе ломтики торчали колючими бочонками, 17.09).
-      if(f.kind==="filling" && (flagsOf(i)&1)) return verts[i]=Float32Array.from(f.points,p=>atDough(p)+fillHeight(f,p)*FILL_VIS);
+      // Ломтик — жёсткий диск: основание одно на весь ломтик, по тесту под его центром
+      // (иначе на неровном листе ломтик вытягивался столбом, 17.09).
+      if(f.kind==="filling" && (flagsOf(i)&1)){ const b0=f.pc ? atDough(f.pc) : null; return verts[i]=Float32Array.from(f.points,p=>(b0!==null ? b0 : atDough(p))+fillHeight(f,p)*FILL_VIS); }
       return verts[i]=Float32Array.from(f.points,f.kind==="dough" ? atDough : at);
     },
     atBase:p=>atDough(p),
@@ -1904,7 +1934,8 @@ function drawDishFaces(g,faces,screen,H,zk,shadow=true,shift=null){
   }
   g.globalAlpha=1;
   for(const k of open){
-    const f=faces[k], hs=H.vert(k), base=f.points.map((p,m)=>Math.min(hs[m],H.atBase(p)));
+    // бок ломтика — не выше его собственной толщины: на склоне он иначе стоял кексом до низа
+    const f=faces[k], hs=H.vert(k), base=f.points.map((p,m)=>Math.max(Math.min(hs[m],H.atBase(p)),hs[m]-fillHeight(f,p)*FILL_VIS-.15));
     g.fillStyle=rgb(tone(f,.88));
     drawFaceWalls(g,f.points,faceScreen(f),hs,zk,base);
   }
@@ -2052,8 +2083,9 @@ function tableFaceData(faces,H){
   }
   const V=faces.map(f=>{
     const m=f.points.length, base=new Float32Array(m), lift=new Float32Array(m), cs=new Float32Array(m*3);
+    const b0=f.kind==="filling" && f.pc ? slabTop(H,f.pc) : null;   // ломтик — один уровень на весь диск
     f.points.forEach((p,k)=>{
-      base[k]=slabTop(H,p);
+      base[k]=b0!==null ? b0 : slabTop(H,p);
       let c;
       if(f.kind==="filling"){ lift[k]=fillHeight(f,p)*FILL_VIS*SLAB_GAIN; c=BANANA_FLESH[f.source%3]; }
       else { const a=acc.get(vkey(p,f)); c=[a[0]/a[3],a[1]/a[3],a[2]/a[3]]; }
