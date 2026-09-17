@@ -245,7 +245,7 @@
 // до 400%+ и лист «рвётся» в середине от любого движения. Замер это обнаружил сразу.
 // Число узлов сохранено (1 060 после обрезки по кругу; прежняя оценка «~1150» была на глаз,
 // пересчитано 07.09.2026), однородность рёбер восстановлена.
-const BUILD = "2026-09-16 · складка внутрь · 5";
+const BUILD = "2026-09-16 · жест переворота · 6";
 const GRID = 38;                   // 38x38, в круг попадает 1 060 узлов (посчитано, не оценка)
 let SUBSTEPS = 8;                  // T2: 8–10 подшагов, 1 итерация
 let DAMP = 0.986;
@@ -828,7 +828,7 @@ function syncDishUI(){
   const flip=document.getElementById("flipDish");
   if(flip) flip.disabled=!dish || dish.mode!=="fold" || !!dishFlight;
   if(dish) hintEl.textContent=dish.mode==="fold"
-    ? "На таве: жарится. Край → внутрь — складка."
+    ? "На таве: жарится. Край → внутрь — складка; резкий мах от края — переворот."
     : "Нарезка: проведи через конверт прямым жестом.";
 }
 // Складка — только ВНУТРЬ листа. Раньше линия сгиба строилась по любому сдвигу длиннее
@@ -855,7 +855,8 @@ function beginDishGesture(id,p,client){
   const len=Math.hypot(edge.dx,edge.dy)||1, c=dish.hull.reduce((s,q)=>({x:s.x+q.x/dish.hull.length,y:s.y+q.y/dish.hull.length}),{x:0,y:0});
   let inward={x:-edge.dy/len,y:edge.dx/len};
   if((c.x-anchor.x)*inward.x+(c.y-anchor.y)*inward.y<0) inward={x:-inward.x,y:-inward.y};
-  dishGesture={id,start,end:start,anchor,inward,preview:null,client:at,samples,moved:false};
+  dishGesture={id,start,end:start,anchor,inward,edge,preview:null,client:at,samples,moved:false};
+  audioScrape();                              // ответ инструмента: лопатка коснулась стали у края
 }
 function inwardFold(g){
   const vx=g.target.x-g.anchor.x, vy=g.target.y-g.anchor.y, depth=vx*g.inward.x+vy*g.inward.y;
@@ -875,10 +876,60 @@ function moveDishGesture(p,client){
     g.preview=inwardFold(g) ? foldGeometry(g.anchor,g.target) : null;
   }
 }
+// Переворот на таве — тот же глагол «поднять и шлёпнуть»: коснуться края и резко махнуть
+// (вариант A для пробы владелицы, #21). Удержание здесь не используется — оно закреплено
+// за прижимом (решение 07.09). Скорость — регрессия по отсчётам в CSS px за последние
+// 80 мс, чтобы исход не зависел от частоты событий (урок #91). Все пороги — для пробы.
+const FLICK_MIN_CSS = 850, FLICK_MIN_PATH_CSS = 40, FLICK_MAX_MS = 300, FLICK_STALE_MS = 50, FLICK_WINDOW_MS = 80;
+function flickOf(g,tUp){
+  const S=g.samples, start=S[0];
+  let path=0, moveT0=null, lastMoveT=start.t;
+  for(let i=1;i<S.length;i++){
+    const d=Math.hypot(S[i].x-S[i-1].x,S[i].y-S[i-1].y);
+    if(d>0){ path+=d; lastMoveT=S[i].t; if(moveT0===null) moveT0=S[i-1].t; }
+  }
+  const win=S.filter(q=>q.t>=tUp-FLICK_WINDOW_MS);
+  const pts=win.length>=2 ? win : S.slice(-2);
+  let vx=0, vy=0;
+  if(pts.length>=2){
+    const n=pts.length, mt=pts.reduce((a,q)=>a+q.t,0)/n, mx=pts.reduce((a,q)=>a+q.x,0)/n, my=pts.reduce((a,q)=>a+q.y,0)/n;
+    let tt=0, tx=0, ty=0;
+    for(const q of pts){ const dt=q.t-mt; tt+=dt*dt; tx+=dt*(q.x-mx); ty+=dt*(q.y-my); }
+    if(tt>1e-9){ vx=tx/tt*1000; vy=ty/tt*1000; }
+  }
+  const speed=Math.hypot(vx,vy), duration=moveT0===null ? 0 : tUp-moveT0, stale=tUp-lastMoveT;
+  const ok=speed>=FLICK_MIN_CSS && path>=FLICK_MIN_PATH_CSS && duration<=FLICK_MAX_MS && stale<=FLICK_STALE_MS;
+  return {ok,vx,vy,speed,duration,path,stale};
+}
+function logPanGesture(outcome,f){
+  gestures.push({ ...measurementContext(), kind:"pan", outcome, speed:Math.round(f.speed),
+    duration_ms:Math.round(f.duration), path_css:Math.round(f.path), stale_ms:Math.round(f.stale),
+    folds:dish.folds, flips:dish.flips||0, ts:new Date().toISOString() });
+  if(gestures.length>200) gestures.shift();
+  try{ localStorage.setItem("dough_gestures", JSON.stringify(gestures)); }catch(e){}
+}
 function endDishGesture(){
   const g=dishGesture; dishGesture=null;
-  const ok=dish.mode==="fold" ? g.target&&inwardFold(g)&&foldDish(g.anchor,g.target) : cutDish(g.start,g.end);
-  if(!ok) dish.message=dish.mode==="fold" ? "Потяни край дальше внутрь листа" : "Проведи лезвием через тесто";
+  if(dish.mode!=="fold"){
+    if(!cutDish(g.start,g.end)) dish.message="Проведи лезвием через тесто";
+    return;
+  }
+  const last=g.samples[g.samples.length-1], f=flickOf(g,performance.now());
+  if(f.ok){
+    // Лист уходит по направлению маха: направление переводим из экрана в координаты блюда.
+    const a=dishLocal(toLocal(last.x-f.vx*.05,last.y-f.vy*.05)), b=dishLocal(toLocal(last.x,last.y));
+    const len=Math.hypot(b.x-a.x,b.y-a.y);
+    if(len>1e-9){
+      const d={x:(b.x-a.x)/len,y:(b.y-a.y)/len};
+      const reach=.15*Math.max(0,Math.min(1,(f.speed-FLICK_MIN_CSS)/1650));   // по хвосту маха, inferred
+      const ok=startFlip(d,{x:d.x*reach,y:d.y*reach});
+      logPanGesture(ok ? "flip" : "flip-refused",f);
+      if(ok) return;
+    }
+  }
+  const ok=g.target&&inwardFold(g)&&foldDish(g.anchor,g.target);
+  logPanGesture(ok ? "fold" : "none",f);
+  if(!ok) dish.message="Потяни край дальше внутрь листа";
 }
 // Section geometry belongs to a material snapshot, not to its screen size or heat.
 // A boundary exists only where dough ends. Shared mesh diagonals never get walls.
@@ -1054,12 +1105,37 @@ function drawDishFlight(g,sx,sy,pose){
   const lift=rise*.45*pose.scale;
   drawDishFaces(g,second ? n.faces : F.from,p=>place(p,lift));
 }
+// Ответ на касание края — о совершившемся, голосом предмета (критерий подсказок 07.09):
+// лопатка под краем и приподнятая кромка с тенью. До касания ничего не рисуется.
+function edgeFrame(d){
+  const len=Math.hypot(d.edge.dx,d.edge.dy)||1;
+  return {tx:d.edge.dx/len, ty:d.edge.dy/len, nx:d.inward.x, ny:d.inward.y, a:d.anchor};
+}
+function drawSpatula(g,screen,d,sx,sy){
+  const {tx,ty,nx,ny,a}=edgeFrame(d), w=.13, back=.10, fwd=.24;
+  const P=[[-w,-back],[w,-back],[w*.8,fwd],[-w*.8,fwd]].map(([u,v])=>screen({x:a.x+tx*u+nx*v,y:a.y+ty*u+ny*v}));
+  g.fillStyle="#b9b6ad"; g.globalAlpha=.9; g.beginPath(); g.moveTo(P[0].x,P[0].y);
+  for(let i=1;i<P.length;i++) g.lineTo(P[i].x,P[i].y);
+  g.closePath(); g.fill(); g.globalAlpha=1;
+}
+function drawLiftedEdge(g,screen,d,sx,sy){
+  const {tx,ty,a}=edgeFrame(d), half=.32, up=Math.max(2,4*sy);
+  const p=screen({x:a.x-tx*half,y:a.y-ty*half}), q=screen({x:a.x+tx*half,y:a.y+ty*half});
+  // тень под приподнятой кромкой и сама кромка чуть выше
+  g.fillStyle="rgba(6,3,1,.42)"; g.beginPath();
+  g.moveTo(p.x,p.y); g.lineTo(q.x,q.y); g.lineTo(q.x,q.y+up*.8); g.lineTo(p.x,p.y+up*.8); g.closePath(); g.fill();
+  g.strokeStyle="rgba(240,226,190,.9)"; g.lineWidth=Math.max(1,1.6*sy);
+  g.beginPath(); g.moveTo(p.x,p.y-up); g.lineTo(q.x,q.y-up); g.stroke();
+}
 function drawDish(g,sx,sy){
   const pose=dishPose();
   if(dishFlight){ drawDishFlight(g,sx,sy,pose); return; }
   const faces=dishGesture&&dishGesture.preview ? dishGesture.preview.faces : dish.faces;
   const screen=p=>{const x=pose.x+p.x*pose.scale,y=pose.y+p.y*pose.scale;return{x:prX(x,y)*sx,y:prY(x,y)*sy};};
+  const lift=dishGesture && dish.mode==="fold" && dishGesture.anchor && !dishGesture.preview ? dishGesture : null;
+  if(lift) drawSpatula(g,screen,lift,sx,sy);
   drawDishFaces(g,faces,screen);
+  if(lift) drawLiftedEdge(g,screen,lift,sx,sy);
   // Rebuild expensive boundary intersections only after a committed geometry
   // change. During a drag the existing flat preview remains immediate.
   if((dish.folds||dish.cuts.length)&&!(dishGesture&&dishGesture.preview)) drawDishSections(g,screen,faces,sx,sy);
@@ -1954,6 +2030,16 @@ function audioPanLand(){
   sizzleGain.gain.setValueAtTime(0.5, now);
   crackleNext = now + 0.15;
 }
+// Касание края на таве: короткий тихий скрежет лопатки о сталь.
+function audioScrape(){
+  if(!AC || condition==="sight" || !noiseBuf) return;
+  const s=AC.createBufferSource(); s.buffer=noiseBuf;
+  const f=AC.createBiquadFilter(); f.type="bandpass"; f.frequency.value=3400; f.Q.value=4;
+  const g=AC.createGain(); const t=AC.currentTime;
+  g.gain.setValueAtTime(0.0001,t); g.gain.exponentialRampToValueAtTime(0.10,t+0.015);
+  g.gain.exponentialRampToValueAtTime(0.001,t+0.09);
+  s.connect(f); f.connect(g); g.connect(master); s.start(t); s.stop(t+0.1);
+}
 // Лопатка поддела край и лист пошёл вверх: короткий скрежет о сталь, шипение отступает.
 function audioFlipLift(){
   if(!AC || condition==="sight" || !noiseBuf) return;
@@ -2089,8 +2175,13 @@ function onMove(id, cx, cy){
   dbgMove++;
   updateActionMove(toLocal(cx, cy));
 }
-function onUp(id){
-  if(dishGesture && dishGesture.id===id){ endDishGesture(); return; }
+function onUp(id, cx, cy){
+  if(dishGesture && dishGesture.id===id){
+    // touchend несёт последнюю точку: быстрый участок может прийти только в нём.
+    const L=dishGesture.samples[dishGesture.samples.length-1];
+    if(Number.isFinite(cx) && Number.isFinite(cy) && (cx!==L.x || cy!==L.y)) moveDishGesture(toLocal(cx,cy),{x:cx,y:cy});
+    endDishGesture(); return;
+  }
   if(action.pointerId !== id) return;
   releaseAction();
 }
@@ -2130,7 +2221,7 @@ window.addEventListener("touchmove", e=>{
 }, {passive:false, capture:true});
 
 window.addEventListener("touchend", e=>{
-  for(const t of e.changedTouches) onUp("t"+t.identifier);
+  for(const t of e.changedTouches) onUp("t"+t.identifier, t.clientX, t.clientY);
 }, {passive:false, capture:true});
 
 window.addEventListener("touchcancel", e=>{
@@ -2146,7 +2237,7 @@ window.addEventListener("pointermove", e=>{
   if(e.pointerType === "touch" || inUI(e.target)) return;
   onMove("p"+e.pointerId, e.clientX, e.clientY);
 }, true);
-window.addEventListener("pointerup", e=>{ onUp("p"+e.pointerId); }, true);
+window.addEventListener("pointerup", e=>{ onUp("p"+e.pointerId, e.clientX, e.clientY); }, true);
 window.addEventListener("pointercancel", e=>{ onCancel("p"+e.pointerId); }, true);
 // Уход в фон — та же отмена: не оставлять взведённый жест (audit §5).
 addEventListener("blur", ()=>{
