@@ -11,7 +11,7 @@
 // до 400%+ и лист «рвётся» в середине от любого движения. Замер это обнаружил сразу.
 // Число узлов сохранено (1 060 после обрезки по кругу; прежняя оценка «~1150» была на глаз,
 // пересчитано 07.09.2026), однородность рёбер восстановлена.
-const BUILD = "2026-09-17 · высота · 31";
+const BUILD = "2026-09-17 · рельеф без высоты · 32";
 const GRID = 38;                   // 38x38, в круг попадает 1 060 узлов (посчитано, не оценка)
 let SUBSTEPS = 8;                  // T2: 8–10 подшагов, 1 итерация
 let DAMP = 0.986;
@@ -1574,7 +1574,8 @@ function drawDishSections(g,screen,faces,sx,sy,zk=0,H=null){
     const weights=zk ? raw : w.stack.map(f=>f.kind==="filling"?1.65:1);
     const sum=weights.reduce((a,b)=>a+b,0);
     const surfPx=zk ? (H ? H.at(mid)*zk : raw.reduce((a,b)=>a+b,0)*zk) : 0;
-    const height=zk ? Math.max(unit*w.stack.length*.6,surfPx) : Math.min(Math.max(3,14*pixel),unit*sum), step=height/sum;
+    // минимум на слой не поднимает срез выше нарисованного верха больше чем на полпикселя
+    const height=zk ? Math.min(Math.max(unit*w.stack.length*.6,surfPx),surfPx+.5) : Math.min(Math.max(3,14*pixel),unit*sum), step=height/sum;
     const band=(from,to,color)=>{
       g.fillStyle=rgb(color);g.beginPath();
       g.moveTo(a.x+nx*from,a.y+ny*from);g.lineTo(b.x+nx*from,b.y+ny*from);
@@ -1625,6 +1626,11 @@ const ROTI_R_MM = 110;   // радиус роти ≈ 11 см (inferred): 1 targ
 const Z_EXAG_DEFAULT = 2;
 const Z_EXAG = (()=>{ try { const z=+new URLSearchParams(location.search).get("z"); if(z>=1 && z<=8) return z; } catch(e) {} return Z_EXAG_DEFAULT; })();
 const VIEW_UP = 0.83;    // вертикаль в кадре при наклоне стола, ≈ √(1 − TILT²)
+// Рельеф читается тенью и кромкой, а не высотой. Геометрия — как в жизни (Z_EXAG), а свет, кромка и
+// корки на стенках считаются так, будто высота прежняя (Z_RELIEF): при ×2 без этого верх освещался
+// ровно, складки оставались царапинами, а в виде A стенок не было вовсе (проверка сборки 31).
+const Z_RELIEF = 5;
+const RELIEF_K = Z_RELIEF / Z_EXAG;   // во сколько раз картинка выразительнее геометрии
 // Начинка — ломтики банана (владелица 17.09: жёлтые капли читались желтками). Мякоть кремовая;
 // у каждого ломтика тёмный ободок и семечки в середине. Желток появится отдельной начинкой.
 // Мякоть ломтика и его бок (порция — один ломтик). Ярко-жёлтая горка читалась желтком (17.09).
@@ -1787,7 +1793,7 @@ function envelopeSurface(H,faces){
   // Наклон считается в координатах блюда и сглаживается на ячейку (иначе свет мнётся, как бумага);
   // яркость — из наклона и направления света. Пока блюдо крутят, наклон поворачивается вместе с ним,
   // а свет стоит на месте (lightAtAngle), — раньше блик ехал с блюдом и прыгал на отпускании.
-  let gxg=new Float32Array(N), gyg=new Float32Array(N), s=Z_EXAG/ROTI_R_MM*LIGHT_SLOPE;
+  let gxg=new Float32Array(N), gyg=new Float32Array(N), s=Z_RELIEF/ROTI_R_MM*LIGHT_SLOPE;
   for(let j=0;j<n;j++) for(let i=0;i<n;i++){
     const c=j*n+i;
     if(!cover[c]) continue;
@@ -1869,7 +1875,7 @@ function drawFaceWalls(g,ps,screen,hs,zk,base){
   for(let k=0;k<ps.length;k++){
     const m=(k+1)%ps.length, a=screen(ps[k]), b=screen(ps[m]);
     const ha=hs[k]*zk, hb=hs[m]*zk, la=base ? base[k]*zk : 0, lb=base ? base[m]*zk : 0;
-    if(ha-la<.2 && hb-lb<.2) continue;
+    if(ha-la<.2/RELIEF_K && hb-lb<.2/RELIEF_K) continue;   // порог — доля прежней высоты, иначе бока тонкого пропадают
     g.beginPath(); g.moveTo(a.x,a.y-la); g.lineTo(b.x,b.y-lb); g.lineTo(b.x,b.y-hb); g.lineTo(a.x,a.y-ha); g.closePath(); g.fill();
   }
 }
@@ -1894,7 +1900,7 @@ function drawDishFaces(g,faces,screen,H,zk,shadow=true,shift=null){
     g.fillStyle=onTable ? "rgba(12,7,3,.5)" : "rgba(18,10,4,.34)";
     for(let i=0;i<faces.length && shadow;i++){
       if(faces[i].kind!=="dough" || H.zb[i]>.3) continue;
-      const hs=H.vert(i), drop=zk*Math.max(...hs)*(onTable ? .45 : .25);
+      const hs=H.vert(i), drop=zk*RELIEF_K*Math.max(...hs)*(onTable ? .45 : .25);
       if(drop<.3) continue;
       const ps=faces[i].points, p=screen(ps[0],faces[i]); g.beginPath(); g.moveTo(p.x+drop,p.y);
       for(let k=1;k<ps.length;k++){ const q=screen(ps[k],faces[i]); g.lineTo(q.x+drop,q.y); }
@@ -2038,7 +2044,7 @@ function drawLiftedEdge(g,screen,d,sx,sy){
 function drawDomes(g,screen,H,zk){
   // Пологий купол того же теста: тень у подножия справа-снизу, чуть светлее верх, узкий блик.
   for(const d of domes){
-    const c=screen(d), lift=H ? H.at(d)*zk : 0, up=(.6+1.6*d.grow)*zk;
+    const c=screen(d), lift=H ? H.at(d)*zk : 0, up=(.6+1.6*d.grow)*zk*RELIEF_K;
     const e=screen({x:d.x+d.r,y:d.y}), f=screen({x:d.x,y:d.y+d.r});
     const rx=Math.hypot(e.x-c.x,e.y-c.y), ry=Math.hypot(f.x-c.x,f.y-c.y), y0=c.y-lift;
     g.fillStyle="rgba(60,38,16,.18)";
@@ -2172,7 +2178,7 @@ function renderDishTable(faces,screen,H,zk,W,Hc,s,opts={}){
   if(!(bw>0 && bh>0) || bw*bh>8e6) return null;
   // Верх рельефа ограничен сверху: потолок теста плюс профиль ломтика.
   const maxUp=Math.ceil((SLAB_MM+FILL_MM*FILL_VIS*SLAB_GAIN)*zk)+2;
-  const N=bw*bh, K=TABLE_K, padX=Math.ceil(SHADOW_DX*maxUp)+4, padY=Math.ceil(SHADOW_DY*maxUp)+4;
+  const N=bw*bh, K=TABLE_K, padX=Math.ceil(SHADOW_DX*maxUp*RELIEF_K)+4, padY=Math.ceil(SHADOW_DY*maxUp*RELIEF_K)+4;
   const OW=bw+padX, OH=bh+maxUp+padY, NO=OW*OH;
   const A=tableArrays(N,NO), {tf,th,tl,tu,tv,col,pf,pn,pd}=A, layer=D.layer;
   // Грани идут снизу вверх: последняя накрывшая пиксель — его верх.
@@ -2269,8 +2275,9 @@ function renderDishTable(faces,screen,H,zk,W,Hc,s,opts={}){
   for(let j=0;j<bh;j++) for(let i=0;i<bw;i++){
     const c=j*bw+i; if(tf[c]<0) continue;
     const h=th[c];
-    let x=Math.round(i+SHADOW_DX*h), y=Math.round(j+UP+SHADOW_DY*h); if(x<OWu && y<OHu) sh[y*OWu+x]=1;
-    x=Math.round(i+SHADOW_DX*h*.5); y=Math.round(j+UP+SHADOW_DY*h*.5); if(x<OWu && y<OHu) sh[y*OWu+x]=1;
+    const hsx=h*RELIEF_K;   // тень читает высоту так же, как свет и кромка
+    let x=Math.round(i+SHADOW_DX*hsx), y=Math.round(j+UP+SHADOW_DY*hsx); if(x<OWu && y<OHu) sh[y*OWu+x]=1;
+    x=Math.round(i+SHADOW_DX*hsx*.5); y=Math.round(j+UP+SHADOW_DY*hsx*.5); if(x<OWu && y<OHu) sh[y*OWu+x]=1;
   }
   const rb=Math.max(1,Math.round(1.5*s)), NOu=OWu*OHu;
   boxSum(sh,sh,A.s1,OWu,OHu,rb);
@@ -2323,7 +2330,9 @@ function renderDishTable(faces,screen,H,zk,W,Hc,s,opts={}){
   const wallColor=(w,z,h,i)=>{
     const phi=Math.max(0,Math.min(.9999,z/h)), ao=.84+.16*phi;
     let c, kind;
-    if(!w.cut){ if(z<Math.max(1.2*s,.22*h)){ c=w.low; stat.low++; kind="low"; } else { c=w.side; kind="side"; } }
+    // поджаристый низ на боку сгиба — полоска, а не весь бок: при низкой стенке 1,2 пикселя
+    // съедали её целиком (проверка сборки 31)
+    if(!w.cut){ if(z<Math.min(Math.max(1.2*s,.22*h),.4*h)){ c=w.low; stat.low++; kind="low"; } else { c=w.side; kind="side"; } }
     else {
       let b=w.bands[w.bands.length-1];
       for(const x of w.bands) if(phi<x.to){ b=x; break; }
@@ -2332,9 +2341,11 @@ function renderDishTable(faces,screen,H,zk,W,Hc,s,opts={}){
         const pu=per*unit, ph=((w.along%pu)+pu)%pu/pu-.5, dz=(z-(zf+zt)/2)/Math.max(.5,(zt-zf)/2);
         c=(ph/.34)**2+(dz/.62)**2<1 ? flesh : FILL; kind="filling";
         stat.wallFill++;
-      } else if(z-zf<cp && zt-zf>2.5*cp){ c=b.c0; stat.crustDown++; kind="crustDown"; }
-      else if(zt-z<cp && zt-zf>2.5*cp){ c=b.c1; stat.crustUp++; kind="crustUp"; }
-      else { c=b.crumb; kind="crumb"; }
+      } else { // корка не толще 40 % полосы, но не тоньше пикселя: иначе на низкой стенке её нет вовсе
+        const cw=Math.max(.9,Math.min(cp,.4*(zt-zf)));
+        if(z-zf<cw){ c=b.c0; stat.crustDown++; kind="crustDown"; }
+        else if(zt-z<cw){ c=b.c1; stat.crustUp++; kind="crustUp"; }
+        else { c=b.crumb; kind="crumb"; } }
       stat.cutWall++;
     }
     R=c[0]*ao; G=c[1]*ao; B=c[2]*ao;
@@ -2342,7 +2353,7 @@ function renderDishTable(faces,screen,H,zk,W,Hc,s,opts={}){
   };
   // Наклон верха → свет слева-сверху-издалека (как у подушки на таве), вполсилы. Свет считается
   // в экране, поэтому при повороте он не крутится вместе с блюдом.
-  const slopeK=.5*TILT/Math.max(.2,VIEW_UP), dbgCol=opts.debugColumn, owner=dbgCol!==undefined ? new Int32Array(OHu).fill(-1) : null;
+  const slopeK=.5*TILT/Math.max(.2,VIEW_UP)*RELIEF_K, dbgCol=opts.debugColumn, owner=dbgCol!==undefined ? new Int32Array(OHu).fill(-1) : null;
   for(let i=0;i<bw;i++){
     let ymin=Infinity;
     for(let j=bh-1;j>=0;j--){
@@ -2351,8 +2362,10 @@ function renderDishTable(faces,screen,H,zk,W,Hc,s,opts={}){
       if(rt>=ymin) continue;
       const rEnd=Math.min(j,ymin-1), lip=Math.min(1.6*s+.4,h*.2);
       // Кромка — только там, где ближний сосед заметно ниже: иначе пологий склон рисовался
-      // полосами, как горы на карте (проба 17.09).
-      const near=j+1<bh && tf[c+bw]>=0 ? th[c+bw] : 0, edge=h-near>lip+1.5;
+      // полосами, как горы на карте (проба 17.09). Ступенька меряется в «прежней» высоте
+      // (×RELIEF_K), иначе при низком роти кромок нет вовсе (проверка сборки 31).
+      const near=j+1<bh && tf[c+bw]>=0 ? th[c+bw] : 0;
+      const hR=h*RELIEF_K, edge=(h-near)*RELIEF_K>Math.min(1.6*s+.4,hR*.2)+1.5;
       const far=j>0 && tf[c-bw]>=0 ? th[c-bw] : h, left=i>0 && tf[c-1]>=0 ? th[c-1] : h, right=i+1<bw && tf[c+1]>=0 ? th[c+1] : h;
       const gy=((edge ? h : near)-far)*.5*slopeK, gx=(right-left)*.5*slopeK;
       const light=Math.max(.8,Math.min(1.15,(.42*gx+.5*gy+.76)/Math.hypot(gx,gy,1)/.76));
