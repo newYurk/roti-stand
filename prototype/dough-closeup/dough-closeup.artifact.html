@@ -527,7 +527,7 @@ function startDish(){
         const a=ring[j], z=ring[(j+1)%ring.length], nx=-(z.y-a.y), ny=z.x-a.x;
         p=clipPoly(p,nx,ny,a.x*nx+a.y*ny);
       }
-      if(p.length){ faces.push({points:p,kind:"filling",source:id,tone:id%3,turned:false}); added=true; }
+      if(p.length){ faces.push({points:p,kind:"filling",source:id,tone:id%3,turned:false,pc:{x,y},pr:radius,ph:FILL_MM}); added=true; }
     }
     if(added) dish.filling.push({id,x,y,radius});
   }
@@ -535,7 +535,9 @@ function startDish(){
   if(!dish.filling.length){
     const f=base.reduce((a,b)=>polyArea(a.points)>polyArea(b.points)?a:b);
     const c=f.points.reduce((s,p)=>({x:s.x+p.x/3,y:s.y+p.y/3}),{x:0,y:0});
-    faces.push({...f,kind:"filling",source:0,tone:0,points:f.points.map(p=>({x:c.x+(p.x-c.x)*.7,y:c.y+(p.y-c.y)*.7}))});
+    const pts=f.points.map(p=>({x:c.x+(p.x-c.x)*.7,y:c.y+(p.y-c.y)*.7}));
+    faces.push({...f,kind:"filling",source:0,tone:0,points:pts,pc:{x:c.x,y:c.y},
+      pr:Math.max(...pts.map(p=>Math.hypot(p.x-c.x,p.y-c.y)))*1.2,ph:FILL_MM});
     dish.filling.push({id:0,x:c.x,y:c.y,radius:0});
   }
   // У материала две поверхности: 0 — та, что легла на таву при посадке, 1 — исходный
@@ -560,6 +562,27 @@ function pointInFace(points,x,y){
   }
   return true;
 }
+// ─── Толщина в миллиметрах и объём начинки (решение владелицы 17.09: всё влияет и на жарку,
+// и на вид). Это 2.5D: слои и карта высоты, без объёмной физики (#34). Все числа INFERRED —
+// миллиметров уличного роти в источниках нет; опора — «тонкий, почти прозрачный лист» и
+// подброшенное тесто пиццы 0,12–0,18 мм (docs/simulation-references.md, §в).
+const DOUGH_UNIT_MM = 14;     // толщина 1 (кусочек) ≈ 14 мм → лист у мишени (0,035) ≈ 0,5 мм
+const SHEET_REF_MM = 0.5;     // при такой толщине сушка идёт с базовой скоростью
+const FILL_MM = 4;            // высота порции начинки (ломтики банана с яйцом)
+const DOUGH_HEAT_MM = 1.05;   // тепло сквозь слой теста exp(−мм/1,05): лист 0,5 мм пропускает 0,62, как раньше
+const FILL_HEAT_MM = 5;       // сквозь начинку exp(−мм/5), и ещё её тень: порция 4 мм пропускает 0,45 × 0,2
+const COVER_MM = 1;           // тень начинки на слоях под ней 1/(1+мм/1): 4 мм дают ×0,2 (спецификация §1: ×0,15…0,25)
+const doughMM = tone => tone*DOUGH_UNIT_MM;
+// Высота начинки в точке: плато с мягким краем по внешней трети порции. Порция помнит свой
+// центр в текущих координатах (pc) — складка и переворот переносят его вместе с гранью.
+function fillHeight(f,p){
+  const H = f.ph ?? FILL_MM*0.8;
+  if(!f.pc || !(f.pr>0)) return H;
+  const edge = 1 - Math.hypot(p.x-f.pc.x,p.y-f.pc.y)/f.pr;
+  return H*Math.sqrt(Math.max(0.15,Math.min(1,edge/0.35)));
+}
+function layerMM(f,p){ return f.kind==="filling" ? fillHeight(f,p) : doughMM(f.tone); }
+const fillPass = mm => Math.exp(-mm/FILL_HEAT_MM)/(1+mm/COVER_MM);
 // Сушка верхней, открытой стороны: пар от нагретого низа уходит сквозь лист.
 // INFERRED — источника на долю нет. Закрытая сверху сторона (под клапаном или под
 // начинкой) не сохнет вовсе: там пар заперт, а начинка — водяной резервуар
@@ -598,15 +621,35 @@ function rebuildDishContact(){
     if(top){ dryD[s][up]+=UP_DRY*h*tr; topW[s][up]+=weight; }
     if(tr===1 && heat>0){ cookD[s][down]+=h; contactW[s][down]+=weight; }
   };
-  for(let y=0;y<size;y++) for(let x=0;x<size;x++){
-    const cell=cells[y*size+x]; let transmission=1;
-    const r=Math.hypot(b.left+(x+.5)*dx,b.top+(y+.5)*dy)*targetR/PAN_R;
-    const heat=r<=1 ? panHeat(r)*1.05 : 0;
-    for(let k=0;k<cell.length;k++){
-      const f=cell[k];
-      if(f.kind==="dough"){ deposit(f,heat,transmission,k===cell.length-1,1); transmission*=.62; }
-      else transmission*=.45; // moist filling slows heat reaching the upper flap
+  // Для крошечного фрагмента: та же стопка, но тепло кладётся только ему самому (индекс own).
+  const stackHeatAt=(stack,own,pt,heat,weight)=>{
+    const hs=stack.map(f=>layerMM(f,pt));
+    let transmission=1, fillAbove=0;
+    for(let k=own+1;k<stack.length;k++) if(stack[k].kind==="filling") fillAbove+=hs[k];
+    for(let k=0;k<own;k++) transmission*=stack[k].kind==="dough" ? Math.exp(-hs[k]/DOUGH_HEAT_MM) : fillPass(hs[k]);
+    deposit(stack[own],heat/(1+fillAbove/COVER_MM),transmission,own===stack.length-1,weight);
+  };
+  // Стопка в точке, снизу вверх: слой теста пропускает exp(−мм/DOUGH_HEAT_MM), начинка —
+  // exp(−мм/FILL_HEAT_MM)·тень; на всё, что лежит под начинкой, ложится её тень 1/(1+мм/COVER_MM).
+  // Тень входит и в поток вверх: клапан получает тепло сквозь охлаждённую начинкой базу,
+  // поэтому ему не может достаться больше, чем слою под начинкой.
+  const stackHeat=(stack,pt,heat,weight)=>{
+    const hs=stack.map(f=>layerMM(f,pt));
+    let above=0; const fillAbove=new Array(stack.length);
+    for(let k=stack.length-1;k>=0;k--){ fillAbove[k]=above; if(stack[k].kind==="filling") above+=hs[k]; }
+    let transmission=1;
+    for(let k=0;k<stack.length;k++){
+      const f=stack[k];
+      if(f.kind==="dough"){
+        deposit(f,heat/(1+fillAbove[k]/COVER_MM),transmission,k===stack.length-1,weight);
+        transmission*=Math.exp(-hs[k]/DOUGH_HEAT_MM);
+      } else transmission*=fillPass(hs[k]);   // влажная начинка задерживает тепло к клапану
     }
+  };
+  for(let y=0;y<size;y++) for(let x=0;x<size;x++){
+    const cell=cells[y*size+x];
+    const pt={x:b.left+(x+.5)*dx,y:b.top+(y+.5)*dy}, r=Math.hypot(pt.x,pt.y)*targetR/PAN_R;
+    stackHeat(cell,pt,r<=1 ? panHeat(r)*1.05 : 0,1);
   }
   // Tiny intact fragments may fit between all grid centres. Sample their own
   // interior instead of leaving a permanently raw island inside the hot pan.
@@ -617,22 +660,19 @@ function rebuildDishContact(){
     const f=dish.faces[i],t=dish.thermal[f.source];
     if(f.kind!=="dough" || !t || !missed[f.source]) continue;
     const p=f.points.reduce((s,p)=>({x:s.x+p.x/f.points.length,y:s.y+p.y/f.points.length}),{x:0,y:0});
-    let transmission=1;
-    const seen=new Set();
-    for(let j=0;j<i;j++){
+    // Та же стопка, что в ячейке, но собранная для собственной точки фрагмента.
+    const below=[],above=[],seen=new Set();
+    for(let j=0;j<dish.faces.length;j++){
+      if(j===i || !inBox(j,p)) continue;
       // Рамка отсекает почти все грани до точного теста: без неё открытый лист
       // тратил здесь десятки тысяч вызовов pointInFace на одну пересборку.
-      if(!inBox(j,p)) continue;
-      const below=dish.faces[j],key=below.kind+":"+below.source+":"+below.turned;
-      if(seen.has(key) || !pointInFace(below.points,p.x,p.y)) continue;
-      seen.add(key); transmission*=below.kind==="dough" ? .62 : .45;
+      const g=dish.faces[j],key=g.kind+":"+g.source+":"+g.turned;
+      if(j<i && seen.has(key)) continue;
+      if(!pointInFace(g.points,p.x,p.y)) continue;
+      if(j<i){ seen.add(key); below.push(g); } else above.push(g);
     }
-    let top=true;
-    for(let j=i+1;j<dish.faces.length && top;j++){
-      if(inBox(j,p) && pointInFace(dish.faces[j].points,p.x,p.y)) top=false;
-    }
-    const r=Math.hypot(p.x,p.y)*targetR/PAN_R,heat=r<=1 ? panHeat(r)*1.05 : 0;
-    deposit(f,heat,transmission,top,polyArea(f.points)/(dx*dy));
+    const r=Math.hypot(p.x,p.y)*targetR/PAN_R;
+    stackHeatAt(below.concat([f],above),below.length,p,r<=1 ? panHeat(r)*1.05 : 0,polyArea(f.points)/(dx*dy));
   }
   const avg=(v,s)=>count[s] ? [v[0]/count[s],v[1]/count[s]] : [0,0];
   dish.dryDrive=dryD.map(avg);
@@ -646,7 +686,8 @@ function cookDish(dt){
   if(!dish.dryDrive) rebuildDishContact();
   for(let i=0;i<dish.thermal.length;i++){
     const t=dish.thermal[i]; if(!t) continue;
-    const thin=Math.max(.2,Math.min(2,.10/Math.max(.05,t.tone)));
+    // Толще листа-эталона — сохнет медленнее, тоньше — быстрее (время сушки ∝ толщине, §1).
+    const thin=Math.max(.25,Math.min(2.5,SHEET_REF_MM/Math.max(.05,doughMM(t.tone))));
     for(let side=0;side<2;side++){
       // Сторона сначала сохнет, и только потом набирает цвет — как было для листа целиком.
       if(t.dry[side]<1) t.dry[side]=Math.min(1,t.dry[side]+dt*DRY_RATE*dish.dryDrive[i][side]*thin);
@@ -708,7 +749,8 @@ function foldGeometry(anchor,end){
     if(stay.length){ fixed.push({...f,points:stay}); if(f.kind==="dough") aFixed+=polyArea(stay); }
     if(lift.length){
       if(f.kind==="dough") aMoving+=polyArea(lift);
-      moving.push({...f,turned:!f.turned,points:lift.map(p=>{const d=p.x*nx+p.y*ny-offset;return{x:p.x-2*d*nx,y:p.y-2*d*ny};})});
+      const refl=p=>{const d=p.x*nx+p.y*ny-offset;return{x:p.x-2*d*nx,y:p.y-2*d*ny};};
+      moving.push({...f,turned:!f.turned,points:lift.map(refl),...(f.pc?{pc:refl(f.pc)}:{})});
     }
   }
   if(aMoving<.025*(aFixed+aMoving)||aFixed<.18*(aFixed+aMoving)) return null;
@@ -861,7 +903,7 @@ function flipGeometry(dir,landing={x:0,y:0}){
   const faces=[];
   for(let i=dish.faces.length-1;i>=0;i--){
     const f=dish.faces[i];
-    faces.push({...f,turned:!f.turned,points:f.points.map(mirror)});
+    faces.push({...f,turned:!f.turned,points:f.points.map(mirror),...(f.pc?{pc:mirror(f.pc)}:{})});
   }
   return {faces,axis:{nx,ny,c},from:c,to:{x:tx,y:ty}};
 }
