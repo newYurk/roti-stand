@@ -11,7 +11,7 @@
 // до 400%+ и лист «рвётся» в середине от любого движения. Замер это обнаружил сразу.
 // Число узлов сохранено (1 060 после обрезки по кругу; прежняя оценка «~1150» была на глаз,
 // пересчитано 07.09.2026), однородность рёбер восстановлена.
-const BUILD = "2026-09-16 · снятие на стол · 8";
+const BUILD = "2026-09-16 · подача · 9";
 const GRID = 38;                   // 38x38, в круг попадает 1 060 узлов (посчитано, не оценка)
 let SUBSTEPS = 8;                  // T2: 8–10 подшагов, 1 итерация
 let DAMP = 0.986;
@@ -299,6 +299,7 @@ function startDish(){
     tone:ids.reduce((s,i)=>s+thick[i],0)/4,contact:ids.reduce((s,i)=>s+contactF[i],0)/4
   });
   dish.flips=0; dish.panTime=0; dish.sessions=[{flip:0,start:0,gold:null}];
+  dish.holes=quadCons.filter(cs=>cs.some(c=>c.broken)).length;   // рваные ячейки листа при посадке
   rebuildDishContact(); dish.hull=dishHull(); syncDishUI();
 }
 // Heat belongs to material, not to a geometry snapshot. Undo never rewinds cooking.
@@ -475,6 +476,50 @@ function foldDish(anchor,end){
   dish.message=`Складок: ${dish.folds} · можно сложить ещё`;
   syncDishUI(); return true;
 }
+// ─── Подача (решение владелицы 16.09): техническая кнопка «подать» → карточка → «следующий роти».
+// Карточка — черновик стенда: что помнит след роти, владелица отложила до первой нарисованной
+// карточки (#50). Здесь только то, что стенд знает наверняка.
+let servedCount = 0;
+function cookWord(c){
+  return c<.05 ? "сырое" : c<.25 ? "бледное" : c<.6 ? "золотистое" : c<1 ? "румяное" : c<1.3 ? "тёмное" : "до угля";
+}
+function dishCard(){
+  const bottom=dishSideMean("cook","contactWeights"), top=dishSideMean("cook","topWeights");
+  return { folds:dish.folds, flips:dish.flips||0, cuts:dish.cuts.length, holes:dish.holes||0,
+    portions:dish.filling.length, bottom:+bottom.toFixed(3), top:+top.toFixed(3),
+    bottomWord:cookWord(bottom), topWord:cookWord(top), panSeconds:Math.round(dish.panTime||0),
+    sessions:(dish.sessions||[]).map(x=>x.gold===null ? "—" : typeof x.gold==="string" ? x.gold : Math.round(x.gold)+" с") };
+}
+function serveDish(){
+  if(!dish || dish.mode!=="cut" || dishMove || dishGesture) return false;
+  const c=dishCard(), f=v=>v.toFixed(2).replace(".",",");
+  dish.mode="served"; dish.card=c; servedCount++;
+  gestures.push({ ...measurementContext(), kind:"serve", n:servedCount, ...c, ts:new Date().toISOString() });
+  if(gestures.length>200) gestures.shift();
+  try{ localStorage.setItem("dough_gestures", JSON.stringify(gestures)); }catch(e){}
+  const lines=[
+    `Роти №${servedCount} подано`,
+    `Складок ${c.folds} · переворотов ${c.flips} · резов ${c.cuts}`,
+    `Снизу ${c.bottomWord} (${f(c.bottom)}) · сверху ${c.topWord} (${f(c.top)})`,
+    `На таве ${c.panSeconds} с`,
+    `Золото низа по сеансам: ${c.sessions.join(" / ")}`,
+    `Начинка: ${c.portions} порц. · ${c.holes ? `рваный узор (${c.holes} ячеек)` : "без дырок"}`,
+  ];
+  if(!c.folds) lines.push("Не сложено");
+  else if(!c.flips) lines.push("Конверт не переворачивали — верх не прожарен");
+  if(!c.cuts) lines.push("Не нарезано");
+  lines.push("", "черновик карточки стенда · что помнит след — ещё не решено (#50)");
+  document.getElementById("cardBody").textContent=lines.join("\n");
+  document.getElementById("card").hidden=false;
+  dish.message="Подано";
+  syncDishUI(); return true;
+}
+function nextRoti(){
+  document.getElementById("card").hidden=true;
+  stepNo=1;
+  try{ localStorage.setItem("dough_step","1"); }catch(e){}
+  syncStepButtons(); reset();
+}
 function startCutting(){
   if(!dish || !dish.folds || dish.mode!=="fold" || dishGesture || dishFlight) return;
   const b=dishBounds(); dish.cutBounds=b; dish.cutCenter={x:(b.left+b.right)/2,y:(b.top+b.bottom)/2};
@@ -507,7 +552,7 @@ function cutDish(a,b){
   syncDishUI(); return true;
 }
 function undoDish(){
-  if(!dish || dishGesture || dishFlight || dishMove || !dish.history.length) return;
+  if(!dish || dishGesture || dishFlight || dishMove || dish.mode==="served" || !dish.history.length) return;
   const flipsBefore=dish.flips||0;
   Object.assign(dish,dish.history.pop()); dish.hull=dishHull(); rebuildDishContact();
   // Отмена переворота кладёт на сталь другую сторону — это новый сеанс, а не откат времени.
@@ -598,15 +643,18 @@ function syncDishUI(){
   document.getElementById("gTune").hidden=!!dish;
   document.getElementById("gCond").hidden=!!dish;
   const cut=document.getElementById("cutMode");
-  cut.disabled=!dish || !dish.folds || dish.mode==="cut";
+  cut.disabled=!dish || !dish.folds || dish.mode!=="fold";
   cut.textContent=dish && dish.mode==="cut" ? "нарезка на столе" : "к нарезке →";
   cut.disabled=cut.disabled || !!dishFlight || !!dishMove;
-  document.getElementById("undoDish").disabled=!dish || !dish.history.length || !!dishFlight;
+  document.getElementById("undoDish").disabled=!dish || !dish.history.length || !!dishFlight || dish.mode==="served";
+  const serve=document.getElementById("serveDish");
+  if(serve){ serve.hidden=!dish || dish.mode==="fold"; serve.disabled=!dish || dish.mode!=="cut" || !!dishMove; }
   const flip=document.getElementById("flipDish");
   if(flip) flip.disabled=!dish || dish.mode!=="fold" || !!dishFlight;
   if(dish) hintEl.textContent=dish.mode==="fold"
     ? "край: внутрь — складка · мах — переворот · на стол — снять"
-    : "Нарезка: проведи через конверт прямым жестом.";
+    : dish.mode==="served" ? "Подано · «следующий роти» — новый кусочек"
+    : "Нарезка: проведи через конверт прямым жестом · «подать» — когда готово";
 }
 // Складка — только ВНУТРЬ листа. Раньше линия сгиба строилась по любому сдвигу длиннее
 // 0,12, и сдвиг пальца вдоль кромки на 10 CSS px складывал полсписта (портрет: сгиб
@@ -1074,6 +1122,7 @@ function build(){
   layoutPan();
   phase = "TABLE"; xf = null;
   dish = null; dishGesture = null; dishFlight = null; dishMove = null; syncDishUI(); syncStepButtons();
+  { const card = document.getElementById("card"); if(card) card.hidden = true; }
   cook = new Float32Array(N); dry = new Float32Array(N);
   // Контакт с плитой пятнистый, а не идеальный: под листом микрозазоры, складки, плёнка
   // жира. Источники в один голос описывают ПЯТНА («some brown spots», «leopard-spotted»),
@@ -2062,7 +2111,7 @@ let rawTouch = 0, rawPointer = 0;
 // умерла кнопка «всё равно продолжить» на заглушке поворота: она лежала внутри #stage,
 // а проверка была только на #panel. Заглушки больше нет, но правило остаётся:
 // ЛЮБОЙ новый слой поверх поля добавлять СЮДА, иначе его кнопки не нажмутся.
-function inUI(t){ return !!(t && t.closest && t.closest("#panel")); }
+function inUI(t){ return !!(t && t.closest && t.closest("#panel, #card")); }
 
 window.addEventListener("touchstart", e=>{
   rawTouch++;
@@ -2115,6 +2164,8 @@ document.getElementById("reset").addEventListener("click", reset);
 // Техническое снятие — тот же перелёт на стол, что и у жеста.
 document.getElementById("cutMode").addEventListener("click", ()=>startRemoval());
 document.getElementById("undoDish").addEventListener("click", undoDish);
+document.getElementById("serveDish").addEventListener("click", serveDish);
+document.getElementById("nextRoti").addEventListener("click", nextRoti);
 // Технический вход переворота (как «к нарезке»): лист уходит от игрока и ложится обратно.
 document.getElementById("flipDish").addEventListener("click", ()=>startFlip({x:0,y:-1},{x:0,y:0}));
 document.getElementById("foldSample").addEventListener("click", ()=>{

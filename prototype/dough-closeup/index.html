@@ -74,6 +74,12 @@
     padding:2px 6px; font-size:10px; line-height:1.3; color:#f0c674;
     background:rgba(20,16,12,.82); border:1px solid #5a4526; pointer-events:none;
     z-index:3; overflow-wrap:anywhere; }
+  /* Карточка поданного роти: черновик стенда (#50 — что помнит след, ещё не решено). */
+  #card{ position:absolute; left:6%; right:6%; top:12%; max-height:76%; overflow:auto; z-index:5;
+    padding:12px 14px; background:rgba(20,16,12,.95); border:1px solid #5a4526; color:var(--ink);
+    font-size:13px; line-height:1.5; touch-action:pan-y; }
+  #cardBody{ white-space:pre-line; }
+  #card button{ margin-top:10px; padding:9px 14px; }
   /* Портрет БОЛЬШЕ НЕ ЗАКРЫТ (решение владельца 08.09.2026: «на вертикальном экране
      закидываем роти снизу вверх, и таву увеличим»). Заглушка «поверни телефон» стояла
      здесь потому, что в портрете сцена была широкой низкой полосой, лист и тава лежали
@@ -178,6 +184,11 @@
   <div id="live">прижми кусочек теста</div>
   <div id="flash"></div>
   <div id="previewBadge" hidden></div>
+  <!-- Карточка поданного роти — слой поверх поля, поэтому он есть в inUI() stand.js. -->
+  <div id="card" hidden>
+    <div id="cardBody"></div>
+    <button id="nextRoti">следующий роти</button>
+  </div>
 </div>
 
 <div id="panel">
@@ -194,6 +205,7 @@
     <div class="grp" id="gDish" hidden><b>конверт</b>
       <button id="flipDish" disabled title="Технический вход: перевернуть лист на таве">перевернуть</button>
       <button id="cutMode" disabled>к нарезке →</button>
+      <button id="serveDish" hidden>подать</button>
       <button id="undoDish" disabled>отменить</button>
     </div>
     <button id="tear">СЕЙЧАС ПОРВЁТСЯ<span class="kbd"> (space)</span></button>
@@ -231,6 +243,6 @@
   </div>
 </div>
 
-<script src="stand.js?v=2026-09-16-remove-8"></script>
+<script src="stand.js?v=2026-09-16-serve-9"></script>
 </body>
 </html>
