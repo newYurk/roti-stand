@@ -22,8 +22,9 @@
 - Артефакты (приватные; истина — git): обзор https://claude.ai/code/artifact/4f303d10-1e8d-45a2-97d8-2d825fa1a475
   (`docs/overview.html`, отстал от корпуса — #92), стенд https://claude.ai/code/artifact/9f56d5c6-253b-4e09-b04c-1804c263aa20
   (`dough-closeup.artifact.html` — самодостаточный снимок `index.html` + `stand.js`).
-- **Рабочие материалы и регрессия стенда — вне git**, в `~/Desktop/SDV/AI/Roti_Stand/`
-  (правило владелицы). Сырые результаты и скриншоты в git не кладутся.
+- **Рабочие материалы, регрессия стенда, логи и профиль своего браузера — в `runs/`** (исключён
+  из git; в `~/Desktop/SDV` личные проекты не кладутся — Home/CLAUDE.md, 16.09). Регрессия —
+  `runs/continuation/regression/`, предпросмотр ветки — `runs/continuation/preview/` (порт 8781).
 
 ## Сейчас: v0 · вертикальный срез — законченное роти
 
