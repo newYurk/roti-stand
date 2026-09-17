@@ -1069,8 +1069,8 @@ function flickOf(g,tUp){
   const ok=speed>=FLICK_MIN_CSS && path>=FLICK_MIN_PATH_CSS && duration<=FLICK_MAX_MS && stale<=FLICK_STALE_MS;
   return {ok,vx,vy,speed,duration,path,stale};
 }
-function logPanGesture(outcome,f){
-  gestures.push({ ...measurementContext(), kind:"pan", outcome, speed:Math.round(f.speed),
+function logPanGesture(outcome,f,extra){
+  gestures.push({ ...measurementContext(), kind:"pan", outcome, condition, ...(extra||{}), speed:Math.round(f.speed),
     duration_ms:Math.round(f.duration), path_css:Math.round(f.path), stale_ms:Math.round(f.stale),
     folds:dish.folds, flips:dish.flips||0, ts:new Date().toISOString() });
   if(gestures.length>200) gestures.shift();
@@ -1100,7 +1100,10 @@ function endDishGesture(time){
     const onTable=slideEndsOnTable(last), fingerFar=Math.hypot(last.x-g.client.x,last.y-g.client.y)>=REMOVE_MIN_CSS;
     if(!dish.folds && onTable && fingerFar){ logPanGesture("slide-unfolded",f); dish.message="Сначала сверни края — потом на стол"; return; }
     if(!onTable || !slideFarEnough(g,last)){ logPanGesture("slide-back",f); dish.message="Веди дальше — на стол"; return; }
-    logPanGesture(startRemoval(g.slide) ? "remove" : "slide-refused",f);
+    // Для замера «когда снимать» (#14): цвет прижатой и видимой стороны в момент снятия.
+    const at={bottomCook:+meanCook().toFixed(3), topCook:+dishSideMean("cook","topWeights").toFixed(3),
+      panSeconds:Math.round(dish.panTime||0)};
+    logPanGesture(startRemoval(g.slide) ? "remove" : "slide-refused",f,at);
     return;
   }
   const ok=g.target&&inwardFold(g)&&foldDish(g.anchor,g.target);
