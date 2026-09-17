@@ -269,7 +269,7 @@
 // до 400%+ и лист «рвётся» в середине от любого движения. Замер это обнаружил сразу.
 // Число узлов сохранено (1 060 после обрезки по кругу; прежняя оценка «~1150» была на глаз,
 // пересчитано 07.09.2026), однородность рёбер восстановлена.
-const BUILD = "2026-09-17 · рельеф на столе · 26";
+const BUILD = "2026-09-17 · поворот · 27";
 const GRID = 38;                   // 38x38, в круг попадает 1 060 узлов (посчитано, не оценка)
 let SUBSTEPS = 8;                  // T2: 8–10 подшагов, 1 итерация
 let DAMP = 0.986;
@@ -466,6 +466,9 @@ let contactRebuilds = 0;        // счётчик пересборок конт�
 let dishFlight = null;
 // Перелёт снятого блюда с тавы на стол: поза интерполируется от места на таве к столу.
 let dishMove = null;
+// Поворот в процессе (предпросмотр): {input, angle, pivot, …}; запекается на отпускании (rotateDish).
+let dishTwist = null;
+const dishTouches = new Map();   // касания поля при блюде: id → точка стола (второй палец — поворот)
 const polyArea = p => Math.abs(p.reduce((s,a,i)=>{ const b=p[(i+1)%p.length]; return s+a.x*b.y-b.x*a.y; },0))/2;
 function clipPoly(points, nx, ny, offset, positive=true){
   const out=[], sign=positive ? 1 : -1;
@@ -486,12 +489,15 @@ function dishBounds(faces=dish.faces){
 }
 function dishPose(){
   if(dish.mode==="fold") return {x:panC.x,y:panC.y,scale:targetR};
-  const w=zone("work"), b=dish.cutBounds;
+  const w=zone("work"), b=dishTwist ? twistBoundsCached() : dish.cutBounds;
   const perspective=1+((w.cy+w.h*.35-horizon())/cv.height)*PERSP;
   const scale=Math.min(targetR*1.4,w.w*.82/(b.right-b.left)/perspective,w.h*.70/(b.bottom-b.top));
   return {x:w.cx-dish.cutCenter.x*scale,y:w.cy-dish.cutCenter.y*scale,scale};
 }
-function dishLocal(p){ const pose=dishPose(); return {x:(p.x-pose.x)/pose.scale,y:(p.y-pose.y)/pose.scale}; }
+function dishLocal(p){
+  const pose=dishPose(), q={x:(p.x-pose.x)/pose.scale,y:(p.y-pose.y)/pose.scale}, T=dishTwist;
+  return T ? rotAbout(q,T.pivot,Math.cos(-T.angle),Math.sin(-T.angle)) : q;
+}
 function dishHull(){
   const pts=dish.faces.filter(f=>f.kind==="dough").flatMap(f=>f.points).slice().sort((a,b)=>a.x-b.x||a.y-b.y);
   const cross=(a,b,c)=>(b.x-a.x)*(c.y-a.y)-(b.y-a.y)*(c.x-a.x);
@@ -1068,6 +1074,7 @@ function dishCard(){
     sessions:(dish.sessions||[]).map(x=>x.gold===null ? "—" : typeof x.gold==="string" ? x.gold : Math.round(x.gold)+" с") };
 }
 function serveDish(){
+  if(dishTwist) endTwist(false);
   if(!dish || dish.mode!=="cut" || dishMove || dishGesture) return false;
   const c=dishCard(), f=v=>v.toFixed(2).replace(".",",");
   dish.mode="served"; dish.card=c; servedCount++;
@@ -1135,6 +1142,7 @@ function cutDish(a,b){
   syncDishUI(); return true;
 }
 function undoDish(){
+  if(dishTwist) endTwist(false);            // кнопка посреди поворота: поворот не считается
   if(!dish || dishGesture || dishFlight || dishMove || dish.mode==="served" || !dish.history.length) return;
   const flipsBefore=dish.flips||0;
   panPress=[]; for(const d of domes.slice()) popDome(d,false);   // геометрия меняется — купола и пятна прижима не переносятся
@@ -1210,6 +1218,7 @@ function commitFlip(next){
 // Технический и жестовый вход одинаковы: полёт 0,45 с, посадка — шлепок и волна шипения.
 const FLIP_T = 0.45;
 function startFlip(dir,landing){
+  if(dishTwist) endTwist(false);
   if(!dish || dish.mode!=="fold" || phase!=="PAN" || dishGesture || dishFlight) return false;
   const next=flipGeometry(dir,landing); if(!next) return false;
   if(dish.folds || dish.cuts.length) dishSectionGeometry(next.faces);   // торец считаем до посадки, если он рисуется
@@ -1230,6 +1239,87 @@ function updateDishFlight(){
   commitFlip(next);
   if(!late) audioPanLand();                  // шлепок через минуты после взлёта — ложный звук
 }
+// ─── Поворот сложенного роти на плоскости (владелица 17.09: «давай реализуем поворот на плоскости
+// (когда роти уже в сложенном виде)?», жест — «два пальца?»). Пока пальцы крутят, поворот только
+// показывается (dishTwist); на отпускании он запекается в геометрию, как переворот: грани, центры
+// ломтиков и резы поворачиваются вокруг середины (на таве — центроида теста, на столе — середины
+// раскладки), шаг ложится в историю. Тепло принадлежит материалу и не меняется; на таве контакт
+// пересчитывается (сталь греет по радиусу), пятна прижима и купола снимаются — лопатка поддела лист.
+// Мышь: колесо или прокрутка тачпада над полем (фиксируется через TWIST_IDLE_MS тишины) и
+// перетаскивание с Option/Alt. Все числа — для пробы.
+const TWIST_MIN_DEG = 1, TWIST_IDLE_MS = 220, TWIST_WHEEL_DEG = 0.25;   // градусов на пиксель прокрутки
+function canTwist(){
+  if(!dish || dishFlight || dishMove || dish.mode==="served") return false;
+  if(dish.mode==="fold") return phase==="PAN" && dish.folds>0;
+  return dish.mode==="cut";
+}
+function twistPivot(){ return dish.mode==="cut" ? {...dish.cutCenter} : dishCentroid(); }
+const rotAbout=(p,c,cs,sn)=>({x:c.x+(p.x-c.x)*cs-(p.y-c.y)*sn, y:c.y+(p.x-c.x)*sn+(p.y-c.y)*cs});
+// Границы повёрнутого блюда — масштаб стола следует за поворотом плавно, без скачка на отпускании.
+function twistBounds(angle,pivot){
+  const cs=Math.cos(angle), sn=Math.sin(angle);
+  let left=Infinity,right=-Infinity,top=Infinity,bottom=-Infinity;
+  for(const f of dish.faces){ if(f.kind!=="dough") continue;
+    for(const p of f.points){ const q=rotAbout(p,pivot,cs,sn); if(q.x<left)left=q.x; if(q.x>right)right=q.x; if(q.y<top)top=q.y; if(q.y>bottom)bottom=q.y; } }
+  return {left,right,top,bottom};
+}
+function twistBoundsCached(){
+  const T=dishTwist, C=twistBoundsCached.c;
+  if(C && C.faces===dish.faces && C.angle===T.angle && C.px===T.pivot.x && C.py===T.pivot.y) return C.b;
+  const b=twistBounds(T.angle,T.pivot);
+  twistBoundsCached.c={faces:dish.faces,angle:T.angle,px:T.pivot.x,py:T.pivot.y,b};
+  return b;
+}
+function rotateDish(angle,pivot=twistPivot()){
+  if(!canTwist() || dishGesture || !(Math.abs(angle)*180/Math.PI>=TWIST_MIN_DEG)) return false;
+  const cs=Math.cos(angle), sn=Math.sin(angle), R=p=>rotAbout(p,pivot,cs,sn);
+  const moved=new Map(), rot=p=>{ let q=moved.get(p); if(!q){ q=R(p); moved.set(p,q); } return q; };
+  const faces=dish.faces.map(f=>({...f,points:f.points.map(rot),...(f.pc?{pc:R(f.pc)}:{})}));
+  if(dish.mode==="cut"){
+    // Отмена поворота на столе возвращает и рамку масштаба.
+    dish.history.push({faces:dish.faces,folds:dish.folds,cuts:dish.cuts,flips:dish.flips||0,cutBounds:dish.cutBounds});
+    if(dish.history.length>20) dish.history.shift();
+    dish.faces=faces; dish.cuts=dish.cuts.map(c=>({...c,a:R(c.a),b:R(c.b)}));
+    dish.cutBounds=dishBounds();
+  } else {
+    panPress=[]; popAllDomes();
+    rememberDish(); dish.faces=faces; rebuildDishContact();
+  }
+  dish.hull=dishHull();
+  const deg=Math.round(angle*180/Math.PI);
+  dish.message=`Повёрнуто на ${Math.abs(deg)}° ${deg>0 ? "по часовой" : "против часовой"}`;
+  syncDishUI(); return true;
+}
+function logTwist(input,angle){
+  gestures.push({ ...measurementContext(), kind:"twist", input, mode:dish.mode, deg:+(angle*180/Math.PI).toFixed(1),
+    folds:dish.folds, cuts:dish.cuts.length, ts:new Date().toISOString() });
+  if(gestures.length>200) gestures.shift();
+  try{ localStorage.setItem("dough_gestures", JSON.stringify(gestures)); }catch(e){}
+}
+// Угол точек касания меряется в плоскости стола: на экране стол сжат по вертикали.
+const tableAngle=(a,b)=>Math.atan2(b.y-a.y,b.x-a.x);
+function beginTwist(input,extra){
+  if(!canTwist() || dishTwist) return false;
+  if(dishGesture){ releasePress(dishGesture); dishGesture=null; }   // второй палец отменяет начатую складку или рез
+  dishTwist={input,angle:0,pivot:twistPivot(),lastT:performance.now(),...extra};
+  if(dish.mode==="fold") audioScrape();
+  return true;
+}
+function twistTo(raw){
+  // Разворот через ±180° не перескакивает: копим приращения.
+  const T=dishTwist; let d=raw-T.raw; d=Math.atan2(Math.sin(d),Math.cos(d));
+  T.raw=raw; T.angle+=d; T.lastT=performance.now();
+}
+function endTwist(commit=true){
+  const T=dishTwist; if(!T) return false;
+  dishTwist=null;
+  const ok=commit && rotateDish(T.angle,T.pivot);
+  logTwist(T.input,ok ? T.angle : 0);
+  return ok;
+}
+function updateDishTwist(){
+  if(dishTwist && dishTwist.input==="wheel" && performance.now()-dishTwist.lastT>=TWIST_IDLE_MS) endTwist(true);
+}
 function syncDishUI(){
   document.getElementById("gDish").hidden=!dish;
   document.getElementById("gStep").hidden=!!dish;
@@ -1248,9 +1338,9 @@ function syncDishUI(){
   const served=!!dish && dish.mode==="served";
   for(const id of ["flipDish","cutMode","undoDish"]){ const b=document.getElementById(id); if(b) b.hidden=served; }
   if(dish) hintEl.textContent=dish.mode==="fold"
-    ? "край: внутрь — складка · мах — переворот · на стол — снять · держи — прижим"
+    ? "край: внутрь — складка · мах — переворот · на стол — снять · держи — прижим"+(dish.folds ? " · два пальца — повернуть" : "")
     : dish.mode==="served" ? "Подано · «следующий роти» — новый кусочек"
-    : "Нарезка: проведи через конверт прямым жестом · «подать» — когда готово";
+    : "Нарезка: проведи через конверт прямым жестом · два пальца или колесо — повернуть · «подать» — когда готово";
 }
 // Складка — только ВНУТРЬ листа. Раньше линия сгиба строилась по любому сдвигу длиннее
 // 0,12, и сдвиг пальца вдоль кромки на 10 CSS px складывал полсписта (портрет: сгиб
@@ -1260,7 +1350,7 @@ function syncDishUI(){
 // (iOS allowableMovement 10 pt, Android touch slop 8 dp). Числа — для пробы, не замер.
 const FOLD_MIN_DEPTH = 0.12, FOLD_MAX_ANGLE_COS = Math.cos(60*Math.PI/180), TOUCH_SLOP_CSS = 10;
 function beginDishGesture(id,p,client,time){
-  if(dishGesture || dishFlight || dishMove || dish.mode==="served") return;
+  if(dishGesture || dishTwist || dishFlight || dishMove || dish.mode==="served") return;
   const start=dishLocal(p), at=client || {x:0,y:0}, t0=Number.isFinite(time) ? time : performance.now();
   const samples=[{x:at.x,y:at.y,t:t0}];
   if(dish.mode==="cut"){
@@ -1387,6 +1477,7 @@ function slideEndsOnTable(client){
 }
 const MOVE_T = 0.35;
 function startRemoval(slide={x:0,y:0}){
+  if(dishTwist) endTwist(false);
   if(!dish || dish.mode!=="fold" || dishFlight || dishMove || dishGesture) return false;
   const from=dishPose(); from.x+=slide.x*from.scale; from.y+=slide.y*from.scale;
   panPress=[]; popAllDomes();
@@ -2414,12 +2505,15 @@ function renderDishTable(faces,screen,H,zk,W,Hc,s){
 }
 function drawDishTable(g,screen,faces,H,zk,sx,sy){
   const W=Math.round(cv.width*sx), Hc=Math.round(cv.height*sy), s=Math.min(2,devicePixelRatio||1)*Math.min(sx,sy);
+  // Пока блюдо крутят, рельеф считается каждый кадр — вполовину разрешения (вчетверо дешевле);
+  // на отпускании — полный.
+  const q=dishTwist && W>400 ? .5 : 1, sc=q===1 ? screen : p=>{ const a=screen(p); return {x:a.x*q,y:a.y*q}; };
   const o=screen({x:0,y:0}), e=screen({x:1,y:1});
-  const key=[W,Hc,o.x,o.y,e.x,e.y,zk,s,dish.panTime||0,dish.flips||0,SHOW_THROUGH].map(v=>+(+v).toFixed(3)).join(",");
+  const key=[W,Hc,o.x,o.y,e.x,e.y,zk,s,q,dish.panTime||0,dish.flips||0,SHOW_THROUGH].map(v=>+(+v).toFixed(3)).join(",");
   let C=drawDishTable.cache;
   if(!C || C.faces!==faces || C.key!==key){
-    const R=renderDishTable(faces,screen,H,zk,W,Hc,s);
-    C=drawDishTable.cache={faces,key,R,drawn:false};
+    const R=renderDishTable(faces,sc,H,zk*q,Math.round(W*q),Math.round(Hc*q),s*q);
+    C=drawDishTable.cache={faces,key,R,q,drawn:false};
     if(R && typeof document!=="undefined"){
       if(!tableCanvas) tableCanvas=document.createElement("canvas");
       tableCanvas.width=R.w; tableCanvas.height=R.h;
@@ -2427,7 +2521,9 @@ function drawDishTable(g,screen,faces,H,zk,sx,sy){
       if(tc && tc.createImageData && tc.putImageData){ const img=tc.createImageData(R.w,R.h); img.data.set(R.data); tc.putImageData(img,0,0); C.drawn=true; }
     }
   }
-  if(C.R && C.drawn) g.drawImage(tableCanvas,C.R.x,C.R.y);
+  if(!(C.R && C.drawn)) return;
+  if(C.q===1) g.drawImage(tableCanvas,C.R.x,C.R.y);
+  else { const k=1/C.q, sm=g.imageSmoothingEnabled; g.imageSmoothingEnabled=true; g.drawImage(tableCanvas,C.R.x*k,C.R.y*k,C.R.w*k,C.R.h*k); g.imageSmoothingEnabled=sm; }
 }
 // Вмятина под пальцем: мягкое тёмное пятно на поверхности, глубже с силой прижима.
 function drawPressDents(g,screen,H,zk,pose,sx,sy){
@@ -2454,7 +2550,8 @@ function drawDish(g,sx,sy){
   const slide=dishGesture && dishGesture.slide;
   if(slide) pose={x:pose.x+slide.x*pose.scale, y:pose.y+slide.y*pose.scale, scale:pose.scale};
   const faces=dishGesture&&dishGesture.preview ? dishGesture.preview.faces : dish.faces;
-  const screen=p=>{const x=pose.x+p.x*pose.scale,y=pose.y+p.y*pose.scale;return{x:prX(x,y)*sx,y:prY(x,y)*sy};};
+  const T=dishTwist, tc=T ? Math.cos(T.angle) : 1, ts=T ? Math.sin(T.angle) : 0;
+  const screen=p=>{ if(T) p=rotAbout(p,T.pivot,tc,ts); const x=pose.x+p.x*pose.scale,y=pose.y+p.y*pose.scale;return{x:prX(x,y)*sx,y:prY(x,y)*sy};};
   const lift=dishGesture && dish.mode==="fold" && dishGesture.anchor && !dishGesture.preview && !dishGesture.press ? dishGesture : null;
   const H=faces===dish.faces ? stackHeights(faces) : previewHeights(faces), zk=pose.scale*Z_EXAG/ROTI_R_MM*VIEW_UP*sy;
   if(lift) drawSpatula(g,screen,lift,sx,sy);
@@ -2553,7 +2650,7 @@ function build(){
 
   layoutPan();
   phase = "TABLE"; xf = null;
-  dish = null; dishGesture = null; dishFlight = null; dishMove = null; syncDishUI(); syncStepButtons();
+  dish = null; dishGesture = null; dishFlight = null; dishMove = null; dishTwist = null; dishTouches.clear(); syncDishUI(); syncStepButtons();
   panPress = []; domes = []; fatMap = null; fatGesture = null;
   { const card = document.getElementById("card"); if(card) card.hidden = true; }
   cook = new Float32Array(N); dry = new Float32Array(N);
@@ -2622,7 +2719,7 @@ function step(dt){
   // В руке и в полёте узлы заморожены: перенос — движение картинки, запекаемое при посадке.
   // На таве лист схватился и стоит — только жарится.
   if(action.state==="CARRY" || action.state==="TOSS"){ updateAction(dt); return; }
-  if(dish){ updateDishFlight(); updateDishMove(); cookDish(dt); return; }
+  if(dish){ updateDishFlight(); updateDishMove(); updateDishTwist(); cookDish(dt); return; }
   if(phase==="PAN"){ cookStep(dt); return; }
   const h = dt / SUBSTEPS;
   // Затухание зависит от фазы: в полёте лист скользит свободнее, после удара,
@@ -3579,6 +3676,13 @@ function onDown(id, cx, cy, t){
   // возврата шипение на таве молчало бы до «заново».
   if(dish){ audioInit(); if(AC && AC.state==="suspended") AC.resume();
             const p=toLocal(cx,cy);
+            if(id[0]==="t") dishTouches.set(id,p);
+            if(dishTwist) return;                              // третий палец поворот не меняет
+            // Второй палец на поле — поворот (владелица 17.09): начатая складка или рез отменяются.
+            if(id[0]==="t" && dishTouches.size===2 && !fatGesture && canTwist()){
+              const ids=[...dishTouches.keys()];
+              if(beginTwist("touch",{ids})){ dishTwist.raw=tableAngle(dishTouches.get(ids[0]),dishTouches.get(ids[1])); return; }
+            }
             // Порядок попадания: кусок маргарина → лист → сталь.
             if(!fatGesture && !dishGesture && dish.mode==="fold" && onButter(p,{x:cx,y:cy})){ fatGesture={id,last:p}; return; }
             if(fatGesture) return;
@@ -3602,6 +3706,12 @@ function onDown(id, cx, cy, t){
   armAction(id, p);                                  // только выбор края: тесто НЕ двигается
 }
 function onMove(id, cx, cy, t){
+  if(dishTouches.has(id)) dishTouches.set(id,toLocal(cx,cy));
+  if(dishTwist){
+    const T=dishTwist;
+    if(T.ids && T.ids.includes(id)){ twistTo(tableAngle(dishTouches.get(T.ids[0]),dishTouches.get(T.ids[1]))); return; }
+    if(T.id===id){ twistTo(tableAngle(T.center,toLocal(cx,cy))); return; }
+  }
   if(fatGesture && fatGesture.id===id){ const p=toLocal(cx,cy); smearStroke(fatGesture.last,p); fatGesture.last=p; return; }
   if(dishGesture && dishGesture.id===id){ dbgMove++; moveDishGesture(toLocal(cx,cy),{x:cx,y:cy},t); return; }
   if(action.pointerId !== id) return;
@@ -3609,6 +3719,8 @@ function onMove(id, cx, cy, t){
   updateActionMove(toLocal(cx, cy));
 }
 function onUp(id, cx, cy, t){
+  dishTouches.delete(id);
+  if(dishTwist && ((dishTwist.ids && dishTwist.ids.includes(id)) || dishTwist.id===id)){ endTwist(true); return; }
   if(fatGesture && fatGesture.id===id){ fatGesture=null; return; }
   if(dishGesture && dishGesture.id===id){
     // touchend несёт последнюю точку: быстрый участок может прийти только в нём.
@@ -3620,6 +3732,8 @@ function onUp(id, cx, cy, t){
   releaseAction();
 }
 function onCancel(id){
+  dishTouches.delete(id);
+  if(dishTwist && ((dishTwist.ids && dishTwist.ids.includes(id)) || dishTwist.id===id)){ endTwist(false); return; }
   if(fatGesture && fatGesture.id===id){ fatGesture=null; return; }
   if(dishGesture && dishGesture.id===id){ releasePress(dishGesture); dishGesture=null; return; }
   if(action.pointerId !== id) return;
@@ -3669,8 +3783,26 @@ window.addEventListener("touchcancel", e=>{
 window.addEventListener("pointerdown", e=>{
   rawPointer++;
   if(e.pointerType === "touch" || inUI(e.target)) return;
-  dbgKind = "мышь"; onDown("p"+e.pointerId, e.clientX, e.clientY, evTime(e));
+  dbgKind = "мышь";
+  // Мышь: поворот — перетаскивание с Option/Alt вокруг середины блюда.
+  if(e.altKey && canTwist() && !dishTwist){
+    const pose=dishPose(), pv=twistPivot(), center={x:pose.x+pv.x*pose.scale,y:pose.y+pv.y*pose.scale};
+    if(beginTwist("alt",{id:"p"+e.pointerId,center})){ dishTwist.raw=tableAngle(center,toLocal(e.clientX,e.clientY)); return; }
+  }
+  onDown("p"+e.pointerId, e.clientX, e.clientY, evTime(e));
 }, true);
+// Колесо и прокрутка тачпада над полем крутят блюдо; фиксируется после паузы (TWIST_IDLE_MS).
+// Щипок тачпада (ctrlKey) не трогаем. Без блюда колесо листает страницу, как раньше.
+window.addEventListener("wheel", e=>{
+  if(inUI(e.target) || e.ctrlKey || !dish) return;
+  if(dishTwist ? dishTwist.input!=="wheel" : !canTwist() || !!dishGesture) return;
+  e.preventDefault();
+  if(!dishTwist && !beginTwist("wheel",{})) return;
+  const d=Math.abs(e.deltaY)>=Math.abs(e.deltaX) ? e.deltaY : e.deltaX;
+  const px=d*(e.deltaMode===1 ? 16 : e.deltaMode===2 ? 400 : 1);
+  dishTwist.angle+=Math.max(-40,Math.min(40,px))*TWIST_WHEEL_DEG*Math.PI/180;
+  dishTwist.lastT=performance.now();
+}, {passive:false, capture:true});
 window.addEventListener("pointermove", e=>{
   if(e.pointerType === "touch" || inUI(e.target)) return;
   onMove("p"+e.pointerId, e.clientX, e.clientY, evTime(e));
@@ -3680,6 +3812,7 @@ window.addEventListener("pointercancel", e=>{ onCancel("p"+e.pointerId); }, true
 // Уход в фон — та же отмена: не оставлять взведённый жест (audit §5).
 addEventListener("blur", ()=>{
   releasePress(dishGesture); dishGesture=null; fatGesture=null;
+  dishTouches.clear(); if(dishTwist) endTwist(dishTwist.input==="wheel");
   if(action.state==="CARRY"){ action.pointerId = null; dropCarry(); }
   else if(action.state==="ARMED"||action.state==="LIFTING") clearAction();
 });
