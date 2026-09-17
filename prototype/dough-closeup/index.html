@@ -49,14 +49,16 @@
      display:contents, то есть в разметке не участвуют вовсе, а order возвращает
      группам исходный порядок панели: шаг · вид · судишь · порвётся · ощущение · служебные · статистика. */
   #core, #tools{ display:contents; }
-  #gStep{ order:1 } #gView{ order:2 } #gCond{ order:3 } #tear{ order:4 }
+  #gStep{ order:1 } #gZ{ order:2 } #gView{ order:2 } #gCond{ order:3 } #tear{ order:4 }
   #gTune{ order:5 } #gThrough{ order:5 } #gFry{ order:5 } #gPress{ order:5 } #gSrv{ order:6 } #stats{ order:7 }
   #toolsBtn, #mini{ display:none; }
-  #hint{ position:absolute; left:10px; top:10px; right:10px; color:var(--dim);
-    pointer-events:none; font-size:11px; }
+  /* Подсказка и крупный индикатор идут друг за другом: на телефоне подсказка в три строки
+     залезала под индикатор (независимая проверка 17.09). */
+  #topbar{ position:absolute; left:10px; right:10px; top:10px; pointer-events:none; }
+  #hint{ color:var(--dim); pointer-events:none; font-size:11px; }
   /* Крупный индикатор: мелкую строку внизу на телефоне не разглядеть,
      а без неё непонятно, дошло ли касание вообще. */
-  #live{ position:absolute; left:0; right:0; top:34px; text-align:center;
+  #live{ margin-top:6px; text-align:center;
     pointer-events:none; font-size:clamp(14px,3.4vw,20px); color:var(--hot); }
   /* Вспышка на предсказание. Было 0,18 за 90 мс — на телефоне не видно вовсе
      (замечание владельца 08.09.2026). Стало заметно и с затуханием, чтобы читалось
@@ -181,8 +183,8 @@
 <body>
 <div id="stage">
   <canvas id="cv"></canvas>
-  <div id="hint">шаг 1: прижимай кусочек — расплющишь до пунктира · шаг 2: возьми край, миг подержи, резко махни — шлепок · шаг 3: возьми край и круговым махом-«запятой» перекинь на таву — полетит, повернётся, зашипит. Порвётся — останется рваный узор, так и пожарим</div>
-  <div id="live">прижми кусочек теста</div>
+  <div id="topbar"><div id="hint">шаг 1: прижимай кусочек — расплющишь до пунктира · шаг 2: возьми край, миг подержи, резко махни — шлепок · шаг 3: возьми край и круговым махом-«запятой» перекинь на таву — полетит, повернётся, зашипит. Порвётся — останется рваный узор, так и пожарим</div>
+  <div id="live">прижми кусочек теста</div></div>
   <div id="flash"></div>
   <div id="previewBadge" hidden></div>
   <!-- Карточка поданного роти — слой поверх поля, поэтому он есть в inUI() stand.js. -->
@@ -210,6 +212,12 @@
       <button id="undoDish" disabled>отменить</button>
     </div>
     <button id="tear">СЕЙЧАС ПОРВЁТСЯ<span class="kbd"> (space)</span></button>
+    <div class="grp measure" id="gZ"><b>высота</b>
+      <button data-z="1.5">×1,5</button>
+      <button data-z="2" class="on">×2</button>
+      <button data-z="3">×3</button>
+      <button data-z="5">×5</button>
+    </div>
     <div class="grp measure" id="gView"><b>вид</b>
       <button data-v="A" class="on">A · 80</button>
       <button data-v="B">B · 224</button>
@@ -255,6 +263,6 @@
   </div>
 </div>
 
-<script src="stand.js?v=2026-09-17-relief-32"></script>
+<script src="stand.js?v=2026-09-17-zbuttons-33"></script>
 </body>
 </html>

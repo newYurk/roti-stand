@@ -11,7 +11,7 @@
 // до 400%+ и лист «рвётся» в середине от любого движения. Замер это обнаружил сразу.
 // Число узлов сохранено (1 060 после обрезки по кругу; прежняя оценка «~1150» была на глаз,
 // пересчитано 07.09.2026), однородность рёбер восстановлена.
-const BUILD = "2026-09-17 · рельеф без высоты · 32";
+const BUILD = "2026-09-17 · высота кнопками · 33";
 const GRID = 38;                   // 38x38, в круг попадает 1 060 узлов (посчитано, не оценка)
 let SUBSTEPS = 8;                  // T2: 8–10 подшагов, 1 итерация
 let DAMP = 0.986;
@@ -1624,13 +1624,26 @@ const ROTI_R_MM = 110;   // радиус роти ≈ 11 см (inferred): 1 targ
 // ×5 (сборка 24) дал куски-кубики: конверт в 6 мм выглядел на 13–25 мм (владелица 17.09, вечер).
 // Высоту можно подобрать адресом: ?z=1…8.
 const Z_EXAG_DEFAULT = 2;
-const Z_EXAG = (()=>{ try { const z=+new URLSearchParams(location.search).get("z"); if(z>=1 && z<=8) return z; } catch(e) {} return Z_EXAG_DEFAULT; })();
+const Z_RELIEF = 5;      // высота, под которую подобраны свет, кромка, тень и корки
+// Высота меняется на ходу — кнопками «высота» в панели (на телефоне адрес не поперебираешь),
+// адресом `?z=1…8` и запоминается между заходами.
+let Z_EXAG = (()=>{
+  try { const z=+new URLSearchParams(location.search).get("z"); if(z>=1 && z<=8) return z; } catch(e) {}
+  try { const z=+localStorage.getItem("rotiZ"); if(z>=1 && z<=8) return z; } catch(e) {}
+  return Z_EXAG_DEFAULT; })();
+let RELIEF_K = Z_RELIEF / Z_EXAG;   // во сколько раз картинка выразительнее геометрии
+function setHeight(z){
+  if(!(z>=1 && z<=8) || z===Z_EXAG) return;
+  Z_EXAG=z; RELIEF_K=Z_RELIEF/z;
+  try { localStorage.setItem("rotiZ",String(z)); } catch(e) {}
+  drawDishTable.cache=null; drawDishTable.lru=[]; tableBlit.shown=null;
+  if(typeof document!=="undefined") document.querySelectorAll("[data-z]").forEach(x=>x.classList.toggle("on",+x.dataset.z===z));
+  draw();
+}
 const VIEW_UP = 0.83;    // вертикаль в кадре при наклоне стола, ≈ √(1 − TILT²)
-// Рельеф читается тенью и кромкой, а не высотой. Геометрия — как в жизни (Z_EXAG), а свет, кромка и
-// корки на стенках считаются так, будто высота прежняя (Z_RELIEF): при ×2 без этого верх освещался
-// ровно, складки оставались царапинами, а в виде A стенок не было вовсе (проверка сборки 31).
-const Z_RELIEF = 5;
-const RELIEF_K = Z_RELIEF / Z_EXAG;   // во сколько раз картинка выразительнее геометрии
+// Рельеф читается тенью и кромкой, а не высотой: геометрия — как в жизни (Z_EXAG), а свет, кромка,
+// тень и корки считаются по Z_RELIEF (см. выше). При ×2 без этого верх освещался ровно, складки
+// оставались царапинами, а в виде A стенок не было вовсе (проверка сборки 31).
 // Начинка — ломтики банана (владелица 17.09: жёлтые капли читались желтками). Мякоть кремовая;
 // у каждого ломтика тёмный ободок и семечки в середине. Желток появится отдельной начинкой.
 // Мякоть ломтика и его бок (порция — один ломтик). Ярко-жёлтая горка читалась желтком (17.09).
@@ -3890,6 +3903,10 @@ function reset(){ recorded=false; resetMeters(); resize(true); }
 
 // Вид и условие меняют только draw() и звук — лист от них не зависит. Пересборка теряла
 // растянутый лист (A и B мерились на разных листах) и вбрасывала свой всплеск в «худший».
+document.querySelectorAll("[data-z]").forEach(b=>{
+  b.classList.toggle("on",+b.dataset.z===Z_EXAG);
+  b.addEventListener("click",()=>setHeight(+b.dataset.z));
+});
 document.querySelectorAll("[data-v]").forEach(b=>b.addEventListener("click",()=>{
   variant=b.dataset.v;
   document.querySelectorAll("[data-v]").forEach(x=>x.classList.toggle("on",x===b));

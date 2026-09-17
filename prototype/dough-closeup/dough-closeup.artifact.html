@@ -49,14 +49,16 @@
      display:contents, то есть в разметке не участвуют вовсе, а order возвращает
      группам исходный порядок панели: шаг · вид · судишь · порвётся · ощущение · служебные · статистика. */
   #core, #tools{ display:contents; }
-  #gStep{ order:1 } #gView{ order:2 } #gCond{ order:3 } #tear{ order:4 }
+  #gStep{ order:1 } #gZ{ order:2 } #gView{ order:2 } #gCond{ order:3 } #tear{ order:4 }
   #gTune{ order:5 } #gThrough{ order:5 } #gFry{ order:5 } #gPress{ order:5 } #gSrv{ order:6 } #stats{ order:7 }
   #toolsBtn, #mini{ display:none; }
-  #hint{ position:absolute; left:10px; top:10px; right:10px; color:var(--dim);
-    pointer-events:none; font-size:11px; }
+  /* Подсказка и крупный индикатор идут друг за другом: на телефоне подсказка в три строки
+     залезала под индикатор (независимая проверка 17.09). */
+  #topbar{ position:absolute; left:10px; right:10px; top:10px; pointer-events:none; }
+  #hint{ color:var(--dim); pointer-events:none; font-size:11px; }
   /* Крупный индикатор: мелкую строку внизу на телефоне не разглядеть,
      а без неё непонятно, дошло ли касание вообще. */
-  #live{ position:absolute; left:0; right:0; top:34px; text-align:center;
+  #live{ margin-top:6px; text-align:center;
     pointer-events:none; font-size:clamp(14px,3.4vw,20px); color:var(--hot); }
   /* Вспышка на предсказание. Было 0,18 за 90 мс — на телефоне не видно вовсе
      (замечание владельца 08.09.2026). Стало заметно и с затуханием, чтобы читалось
@@ -181,8 +183,8 @@
 <body>
 <div id="stage">
   <canvas id="cv"></canvas>
-  <div id="hint">шаг 1: прижимай кусочек — расплющишь до пунктира · шаг 2: возьми край, миг подержи, резко махни — шлепок · шаг 3: возьми край и круговым махом-«запятой» перекинь на таву — полетит, повернётся, зашипит. Порвётся — останется рваный узор, так и пожарим</div>
-  <div id="live">прижми кусочек теста</div>
+  <div id="topbar"><div id="hint">шаг 1: прижимай кусочек — расплющишь до пунктира · шаг 2: возьми край, миг подержи, резко махни — шлепок · шаг 3: возьми край и круговым махом-«запятой» перекинь на таву — полетит, повернётся, зашипит. Порвётся — останется рваный узор, так и пожарим</div>
+  <div id="live">прижми кусочек теста</div></div>
   <div id="flash"></div>
   <div id="previewBadge" hidden></div>
   <!-- Карточка поданного роти — слой поверх поля, поэтому он есть в inUI() stand.js. -->
@@ -210,6 +212,12 @@
       <button id="undoDish" disabled>отменить</button>
     </div>
     <button id="tear">СЕЙЧАС ПОРВЁТСЯ<span class="kbd"> (space)</span></button>
+    <div class="grp measure" id="gZ"><b>высота</b>
+      <button data-z="1.5">×1,5</button>
+      <button data-z="2" class="on">×2</button>
+      <button data-z="3">×3</button>
+      <button data-z="5">×5</button>
+    </div>
     <div class="grp measure" id="gView"><b>вид</b>
       <button data-v="A" class="on">A · 80</button>
       <button data-v="B">B · 224</button>
@@ -269,7 +277,7 @@
 // до 400%+ и лист «рвётся» в середине от любого движения. Замер это обнаружил сразу.
 // Число узлов сохранено (1 060 после обрезки по кругу; прежняя оценка «~1150» была на глаз,
 // пересчитано 07.09.2026), однородность рёбер восстановлена.
-const BUILD = "2026-09-17 · рельеф без высоты · 32";
+const BUILD = "2026-09-17 · высота кнопками · 33";
 const GRID = 38;                   // 38x38, в круг попадает 1 060 узлов (посчитано, не оценка)
 let SUBSTEPS = 8;                  // T2: 8–10 подшагов, 1 итерация
 let DAMP = 0.986;
@@ -1882,13 +1890,26 @@ const ROTI_R_MM = 110;   // радиус роти ≈ 11 см (inferred): 1 targ
 // ×5 (сборка 24) дал куски-кубики: конверт в 6 мм выглядел на 13–25 мм (владелица 17.09, вечер).
 // Высоту можно подобрать адресом: ?z=1…8.
 const Z_EXAG_DEFAULT = 2;
-const Z_EXAG = (()=>{ try { const z=+new URLSearchParams(location.search).get("z"); if(z>=1 && z<=8) return z; } catch(e) {} return Z_EXAG_DEFAULT; })();
+const Z_RELIEF = 5;      // высота, под которую подобраны свет, кромка, тень и корки
+// Высота меняется на ходу — кнопками «высота» в панели (на телефоне адрес не поперебираешь),
+// адресом `?z=1…8` и запоминается между заходами.
+let Z_EXAG = (()=>{
+  try { const z=+new URLSearchParams(location.search).get("z"); if(z>=1 && z<=8) return z; } catch(e) {}
+  try { const z=+localStorage.getItem("rotiZ"); if(z>=1 && z<=8) return z; } catch(e) {}
+  return Z_EXAG_DEFAULT; })();
+let RELIEF_K = Z_RELIEF / Z_EXAG;   // во сколько раз картинка выразительнее геометрии
+function setHeight(z){
+  if(!(z>=1 && z<=8) || z===Z_EXAG) return;
+  Z_EXAG=z; RELIEF_K=Z_RELIEF/z;
+  try { localStorage.setItem("rotiZ",String(z)); } catch(e) {}
+  drawDishTable.cache=null; drawDishTable.lru=[]; tableBlit.shown=null;
+  if(typeof document!=="undefined") document.querySelectorAll("[data-z]").forEach(x=>x.classList.toggle("on",+x.dataset.z===z));
+  draw();
+}
 const VIEW_UP = 0.83;    // вертикаль в кадре при наклоне стола, ≈ √(1 − TILT²)
-// Рельеф читается тенью и кромкой, а не высотой. Геометрия — как в жизни (Z_EXAG), а свет, кромка и
-// корки на стенках считаются так, будто высота прежняя (Z_RELIEF): при ×2 без этого верх освещался
-// ровно, складки оставались царапинами, а в виде A стенок не было вовсе (проверка сборки 31).
-const Z_RELIEF = 5;
-const RELIEF_K = Z_RELIEF / Z_EXAG;   // во сколько раз картинка выразительнее геометрии
+// Рельеф читается тенью и кромкой, а не высотой: геометрия — как в жизни (Z_EXAG), а свет, кромка,
+// тень и корки считаются по Z_RELIEF (см. выше). При ×2 без этого верх освещался ровно, складки
+// оставались царапинами, а в виде A стенок не было вовсе (проверка сборки 31).
 // Начинка — ломтики банана (владелица 17.09: жёлтые капли читались желтками). Мякоть кремовая;
 // у каждого ломтика тёмный ободок и семечки в середине. Желток появится отдельной начинкой.
 // Мякоть ломтика и его бок (порция — один ломтик). Ярко-жёлтая горка читалась желтком (17.09).
@@ -4148,6 +4169,10 @@ function reset(){ recorded=false; resetMeters(); resize(true); }
 
 // Вид и условие меняют только draw() и звук — лист от них не зависит. Пересборка теряла
 // растянутый лист (A и B мерились на разных листах) и вбрасывала свой всплеск в «худший».
+document.querySelectorAll("[data-z]").forEach(b=>{
+  b.classList.toggle("on",+b.dataset.z===Z_EXAG);
+  b.addEventListener("click",()=>setHeight(+b.dataset.z));
+});
 document.querySelectorAll("[data-v]").forEach(b=>b.addEventListener("click",()=>{
   variant=b.dataset.v;
   document.querySelectorAll("[data-v]").forEach(x=>x.classList.toggle("on",x===b));
