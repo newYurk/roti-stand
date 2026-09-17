@@ -269,7 +269,7 @@
 // до 400%+ и лист «рвётся» в середине от любого движения. Замер это обнаружил сразу.
 // Число узлов сохранено (1 060 после обрезки по кругу; прежняя оценка «~1150» была на глаз,
 // пересчитано 07.09.2026), однородность рёбер восстановлена.
-const BUILD = "2026-09-17 · поворот · 27";
+const BUILD = "2026-09-17 · поворот на iPhone · 28";
 const GRID = 38;                   // 38x38, в круг попадает 1 060 узлов (посчитано, не оценка)
 let SUBSTEPS = 8;                  // T2: 8–10 подшагов, 1 итерация
 let DAMP = 0.986;
@@ -469,6 +469,7 @@ let dishMove = null;
 // Поворот в процессе (предпросмотр): {input, angle, pivot, …}; запекается на отпускании (rotateDish).
 let dishTwist = null;
 const dishTouches = new Map();   // касания поля при блюде: id → точка стола (второй палец — поворот)
+let twistDbg = {gestures:0, cancels:0, last:"—"};   // что видел поворот на устройстве (строка отладки, лог)
 const polyArea = p => Math.abs(p.reduce((s,a,i)=>{ const b=p[(i+1)%p.length]; return s+a.x*b.y-b.x*a.y; },0))/2;
 function clipPoly(points, nx, ny, offset, positive=true){
   const out=[], sign=positive ? 1 : -1;
@@ -1296,6 +1297,16 @@ function logTwist(input,angle){
   if(gestures.length>200) gestures.shift();
   try{ localStorage.setItem("dough_gestures", JSON.stringify(gestures)); }catch(e){}
 }
+function dishModeWord(){
+  return !dish ? "нет блюда" : dishFlight ? "полёт" : dishMove ? "перенос" : dish.mode==="fold" ? (dish.folds ? "тава" : "не сложено") : dish.mode;
+}
+function logTwistTry(reason){
+  twistDbg.last=reason;
+  gestures.push({ ...measurementContext(), kind:"twist-try", reason, touches:dishTouches.size, mode:dish ? dish.mode : null,
+    folds:dish ? dish.folds : 0, ts:new Date().toISOString() });
+  if(gestures.length>200) gestures.shift();
+  try{ localStorage.setItem("dough_gestures", JSON.stringify(gestures)); }catch(e){}
+}
 // Угол точек касания меряется в плоскости стола: на экране стол сжат по вертикали.
 const tableAngle=(a,b)=>Math.atan2(b.y-a.y,b.x-a.x);
 function beginTwist(input,extra){
@@ -1314,6 +1325,7 @@ function endTwist(commit=true){
   const T=dishTwist; if(!T) return false;
   dishTwist=null;
   const ok=commit && rotateDish(T.angle,T.pivot);
+  twistDbg.last=ok ? `${T.input} ${Math.round(T.angle*180/Math.PI)}°` : `${T.input}: не сделан (${Math.round(T.angle*180/Math.PI)}°)`;
   logTwist(T.input,ok ? T.angle : 0);
   return ok;
 }
@@ -3679,9 +3691,10 @@ function onDown(id, cx, cy, t){
             if(id[0]==="t") dishTouches.set(id,p);
             if(dishTwist) return;                              // третий палец поворот не меняет
             // Второй палец на поле — поворот (владелица 17.09): начатая складка или рез отменяются.
-            if(id[0]==="t" && dishTouches.size===2 && !fatGesture && canTwist()){
-              const ids=[...dishTouches.keys()];
-              if(beginTwist("touch",{ids})){ dishTwist.raw=tableAngle(dishTouches.get(ids[0]),dishTouches.get(ids[1])); return; }
+            if(id[0]==="t" && dishTouches.size===2){
+              const ids=[...dishTouches.keys()], can=canTwist();
+              if(!fatGesture && can && beginTwist("touch",{ids})){ dishTwist.raw=tableAngle(dishTouches.get(ids[0]),dishTouches.get(ids[1])); twistDbg.last="два пальца"; return; }
+              logTwistTry(fatGesture ? "маргарин" : !can ? "нельзя: "+dishModeWord() : "не начался");
             }
             // Порядок попадания: кусок маргарина → лист → сталь.
             if(!fatGesture && !dishGesture && dish.mode==="fold" && onButter(p,{x:cx,y:cy})){ fatGesture={id,last:p}; return; }
@@ -3733,7 +3746,9 @@ function onUp(id, cx, cy, t){
 }
 function onCancel(id){
   dishTouches.delete(id);
-  if(dishTwist && ((dishTwist.ids && dishTwist.ids.includes(id)) || dishTwist.id===id)){ endTwist(false); return; }
+  // iOS может отменить касания, когда забирает жест двумя пальцами себе: поворот к этому моменту
+  // уже сделан пальцами — фиксируем его, а не выбрасываем (отменить можно кнопкой).
+  if(dishTwist && ((dishTwist.ids && dishTwist.ids.includes(id)) || dishTwist.id===id)){ twistDbg.cancels++; endTwist(dishTwist.input==="touch"); return; }
   if(fatGesture && fatGesture.id===id){ fatGesture=null; return; }
   if(dishGesture && dishGesture.id===id){ releasePress(dishGesture); dishGesture=null; return; }
   if(action.pointerId !== id) return;
@@ -3756,8 +3771,17 @@ let rawTouch = 0, rawPointer = 0;
 // ЛЮБОЙ новый слой поверх поля добавлять СЮДА, иначе его кнопки не нажмутся.
 function inUI(t){ return !!(t && t.closest && t.closest("#panel, #card")); }
 
+// Список пальцев на поле сверяется с тем, что знает сам браузер (e.touches): палец, чей конец
+// не дошёл до страницы, иначе навсегда оставался бы «вторым» (ломал поворот), а его складка или
+// рез висели бы и не пускали новые касания. Такой палец считается отменённым.
+function syncDishTouches(e){
+  if(!dishTouches.size || !e.touches) return;
+  const live=new Set(); for(const t of e.touches) live.add("t"+t.identifier);
+  for(const id of [...dishTouches.keys()]) if(!live.has(id)) onCancel(id);
+}
 window.addEventListener("touchstart", e=>{
   rawTouch++;
+  syncDishTouches(e);
   if(inUI(e.target)) return;
   e.preventDefault(); dbgKind = "touch";
   const at = evTime(e);
@@ -3765,6 +3789,7 @@ window.addEventListener("touchstart", e=>{
 }, {passive:false, capture:true});
 
 window.addEventListener("touchmove", e=>{
+  syncDishTouches(e);
   if(inUI(e.target)) return;
   e.preventDefault();
   const at = evTime(e);
@@ -3791,6 +3816,21 @@ window.addEventListener("pointerdown", e=>{
   }
   onDown("p"+e.pointerId, e.clientX, e.clientY, evTime(e));
 }, true);
+// Safari (iOS и тачпад на маке) присылает свои события жеста двумя пальцами. Без preventDefault он
+// может забрать жест себе (масштаб страницы) и отменить касания. Если поворот касаниями не начался,
+// блюдо ведёт угол жеста Safari (e.rotation, градусы по часовой на экране).
+for(const type of ["gesturestart","gesturechange","gestureend"]) window.addEventListener(type, e=>{
+  if(inUI(e.target) || !dish) return;
+  e.preventDefault();
+  if(type==="gesturestart"){
+    twistDbg.gestures++;
+    if(!dishTwist && canTwist() && beginTwist("gesture",{})){ dishTwist.raw=0; twistDbg.last="жест Safari"; }
+    return;
+  }
+  if(!dishTwist || dishTwist.input!=="gesture") return;
+  if(type==="gesturechange" && Number.isFinite(e.rotation)) twistTo(e.rotation*Math.PI/180);
+  else if(type==="gestureend") endTwist(true);
+}, {passive:false, capture:true});
 // Колесо и прокрутка тачпада над полем крутят блюдо; фиксируется после паузы (TWIST_IDLE_MS).
 // Щипок тачпада (ctrlKey) не трогаем. Без блюда колесо листает страницу, как раньше.
 window.addEventListener("wheel", e=>{
@@ -4335,7 +4375,7 @@ function loop(now){
     `${dish ? dishStatus() : phase==="PAN" ? "тава · сушка "+md.toFixed(2)+" · цвет "+mc.toFixed(2) : "стол"}  мах: ${lastDecision}` +
     `${tossTry ? "  перенесено "+tossOk+" из "+tossTry : ""}  ` +
     `лист ${pct}%${ready}${ragged}  жестов ${gestures.length}  ` +
-    `[касаний ${rawTouch} · указателей ${rawPointer} · до теста ↓${dbgDown} ↔${dbgMove} · ${dbgKind}${loopErrs?" · сбоев "+loopErrs:""}]  ` +
+    `[касаний ${rawTouch} · указателей ${rawPointer} · до теста ↓${dbgDown} ↔${dbgMove} · ${dbgKind}${loopErrs?" · сбоев "+loopErrs:""}${dish?` · пальцев на поле ${dishTouches.size} · поворот: ${dishTwist ? dishTwist.input+" "+Math.round(dishTwist.angle*180/Math.PI)+"°" : twistDbg.last}${twistDbg.gestures?" · жестов Safari "+twistDbg.gestures:""}${twistDbg.cancels?" · отмен касаний "+twistDbg.cancels:""}`:""}]  ` +
     `${tornAt?"рваный":pressed?"нажато":"—"}  ` +
     `${tuneChanged()?`⚙ ощущение своё (${TUNE.com}/${TUNE.creep}/${TUNE.brk}, исходное ${TUNE_DEFAULT.com}/${TUNE_DEFAULT.creep}/${TUNE_DEFAULT.brk})  `:""}` +
     `${mixedTune?"смешанный лист · для замера «заново»  ":""}` +
