@@ -11,7 +11,7 @@
 // до 400%+ и лист «рвётся» в середине от любого движения. Замер это обнаружил сразу.
 // Число узлов сохранено (1 060 после обрезки по кругу; прежняя оценка «~1150» была на глаз,
 // пересчитано 07.09.2026), однородность рёбер восстановлена.
-const BUILD = "2026-09-17 · прижим и бананы · 16";
+const BUILD = "2026-09-17 · пузыри · 17";
 const GRID = 38;                   // 38x38, в круг попадает 1 060 узлов (посчитано, не оценка)
 let SUBSTEPS = 8;                  // T2: 8–10 подшагов, 1 итерация
 let DAMP = 0.986;
@@ -257,7 +257,7 @@ function materialTriangles(p){
 }
 function startDish(){
   if(dish) return; // раскладка начинки ровно одна на посадку
-  panPress=[]; domes=[];          // жир на таве остаётся: он принадлежит сковороде
+  panPress=[]; domes=[]; domeState={session:-1,left:0,next:0};   // жир на таве остаётся: он принадлежит сковороде
   const faces=[];
   for(let q=0;q<quads.length;q++){
     if(quadCons[q].some(c=>c.broken)) continue;
@@ -461,6 +461,7 @@ function rebuildDishContact(){
 let FORCE_HEAT_TABLE = false;   // отладка: считать через таблицу и без модификаторов
 function panModsActive(){ return FORCE_HEAT_TABLE || panPress.length>0 || domes.length>0 || !!fatMap; }
 function sampleMultiplier(T,i){
+  for(const d of domes) if(Math.hypot(T.x[i]-d.x,T.y[i]-d.y)<d.r) return 0;   // под куполом стали нет
   let m=1;
   for(const p of panPress){
     if(!(p.level>0)) continue;
@@ -505,6 +506,72 @@ function updatePanPress(dt){
   }
 }
 // Палец на тесте — с допуском r: у кромки палец часто чуть за ступенчатым краем листа.
+// ─── Пузыри-купола (спецификация §2, решение 25.08: пузыри прижимаются). Пар поднимает тонкий
+// целый участок нижнего слоя, пока его сторона на стали сохнет; под куполом стали нет — пятно
+// остаётся бледным. Купол лопается от прижима, от складки, переворота и снятия, а сам — когда
+// вокруг досохло (дизайн-док: «лопаются сами на сухом»), через ~2 с. Не под начинкой и не у
+// края или дырки (вокруг купола должно быть тесто). Числа — inferred, на пробу.
+let DOMES = true;                         // выключатель для старых проверок модели
+const DOME_COUNT = [3,5], DOME_R = [.06,.14], DOME_GROW_S = 4, DOME_SELF_POP_S = 2;
+let domeState = {session:-1, left:0, next:0};
+function domeRingDry(d){
+  const T=dish.heatTable; let s=0,n=0;
+  for(let i=0;i<T.n;i++){
+    if(!(T.flags[i]&2)) continue;
+    const r=Math.hypot(T.x[i]-d.x,T.y[i]-d.y); if(r<d.r || r>d.r*1.3+.02) continue;
+    const t=dish.thermal[T.src[i]]; if(t){ s+=t.dry[T.side[i]]; n++; }
+  }
+  return n ? s/n : 1;
+}
+function spawnDome(){
+  const T=dish.heatTable, tones=[];
+  for(let i=0;i<T.n;i++) if((T.flags[i]&6)===2){ const t=dish.thermal[T.src[i]]; if(t) tones.push(t.tone); }
+  if(!tones.length) return false;
+  tones.sort((a,b)=>a-b);
+  const thin=tones[Math.floor(tones.length*.4)];      // купола — на тонком: нижние 40 % по толщине
+  for(let k=0;k<30;k++){
+    const i=Math.floor(Math.random()*T.n);
+    if((T.flags[i]&6)!==2) continue;
+    const t=dish.thermal[T.src[i]]; if(!t || t.tone>thin || t.dry[T.side[i]]>=.95) continue;
+    const r=DOME_R[0]+(DOME_R[1]-DOME_R[0])*Math.random(), c={x:T.x[i],y:T.y[i]};
+    if(domes.some(d=>Math.hypot(d.x-c.x,d.y-c.y)<d.rMax+r+.02)) continue;
+    if(panPress.some(p=>Math.hypot(p.x-c.x,p.y-c.y)<PRESS_R+r)) continue;
+    // не рядом с начинкой: купол поднимает голое тесто
+    if(dish.faces.some(f=>f.kind==="filling" && f.points.some(q=>Math.hypot(q.x-c.x,q.y-c.y)<r+.05))) continue;
+    let ok=true;
+    for(let j=0;j<8 && ok;j++){ const a=j*Math.PI/4; ok=onMaterial({x:c.x+Math.cos(a)*(r+.05),y:c.y+Math.sin(a)*(r+.05)}); }
+    if(!ok) continue;
+    domes.push({x:c.x,y:c.y,rMax:r,r:r*.35,grow:0,dryFor:0});
+    audioDomeGrow();
+    return true;
+  }
+  return false;
+}
+function popDome(d,sound=true){
+  const i=domes.indexOf(d); if(i<0) return;
+  domes.splice(i,1);
+  if(sound) audioDomePop(d.rMax);
+}
+function popAllDomes(){ for(const d of domes.slice()) popDome(d); }
+function updateDomes(dt){
+  if(!DOMES || !dish.heatTable) return;
+  const now=performance.now(), sess=dish.sessions ? dish.sessions.length : 1, md=meanDry();
+  if(domeState.session!==sess){
+    domeState={session:sess,left:DOME_COUNT[0]+Math.floor(Math.random()*(DOME_COUNT[1]-DOME_COUNT[0]+1)),next:0};
+  }
+  // Купола растут, пока сторона на стали сохнет: после схватывания и до почти сухого.
+  if(domeState.left>0 && md>.2 && md<.85 && now>=domeState.next){
+    if(spawnDome()) domeState.left--;
+    domeState.next=now+400+Math.random()*900;
+  }
+  for(const d of domes.slice()){
+    if(panPress.some(p=>p.level>.2 && Math.hypot(p.x-d.x,p.y-d.y)<d.r+PRESS_R*.5)){ popDome(d); continue; }
+    const ring=domeRingDry(d);
+    if(ring<.98){ d.grow=Math.min(1,d.grow+dt/DOME_GROW_S); d.dryFor=0; }
+    else if((d.dryFor+=dt)>=DOME_SELF_POP_S){ popDome(d); continue; }
+    d.r=d.rMax*(.35+.65*d.grow);
+  }
+}
 function onMaterial(p,r=0){
   const pts=r>0 ? [p,{x:p.x+r,y:p.y},{x:p.x-r,y:p.y},{x:p.x,y:p.y+r},{x:p.x,y:p.y-r}] : [p];
   return dish.faces.some(f=>f.kind==="dough" && pts.some(q=>pointInFace(f.points,q.x,q.y)));
@@ -528,6 +595,7 @@ function cookDish(dt){
   if(dishGesture && dishGesture.slide) return;   // лист на лопатке — стали не касается
   if(!dish.dryDrive) rebuildDishContact();
   updatePanPress(dt);
+  updateDomes(dt);
   // Быстрый путь: без прижима, куполов и жира — прежние приводы без перерасчёта.
   const D=panModsActive() && dish.heatTable ? moddedDrives() : dish;
   for(let i=0;i<dish.thermal.length;i++){
@@ -611,7 +679,7 @@ function rememberDish(){
 }
 function foldDish(anchor,end){
   const next=foldGeometry(anchor,end); if(!next) return false;
-  panPress=[];
+  panPress=[]; popAllDomes();
   rememberDish(); dish.faces=next.faces; dish.folds++; dish.hull=dishHull(); rebuildDishContact();
   dish.message=`Складок: ${dish.folds} · можно сложить ещё`;
   syncDishUI(); return true;
@@ -778,6 +846,7 @@ function startFlip(dir,landing){
   const next=flipGeometry(dir,landing); if(!next) return false;
   if(dish.folds || dish.cuts.length) dishSectionGeometry(next.faces);   // торец считаем до посадки, если он рисуется
   stackHeights(dish.faces); stackHeights(next.faces);   // и высоты: иначе кадр посадки считает их сам и дёргается
+  popAllDomes();                                         // лопатка поддела лист — купола лопнули
   let radius=0;
   for(const f of dish.faces) if(f.kind==="dough") for(const p of f.points)
     radius=Math.max(radius,Math.hypot(p.x-next.from.x,p.y-next.from.y));
@@ -944,7 +1013,7 @@ const MOVE_T = 0.35;
 function startRemoval(slide={x:0,y:0}){
   if(!dish || dish.mode!=="fold" || dishFlight || dishMove) return false;
   const from=dishPose(); from.x+=slide.x*from.scale; from.y+=slide.y*from.scale;
-  panPress=[];
+  panPress=[]; popAllDomes();
   startCutting();
   if(dish.mode!=="cut") return false;
   dishMove={from,t0:performance.now(),T:MOVE_T};
@@ -1577,6 +1646,21 @@ function drawLiftedEdge(g,screen,d,sx,sy){
   g.strokeStyle="rgba(240,226,190,.9)"; g.lineWidth=Math.max(1,1.6*sy);
   g.beginPath(); g.moveTo(p.x,p.y-up); g.lineTo(q.x,q.y-up); g.stroke();
 }
+// Купол: светлая выпуклость с тенью и бликом, выше с ростом (условность: ×3 по высоте, как всё).
+function drawDomes(g,screen,H,zk){
+  // Пологий купол того же теста: тень у подножия справа-снизу, чуть светлее верх, узкий блик.
+  for(const d of domes){
+    const c=screen(d), lift=H ? H.at(d)*zk : 0, up=(.6+1.6*d.grow)*zk;
+    const e=screen({x:d.x+d.r,y:d.y}), f=screen({x:d.x,y:d.y+d.r});
+    const rx=Math.hypot(e.x-c.x,e.y-c.y), ry=Math.hypot(f.x-c.x,f.y-c.y), y0=c.y-lift;
+    g.fillStyle="rgba(60,38,16,.18)";
+    g.beginPath(); g.ellipse(c.x+rx*.12,y0+ry*.18,rx*1.02,ry*1.02,0,0,Math.PI*2); g.fill();
+    g.fillStyle="rgba(238,226,192,.55)";
+    g.beginPath(); g.ellipse(c.x,y0-up*.5,rx*.96,ry*.96+up*.3,0,0,Math.PI*2); g.fill();
+    g.fillStyle="rgba(250,244,226,.4)";
+    g.beginPath(); g.ellipse(c.x-rx*.28,y0-up*.8-ry*.28,rx*.42,ry*.26,-.35,0,Math.PI*2); g.fill();
+  }
+}
 // Вмятина под пальцем: мягкое тёмное пятно на поверхности, глубже с силой прижима.
 function drawPressDents(g,screen,H,zk,pose,sx,sy){
   for(const p of panPress){
@@ -1611,6 +1695,7 @@ function drawDish(g,sx,sy){
   // Rebuild expensive boundary intersections only after a committed geometry
   // change. During a drag the existing flat preview remains immediate.
   if(!moving&&(dish.folds||dish.cuts.length)&&!(dishGesture&&dishGesture.preview)) drawDishSections(g,screen,faces,sx,sy,zk,H);
+  if(dish.mode==="fold" && !(dishGesture && dishGesture.preview)) drawDomes(g,screen,H,zk);
   if(dish.mode==="fold") drawPressDents(g,screen,H,zk,pose,sx,sy);
   if(dishGesture && !slide && dishGesture.zone!=="middle" && !(dishGesture.press && !dishGesture.moved)){
     const d=dishGesture, a=screen(d.anchor||d.start),b=screen(d.target||d.end);
@@ -2520,6 +2605,28 @@ function audioFrame(){
   const st = dish ? 0 : Math.min(1, avgStrain*2.5);
   tenseGain.gain.setTargetAtTime(dish ? 0 : Math.min(0.22, avgStrain*0.7), now, 0.04);
   tenseFilt.frequency.setTargetAtTime(260 + st*260, now, 0.05);
+}
+// Купол растёт — тихое «пш» с подъёмом тона; лопается — щелчок и выдох.
+function audioDomeGrow(){
+  if(!AC || condition==="sight" || !noiseBuf) return;
+  const s=AC.createBufferSource(); s.buffer=noiseBuf;
+  const f=AC.createBiquadFilter(); f.type="bandpass"; f.Q.value=3;
+  const g=AC.createGain(), t=AC.currentTime;
+  f.frequency.setValueAtTime(1200,t); f.frequency.exponentialRampToValueAtTime(2600,t+.6);
+  g.gain.setValueAtTime(0.0001,t); g.gain.exponentialRampToValueAtTime(0.05,t+.2); g.gain.exponentialRampToValueAtTime(0.001,t+.65);
+  s.connect(f); f.connect(g); g.connect(master); s.start(t); s.stop(t+.7);
+}
+function audioDomePop(size){
+  if(!AC || condition==="sight" || !noiseBuf) return;
+  const t=AC.currentTime, k=Math.max(.5,Math.min(1.5,size/.1));
+  const s=AC.createBufferSource(); s.buffer=noiseBuf;
+  const f=AC.createBiquadFilter(); f.type="highpass"; f.frequency.value=2200;
+  const g=AC.createGain(); g.gain.setValueAtTime(0.22*k,t); g.gain.exponentialRampToValueAtTime(0.001,t+.03);
+  s.connect(f); f.connect(g); g.connect(master); s.start(t); s.stop(t+.05);
+  const x=AC.createBufferSource(); x.buffer=noiseBuf;
+  const xf2=AC.createBiquadFilter(); xf2.type="bandpass"; xf2.frequency.value=900; xf2.Q.value=1.2;
+  const xg=AC.createGain(); xg.gain.setValueAtTime(0.0001,t+.01); xg.gain.exponentialRampToValueAtTime(0.07*k,t+.04); xg.gain.exponentialRampToValueAtTime(0.001,t+.3);
+  x.connect(xf2); xf2.connect(xg); xg.connect(master); x.start(t); x.stop(t+.32);
 }
 // Голос прижима: громкость — от силы прижима, тембр и хруст — от воды под пальцем.
 function audioPress(now){
