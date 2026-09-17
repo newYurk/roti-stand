@@ -269,7 +269,7 @@
 // до 400%+ и лист «рвётся» в середине от любого движения. Замер это обнаружил сразу.
 // Число узлов сохранено (1 060 после обрезки по кругу; прежняя оценка «~1150» была на глаз,
 // пересчитано 07.09.2026), однородность рёбер восстановлена.
-const BUILD = "2026-09-17 · правки проверки · 22";
+const BUILD = "2026-09-17 · видимые резы · 23";
 const GRID = 38;                   // 38x38, в круг попадает 1 060 узлов (посчитано, не оценка)
 let SUBSTEPS = 8;                  // T2: 8–10 подшагов, 1 итерация
 let DAMP = 0.986;
@@ -795,6 +795,7 @@ function updatePanPress(dt){
 // Жест от куска — предложение ассистента (круговой мах спецификации тоже не из источника).
 const FAT_N = 32, FAT_GAIN = 0.10/1.05, FAT_TAU = 25, FAT_BRUSH = .08, FAT_SEEP = .06;
 let fatGesture = null, fatUnder = 0, dishCrisp = 0, smearSoundAt = 0;
+let fatCanvas = null, fatCtx = null, fatDrawnAt = 0, fatDirty = false;
 function butterSpot(){
   // дальний от стола борт: в портрете — вверх-вправо, в альбоме — вправо
   const a = stackedLayout() ? -35*Math.PI/180 : 20*Math.PI/180;
@@ -845,6 +846,7 @@ function smearAt(q){
       if(d>rr || Math.hypot(cu,cv2)>1) continue;
       const k=j*FAT_N+i; fatMap[k]=Math.min(1,fatMap[k]+.35*(1-d/rr));
     }
+  fatDirty=true;
   return true;
 }
 function smearStroke(a,b){
@@ -1577,8 +1579,9 @@ function dishSectionGeometry(faces, cuts=dish.cuts){
 // теста (грани с общими рёбрами; складка связывает слои, пропил ножа — разделяет); надрез, не
 // разделивший тесто, ничего не двигает. Каждый кусок отодвигается от центра блюда на PIECE_SPREAD.
 // Материал, резы и торцы считаются по настоящей геометрии (ревью 17.09: прежнее деление по
-// бесконечной прямой реза рвало целый кусок при резе «Т»).
-const PIECE_SPREAD = 0.035;
+// бесконечной прямой реза рвало целый кусок при резе «Т»). Сдвиг — поперёк каждого реза, который
+// кусок действительно отделил (dishPieceShift).
+const PIECE_SPREAD = 0.022;   // владелица 17.09: 0,045 — «очень широкая щель»
 function dishPieces(faces){
   const cache=dishPieces.cache||(dishPieces.cache=new WeakMap());
   if(cache.has(faces)) return cache.get(faces);
@@ -1608,25 +1611,80 @@ function dishPieceShift(faces){
   if(!dish || !dish.cuts.length) return null;
   const cache=dishPieceShift.cache||(dishPieceShift.cache=new WeakMap());
   if(cache.has(faces)) return cache.get(faces);
-  const piece=dishPieces(faces), area=new Map();
-  let total=0,tx=0,ty=0;
-  faces.forEach((f,i)=>{
-    if(f.kind!=="dough") return;
-    const a=polyArea(f.points); let cx=0,cy=0; for(const p of f.points){ cx+=p.x; cy+=p.y; } cx/=f.points.length; cy/=f.points.length;
-    const e=area.get(piece[i])||{a:0,x:0,y:0}; e.a+=a; e.x+=cx*a; e.y+=cy*a; area.set(piece[i],e);
-    total+=a; tx+=cx*a; ty+=cy*a;
+  // Кусок отходит поперёк каждого реза, который его отделил: он касается пропила только с одной
+  // стороны. Кусок, обходящий конец надреза, касается обеих сторон — этот рез его не двигает.
+  // (Проба 17.09: сдвиг «от центра блюда» не раскрывал рез между кусками по одну сторону центра.)
+  const piece=dishPieces(faces), touch=new Map();
+  dish.cuts.forEach((c,ci)=>{
+    const dx=c.b.x-c.a.x, dy=c.b.y-c.a.y, len=Math.hypot(dx,dy)||1, ux=dx/len, uy=dy/len;
+    faces.forEach((f,i)=>{
+      if(f.kind!=="dough") return;
+      for(const p of f.points){
+        const along=(p.x-c.a.x)*ux+(p.y-c.a.y)*uy, across=(p.x-c.a.x)*-uy+(p.y-c.a.y)*ux;
+        if(along<-1e-6 || along>len+1e-6 || Math.abs(Math.abs(across)-c.width/2)>1e-6) continue;
+        let m=touch.get(piece[i]); if(!m) touch.set(piece[i],m=new Map());
+        m.set(ci,(m.get(ci)||0)|(across>0 ? 1 : 2));
+      }
+    });
   });
-  let out=null;
-  if(area.size>1 && total>0){
-    const c={x:tx/total,y:ty/total}, dir=new Map();
-    for(const [k,e] of area){
-      const dx=e.x/e.a-c.x, dy=e.y/e.a-c.y, l=Math.hypot(dx,dy);
-      dir.set(k,l>1e-6 ? {x:dx/l*PIECE_SPREAD,y:dy/l*PIECE_SPREAD} : {x:0,y:0});
+  const dir=new Map(); let any=false;
+  for(const [k,m] of touch){
+    let x=0,y=0;
+    for(const [ci,mask] of m){
+      if(mask===3) continue;
+      const c=dish.cuts[ci], len=Math.hypot(c.b.x-c.a.x,c.b.y-c.a.y)||1, nx=-(c.b.y-c.a.y)/len, ny=(c.b.x-c.a.x)/len, side=mask===1 ? 1 : -1;
+      x+=side*PIECE_SPREAD*nx; y+=side*PIECE_SPREAD*ny;
     }
-    out=new Map();
-    faces.forEach((f,i)=>out.set(f,dir.get(piece[i])||{x:0,y:0}));
+    if(x||y) any=true;
+    dir.set(k,{x,y});
   }
+  let out=null;
+  if(any){ out=new Map(); faces.forEach((f,i)=>out.set(f,dir.get(piece[i])||{x:0,y:0})); }
   cache.set(faces,out); return out;
+}
+// Щель ножа видна и там, где рез не разделил тесто (надрез): вдоль пропила, где по обе стороны
+// одно и то же тесто, рисуется тёмная линия на высоте поверхности (проба 17.09: из трёх резов
+// читался один). Где куски разошлись, щель и так видна.
+function dishSlits(faces){
+  const cache=dishSlits.cache||(dishSlits.cache=new WeakMap());
+  if(cache.has(faces)) return cache.get(faces);
+  const piece=dishPieces(faces), boxes=faces.map(f=>{
+    let x0=Infinity,x1=-Infinity,y0=Infinity,y1=-Infinity;
+    for(const p of f.points){ if(p.x<x0)x0=p.x; if(p.x>x1)x1=p.x; if(p.y<y0)y0=p.y; if(p.y>y1)y1=p.y; }
+    return [x0,x1,y0,y1];
+  });
+  const pieceAt=q=>{
+    for(let i=0;i<faces.length;i++){
+      const b=boxes[i]; if(faces[i].kind!=="dough" || q.x<b[0]||q.x>b[1]||q.y<b[2]||q.y>b[3]) continue;
+      if(pointInFace(faces[i].points,q.x,q.y)) return {piece:piece[i],face:faces[i]};
+    }
+    return null;
+  };
+  const runs=[];
+  for(const c of dish.cuts){
+    const dx=c.b.x-c.a.x, dy=c.b.y-c.a.y, len=Math.hypot(dx,dy)||1, ux=dx/len, uy=dy/len, nx=-uy, ny=ux, off=c.width/2+.006;
+    let run=null;
+    const n=Math.max(2,Math.ceil(len/.015));
+    for(let k=0;k<=n;k++){
+      const t=len*k/n, m={x:c.a.x+ux*t,y:c.a.y+uy*t};
+      const L=pieceAt({x:m.x+nx*off,y:m.y+ny*off}), R=pieceAt({x:m.x-nx*off,y:m.y-ny*off});
+      if(L && R && L.piece===R.piece){ if(!run){ run={face:L.face,pts:[]}; runs.push(run); } run.pts.push(m); }
+      else run=null;
+    }
+  }
+  const out=runs.filter(r=>r.pts.length>1);
+  cache.set(faces,out); return out;
+}
+function drawDishSlits(g,screen,faces,H,zk,sx,sy){
+  if(!dish.cuts.length) return;
+  const shift=dishPieceShift(faces), pixel=Math.min(2,devicePixelRatio||1)*Math.min(sx,sy);
+  for(const r of dishSlits(faces)){
+    const o=shift && shift.get(r.face) || {x:0,y:0};
+    const pts=r.pts.map(p=>{ const q=screen({x:p.x+o.x,y:p.y+o.y}); return {x:q.x,y:q.y-(H ? H.at(p)*zk : 0)}; });
+    const line=(w,style,dy)=>{ g.strokeStyle=style; g.lineWidth=w; g.beginPath(); g.moveTo(pts[0].x,pts[0].y+dy); for(let i=1;i<pts.length;i++) g.lineTo(pts[i].x,pts[i].y+dy); g.stroke(); };
+    line(Math.max(1.4,2.2*pixel),"rgba(26,15,6,.82)",0);
+    line(Math.max(.6,.8*pixel),"rgba(255,236,190,.45)",Math.max(1,1.4*pixel));
+  }
 }
 // Точка жеста на столе → точка материала: из нарисованного (сдвинутого) куска под пальцем.
 function unshiftCutPoint(p){
@@ -2125,6 +2183,7 @@ function drawDish(g,sx,sy){
   // Rebuild expensive boundary intersections only after a committed geometry
   // change. During a drag the existing flat preview remains immediate.
   if(!moving&&(dish.folds||dish.cuts.length)&&!(dishGesture&&dishGesture.preview)) drawDishSections(g,screen,faces,sx,sy,zk,H);
+  if(!moving && dish.cuts.length && faces===dish.faces) drawDishSlits(g,screen,faces,H,zk,sx,sy);
   if(dish.mode==="fold" && !(dishGesture && dishGesture.preview)) drawDomes(g,screen,H,zk);
   if(dish.mode==="fold") drawPressDents(g,screen,H,zk,pose,sx,sy);
   if(dishGesture && !slide && dishGesture.zone!=="middle" && !(dishGesture.press && !dishGesture.moved)){
@@ -3735,13 +3794,20 @@ function drawTable(g, sx, sy){   // пикселизация делается н
 function drawFatAndButter(g, sx, sy){
   const P=(x,y)=>({x:prX(x,y)*sx,y:prY(x,y)*sy});
   if(fatMap){
-    const cell=2/FAT_N, rr=PAN_R*cell*1.35;   // пятна перекрываются — мазок, а не бусы
-    for(let j=0;j<FAT_N;j++) for(let i=0;i<FAT_N;i++){
-      const f=fatMap[j*FAT_N+i]; if(f<.04) continue;
-      const c=P(panC.x+(-1+(i+.5)*cell)*PAN_R, panC.y+(-1+(j+.5)*cell)*PAN_R);
-      g.fillStyle=`rgba(236,206,120,${(.13*f).toFixed(3)})`;
-      g.beginPath(); g.ellipse(c.x,c.y,rr*sx,rr*TILT*sy,0,0,Math.PI*2); g.fill();
+    // Карта жира — маленькая картинка 32×32, растянутая на таву со сглаживанием: мазок сплошной,
+    // а не бусы (проба 17.09). Перерисовывается не чаще 4 раз в секунду.
+    if(!fatCanvas){ fatCanvas=document.createElement("canvas"); fatCanvas.width=FAT_N; fatCanvas.height=FAT_N; fatCtx=fatCanvas.getContext("2d"); }
+    const now=performance.now();
+    if(fatDirty || now-fatDrawnAt>250){
+      fatCtx.clearRect(0,0,FAT_N,FAT_N);
+      for(let j=0;j<FAT_N;j++) for(let i=0;i<FAT_N;i++){
+        const f=fatMap[j*FAT_N+i]; if(f<.03) continue;
+        fatCtx.fillStyle=`rgba(236,206,120,${Math.min(.42,.42*f).toFixed(3)})`; fatCtx.fillRect(i,j,1,1);
+      }
+      fatDrawnAt=now; fatDirty=false;
     }
+    const c=P(panC.x,panC.y), rx=PAN_R*sx, ry=PAN_R*TILT*sy;
+    g.save(); g.imageSmoothingEnabled=true; g.drawImage(fatCanvas,c.x-rx,c.y-ry,rx*2,ry*2); g.restore();
   }
   const b=butterSpot(), tx=-Math.sin(b.a), ty=Math.cos(b.a), nx=Math.cos(b.a), ny=Math.sin(b.a);
   const L=PAN_R*.09, W=PAN_R*.06, H=PAN_R*.035*TILT;
