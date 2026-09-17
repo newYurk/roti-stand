@@ -269,7 +269,7 @@
 // до 400%+ и лист «рвётся» в середине от любого движения. Замер это обнаружил сразу.
 // Число узлов сохранено (1 060 после обрезки по кругу; прежняя оценка «~1150» была на глаз,
 // пересчитано 07.09.2026), однородность рёбер восстановлена.
-const BUILD = "2026-09-17 · пузыри по источникам · 20";
+const BUILD = "2026-09-17 · быстрые торцы · 21";
 const GRID = 38;                   // 38x38, в круг попадает 1 060 узлов (посчитано, не оценка)
 let SUBSTEPS = 8;                  // T2: 8–10 подшагов, 1 итерация
 let DAMP = 0.986;
@@ -1562,15 +1562,26 @@ function drawDishSections(g,screen,faces,sx,sy,zk=0,H=null){
   // Magnified cross sections sit just INSIDE their real material edge. Otherwise
   // a .018 kerf on a phone hides every layer behind its neighbouring piece. This
   // is a drawing convention: neither the cut width nor any material is moved.
-  g.save();g.globalAlpha=1;g.beginPath();
-  for(const f of faces){
-    if(f.kind!=="dough") continue;
-    const signed=f.points.reduce((s,p,i)=>{const q=f.points[(i+1)%f.points.length];return s+p.x*q.y-q.x*p.y;},0);
-    const ps=signed<0?f.points.slice().reverse():f.points;
-    const a=screen(ps[0],f);g.moveTo(a.x,a.y);
-    for(let i=1;i<ps.length;i++){const p=screen(ps[i],f);g.lineTo(p.x,p.y);}g.closePath();
-  }
-  g.clip();
+  g.save();g.globalAlpha=1;
+  // Контур обрезки — объединение тысяч граней; строить его каждый кадр стоило ~7 мс (#20).
+  // Пока поза, масштаб и раздвижка кусков те же, он хранится готовым (Path2D).
+  const build=path=>{
+    for(const f of faces){
+      if(f.kind!=="dough") continue;
+      const signed=f.points.reduce((s,p,i)=>{const q=f.points[(i+1)%f.points.length];return s+p.x*q.y-q.x*p.y;},0);
+      const ps=signed<0?f.points.slice().reverse():f.points;
+      const a=screen(ps[0],f);path.moveTo(a.x,a.y);
+      for(let i=1;i<ps.length;i++){const p=screen(ps[i],f);path.lineTo(p.x,p.y);}path.closePath();
+    }
+  };
+  if(typeof Path2D==="function"){
+    const o=screen({x:0,y:0}), e=screen({x:1,y:1});
+    const key=[o.x,o.y,e.x,e.y].map(v=>v.toFixed(2)).join(",");
+    const cache=drawDishSections.clips||(drawDishSections.clips=new WeakMap());
+    let hit=cache.get(faces);
+    if(!hit || hit.key!==key || hit.shift!==shift){ const path=new Path2D(); build(path); hit={key,shift,path}; cache.set(faces,hit); }
+    g.clip(hit.path);
+  } else { g.beginPath(); build(g); g.clip(); }
   const walls=sections.walls.map(w=>{
     const own=w.stack[0];   // стенка принадлежит куску своей стопки
     const a=screen(w.a,own),b=screen(w.b,own),mid={x:(w.a.x+w.b.x)/2,y:(w.a.y+w.b.y)/2};
