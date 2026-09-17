@@ -269,7 +269,7 @@
 // до 400%+ и лист «рвётся» в середине от любого движения. Замер это обнаружил сразу.
 // Число узлов сохранено (1 060 после обрезки по кругу; прежняя оценка «~1150» была на глаз,
 // пересчитано 07.09.2026), однородность рёбер восстановлена.
-const BUILD = "2026-09-17 · быстрые торцы · 21";
+const BUILD = "2026-09-17 · правки проверки · 22";
 const GRID = 38;                   // 38x38, в круг попадает 1 060 узлов (посчитано, не оценка)
 let SUBSTEPS = 8;                  // T2: 8–10 подшагов, 1 итерация
 let DAMP = 0.986;
@@ -295,7 +295,10 @@ let THICK_BREAK = feelBreak(TUNE);        // лист рвётся там, гд�
 let runTuneAtBuild = null, mixedTune = false;
 function measurementContext(){
   return { build:BUILD, tune:{ ...TUNE },
-    runTuneAtBuild:runTuneAtBuild ? { ...runTuneAtBuild } : null, mixedTune };
+    runTuneAtBuild:runTuneAtBuild ? { ...runTuneAtBuild } : null, mixedTune,
+    fry:typeof FRY_SECONDS==="undefined" ? null : FRY_SECONDS,
+    pressGain:typeof PRESS_GAIN==="undefined" ? null : PRESS_GAIN,
+    domes:typeof DOMES==="undefined" ? null : DOMES };
 }
 function currentMeasurement(entry){
   return entry.build===BUILD && entry.mixedTune===false &&
@@ -729,13 +732,16 @@ function sampleMultiplier(T,i){
   for(const d of domes) if(Math.hypot(T.x[i]-d.x,T.y[i]-d.y)<d.r) return 0;   // под куполом стали нет
   let m=1;
   if(fatMap) m*=1+FAT_GAIN*fatAt(T.x[i]*targetR/PAN_R,T.y[i]*targetR/PAN_R);
+  // Прижимы в одном месте не складываются: берётся самый сильный (ревью 17.09 — частые тапы
+  // перемножались до ×7 при заявленных ×(1 + сила)).
+  let press=0;
   for(const p of panPress){
     if(!(p.level>0)) continue;
     const d=Math.hypot(T.x[i]-p.x,T.y[i]-p.y); if(d>=PRESS_R) continue;
     const soft=d<=PRESS_R*.6 ? 1 : 1-(d-PRESS_R*.6)/(PRESS_R*.4);
-    m*=1+PRESS_GAIN*p.level*soft;
+    press=Math.max(press,p.level*soft);
   }
-  return m;
+  return press>0 ? m*(1+PRESS_GAIN*press) : m;
 }
 // ─── Прижим пальцем (владелица 07.09: «удержание пальца = прижим, и больше ничего: дольше держишь —
 // сильнее»). Здесь «сильнее» — это накопление тепла под пальцем: стопка прижата к стали, жар
@@ -749,11 +755,19 @@ const PINCH_WINDOW_MS = 250;             // резерв щипков (#19): б�
 let PRESS_GAIN = 1.0;                    // прибор «прижим»: во сколько раз больше жара под пальцем при полном прижиме
 let pressWet = 0;                        // сколько воды под прижатыми пальцами (для звука)
 function releasePress(g){ if(g && g.press) g.press.held=false; }
+// Новое касание рядом с гаснущим прижимом подхватывает его уровень: тап за тапом — это один прижим.
+function adoptPress(at){
+  let best=null;
+  for(const p of panPress) if(!p.held && Math.hypot(p.x-at.x,p.y-at.y)<PRESS_R && (!best || p.level>best.level)) best=p;
+  const press={x:at.x,y:at.y,level:best ? best.level : 0,held:true,since:performance.now()};
+  if(best) panPress.splice(panPress.indexOf(best),1);
+  panPress.push(press);
+  return press;
+}
 function updatePanPress(dt){
   const g=dishGesture;
   if(g && g.zone==="edge" && !g.press && !g.moved && g.onMat && performance.now()-g.t0>=PRESS_EDGE_HOLD_MS){
-    g.press={x:g.start.x,y:g.start.y,level:0,held:true,since:performance.now()};
-    panPress.push(g.press); g.latched=true;
+    g.press=adoptPress(g.start); g.latched=true;
   }
   for(const p of panPress) p.level=p.held ? Math.min(1,p.level+dt/PRESS_RISE) : p.level*Math.exp(-dt/PRESS_DECAY);
   if(panPress.some(p=>!p.held && p.level<=.01)) panPress=panPress.filter(p=>p.held || p.level>.01);
@@ -786,11 +800,25 @@ function butterSpot(){
   const a = stackedLayout() ? -35*Math.PI/180 : 20*Math.PI/180;
   return {x:panC.x+Math.cos(a)*PAN_R*.93, y:panC.y+Math.sin(a)*PAN_R*.93, a};
 }
-// Кусок берётся, только если палец не на тесте: край листа у борта остаётся складкой и снятием.
-function onButter(p){
-  const b=butterSpot();
-  if(Math.hypot(p.x-b.x,p.y-b.y)>PAN_R*.11) return false;
-  return !(dish && dish.mode==="fold" && onMaterial(dishLocal(p),.02));
+// Кусок берётся по нарисованному контуру (основание и верхняя грань) с запасом 6 CSS px, но не
+// сквозь тесто: если лист лежит на куске, касание — листу (ревью 17.09).
+function butterPolys(){
+  const b=butterSpot(), tx=-Math.sin(b.a), ty=Math.cos(b.a), nx=Math.cos(b.a), ny=Math.sin(b.a);
+  const L=PAN_R*.09, W=PAN_R*.06, H=PAN_R*.035*TILT;
+  const P=(u,v)=>({x:prX(b.x+tx*u+nx*v,b.y+ty*u+ny*v),y:prY(b.x+tx*u+nx*v,b.y+ty*u+ny*v)});
+  const base=[P(-L,-W),P(L,-W),P(L,W),P(-L,W)];
+  return {base,top:base.map(q=>({x:q.x,y:q.y-H}))};
+}
+function onButter(p,client){
+  let hit;
+  if(client){
+    const r=cv.getBoundingClientRect(), k=cv.width/(r.width||1);
+    const c={x:(client.x-r.left)*k,y:(client.y-r.top)*k}, slop=6*k;
+    const near=poly=>pointInFace(poly,c.x,c.y) || poly.some((a,i)=>{const z=poly[(i+1)%poly.length],dx=z.x-a.x,dy=z.y-a.y,
+      t=Math.max(0,Math.min(1,((c.x-a.x)*dx+(c.y-a.y)*dy)/(dx*dx+dy*dy||1)));return Math.hypot(a.x+dx*t-c.x,a.y+dy*t-c.y)<=slop;});
+    const P=butterPolys(); hit=near(P.base)||near(P.top)||near([P.base[0],P.base[1],P.top[1],P.top[0]])||near([P.base[3],P.base[2],P.top[2],P.top[3]]);
+  } else { const b=butterSpot(); hit=Math.hypot(p.x-b.x,p.y-b.y)<=PAN_R*.11; }
+  return hit && !(dish && dish.mode==="fold" && onMaterial(dishLocal(p)));
 }
 function fatAt(u,v){
   if(!fatMap) return 0;
@@ -883,15 +911,17 @@ function popDome(d,sound=true){
   domes.splice(i,1);
   if(sound) audioDomePop(d.rMax);
 }
-function popAllDomes(){ for(const d of domes.slice()) popDome(d); }
+function popAllDomes(){ domes.slice().forEach((d,i)=>popDome(d,i<3)); }   // слышно не больше трёх хлопков разом
 function updateDomes(dt){
   if(!DOMES || !dish.heatTable) return;
   const now=performance.now(), sess=dish.sessions ? dish.sessions.length : 1, md=meanDry();
   if(domeState.session!==sess){
-    domeState={session:sess,left:DOME_COUNT[0]+Math.floor(Math.random()*(DOME_COUNT[1]-DOME_COUNT[0]+1)),next:0};
+    domeState={session:sess,left:DOME_COUNT[0]+Math.floor(Math.random()*(DOME_COUNT[1]-DOME_COUNT[0]+1)),next:0,s0:md};
   }
-  // Купола растут, пока сторона на стали сохнет: после схватывания и до почти сухого.
-  if(domeState.left>0 && md>.2 && md<.85 && now>=domeState.next){
+  // Купола растут, пока сторона на стали сохнет: после схватывания и до почти сухого — считая от
+  // сухости при посадке (вторая сторона садится уже подсохшей; совсем сухой пара не даёт).
+  const s0=domeState.s0||0, wet=1-s0;
+  if(domeState.left>0 && wet>.1 && md>s0+.15*wet && md<s0+.85*wet && now>=domeState.next){
     if(spawnDome()) domeState.left--;
     domeState.next=now+400+Math.random()*900;
   }
@@ -1032,7 +1062,7 @@ function dishCard(){
     portions:dish.filling.length, bottom, top,
     thickMM:+Math.max(0,...stackHeights(dish.faces).zt).toFixed(1),
     bottomWord:cookWord(bottom), topWord:cookWord(top), panSeconds:Math.round(dish.panTime||0),
-    crisp:+dishCrisp.toFixed(1), crispWord:crispWord(dishCrisp),
+    crisp:+dishCrisp.toFixed(1), crispWord:crispWord(+dishCrisp.toFixed(1)),
     sessions:(dish.sessions||[]).map(x=>x.gold===null ? "—" : typeof x.gold==="string" ? x.gold : Math.round(x.gold)+" с") };
 }
 function serveDish(){
@@ -1105,6 +1135,7 @@ function cutDish(a,b){
 function undoDish(){
   if(!dish || dishGesture || dishFlight || dishMove || dish.mode==="served" || !dish.history.length) return;
   const flipsBefore=dish.flips||0;
+  panPress=[]; for(const d of domes.slice()) popDome(d,false);   // геометрия меняется — купола и пятна прижима не переносятся
   const {toPan,...entry}=dish.history.pop();
   Object.assign(dish,entry); dish.hull=dishHull();
   if(toPan){
@@ -1230,7 +1261,13 @@ function beginDishGesture(id,p,client,time){
   if(dishGesture || dishFlight || dishMove || dish.mode==="served") return;
   const start=dishLocal(p), at=client || {x:0,y:0}, t0=Number.isFinite(time) ? time : performance.now();
   const samples=[{x:at.x,y:at.y,t:t0}];
-  if(dish.mode==="cut"){ dishGesture={id,start,end:start,client:at,samples}; return; }
+  if(dish.mode==="cut"){
+    // Рез считается в материале: сдвиг куска под пальцем вычитается из всего штриха; начало в
+    // щели — сдвиг ближайшего куска не известен, штрих идёт по нарисованному столу как есть.
+    const u=unshiftCutPoint(start), o=u ? u.o : {x:0,y:0};
+    dishGesture={id,start:{x:start.x-o.x,y:start.y-o.y},end:{x:start.x-o.x,y:start.y-o.y},client:at,samples,cutShift:o};
+    return;
+  }
   // У угла оболочки два ребра одинаково близки: сохраняем оба, иначе жест внутрь
   // засчитывался бы у одного угла конверта и отклонялся у другого.
   const near=[]; let distance=Infinity;
@@ -1246,8 +1283,7 @@ function beginDishGesture(id,p,client,time){
   // Подсказки о возможном здесь не пишутся (критерий подсказок 07.09).
   if(distance>.30){
     if(!onMat) return;
-    const press={x:start.x,y:start.y,level:0,held:true,since:performance.now()};
-    panPress.push(press);
+    const press=adoptPress(start);
     dishGesture={id,start,end:start,client:at,samples,zone:"middle",t0,moved:false,press,latched:true};
     return;
   }
@@ -1286,12 +1322,15 @@ function trackStroke(g,client,t){
 }
 function moveDishGesture(p,client,time){
   const g=dishGesture; g.end=dishLocal(p);
+  if(g.cutShift){ g.end={x:g.end.x-g.cutShift.x,y:g.end.y-g.cutShift.y}; }
   const t=Number.isFinite(time) ? time : performance.now();
   if(client){
     g.samples.push({x:client.x,y:client.y,t});
     if(g.samples.length>64) g.samples.shift();
-    if(g.stroke) trackStroke(g,client,t);
     if(!g.moved && Math.hypot(client.x-g.client.x,client.y-g.client.y)>=TOUCH_SLOP_CSS){ g.moved=true; g.movedAt=t; }
+    // Дрожание пальца в пределах мёртвой зоны штрих не начинает: иначе «подержи — махни» с
+    // дрожащим пальцем давал штрих длиннее 300 мс и складку вместо переворота (ревью 17.09).
+    if(g.stroke){ if(g.moved) trackStroke(g,client,t); else { g.stroke.pos={x:client.x,y:client.y}; g.stroke.lastT=t; } }
   } else { if(!g.moved) g.movedAt=t; g.moved=true; }   // вызов без экранных координат (проверки) — без мёртвой зоны
   if(g.zone==="middle"){
     // До схватывания быстрый сдвиг — место под щипок (#19), не след прижима.
@@ -1346,7 +1385,7 @@ function slideEndsOnTable(client){
 }
 const MOVE_T = 0.35;
 function startRemoval(slide={x:0,y:0}){
-  if(!dish || dish.mode!=="fold" || dishFlight || dishMove) return false;
+  if(!dish || dish.mode!=="fold" || dishFlight || dishMove || dishGesture) return false;
   const from=dishPose(); from.x+=slide.x*from.scale; from.y+=slide.y*from.scale;
   panPress=[]; popAllDomes();
   startCutting();
@@ -1408,7 +1447,13 @@ function endDishGesture(time){
     return;
   }
   if(dish.mode!=="fold"){
-    if(!cutDish(g.start,g.end)) dish.message="Проведи лезвием через тесто";
+    // Конец штриха в нарисованной щели продлевается до выхода из материала (там же, по направлению).
+    let end=g.end;
+    if(g.cutShift && !onMaterial(end)){
+      const dx=end.x-g.start.x, dy=end.y-g.start.y, l=Math.hypot(dx,dy);
+      if(l>1e-6) end={x:end.x+dx/l*PIECE_SPREAD*2.5,y:end.y+dy/l*PIECE_SPREAD*2.5};
+    }
+    if(!cutDish(g.start,end)) dish.message="Проведи лезвием через тесто";
     return;
   }
   const last=g.samples[g.samples.length-1], f=flickOf(g,tUp), extra=pressExtra(g,tUp);
@@ -1528,31 +1573,70 @@ function dishSectionGeometry(faces, cuts=dish.cuts){
   const result={walls,stackAt,bounds};cache.set(faces,result);return result;
 }
 // Куски на столе чуть раздвинуты — условность отрисовки (владелица 17.09: после «одного
-// конверта» резы не читались: гладкий верх шёл поверх узкой щели ножа). Каждый сквозной рез
-// отодвигает свои стороны на PIECE_SPREAD поперёк себя; надрез, не дошедший до края, кусков
-// не разделяет и ничего не двигает. Материал, резы и торцы считаются по настоящей геометрии.
+// конверта» резы не читались: гладкий верх шёл поверх узкой щели ножа). Кусок — связная часть
+// теста (грани с общими рёбрами; складка связывает слои, пропил ножа — разделяет); надрез, не
+// разделивший тесто, ничего не двигает. Каждый кусок отодвигается от центра блюда на PIECE_SPREAD.
+// Материал, резы и торцы считаются по настоящей геометрии (ревью 17.09: прежнее деление по
+// бесконечной прямой реза рвало целый кусок при резе «Т»).
 const PIECE_SPREAD = 0.035;
+function dishPieces(faces){
+  const cache=dishPieces.cache||(dishPieces.cache=new WeakMap());
+  if(cache.has(faces)) return cache.get(faces);
+  const parent=faces.map((_,i)=>i);
+  const find=i=>{ while(parent[i]!==i){ parent[i]=parent[parent[i]]; i=parent[i]; } return i; };
+  const key=p=>Math.round(p.x*1e7)+","+Math.round(p.y*1e7);
+  const edges=new Map();
+  faces.forEach((f,i)=>{
+    if(f.kind!=="dough") return;
+    const ps=f.points;
+    for(let j=0;j<ps.length;j++){
+      const a=key(ps[j]), b=key(ps[(j+1)%ps.length]), k=a<b ? a+"/"+b : b+"/"+a;
+      const o=edges.get(k); if(o===undefined) edges.set(k,i); else parent[find(i)]=find(o);
+    }
+  });
+  const piece=new Array(faces.length).fill(-1);
+  faces.forEach((f,i)=>{ if(f.kind==="dough") piece[i]=find(i); });
+  // Начинка — кусок того теста, на котором лежит её центр.
+  faces.forEach((f,i)=>{
+    if(f.kind==="dough") return;
+    let cx=0,cy=0; for(const p of f.points){ cx+=p.x; cy+=p.y; } cx/=f.points.length; cy/=f.points.length;
+    for(let j=0;j<faces.length;j++) if(faces[j].kind==="dough" && pointInFace(faces[j].points,cx,cy)){ piece[i]=piece[j]; break; }
+  });
+  cache.set(faces,piece); return piece;
+}
 function dishPieceShift(faces){
   if(!dish || !dish.cuts.length) return null;
   const cache=dishPieceShift.cache||(dishPieceShift.cache=new WeakMap());
   if(cache.has(faces)) return cache.get(faces);
-  const inDough=p=>faces.some(f=>f.kind==="dough" && pointInFace(f.points,p.x,p.y));
-  const full=dish.cuts.filter(c=>!inDough(c.a) && !inDough(c.b)).map(c=>{
-    const len=Math.hypot(c.b.x-c.a.x,c.b.y-c.a.y)||1;
-    return {a:c.a,nx:-(c.b.y-c.a.y)/len,ny:(c.b.x-c.a.x)/len};
+  const piece=dishPieces(faces), area=new Map();
+  let total=0,tx=0,ty=0;
+  faces.forEach((f,i)=>{
+    if(f.kind!=="dough") return;
+    const a=polyArea(f.points); let cx=0,cy=0; for(const p of f.points){ cx+=p.x; cy+=p.y; } cx/=f.points.length; cy/=f.points.length;
+    const e=area.get(piece[i])||{a:0,x:0,y:0}; e.a+=a; e.x+=cx*a; e.y+=cy*a; area.set(piece[i],e);
+    total+=a; tx+=cx*a; ty+=cy*a;
   });
   let out=null;
-  if(full.length){
-    out=new Map();
-    for(const f of faces){
-      let cx=0,cy=0; for(const p of f.points){ cx+=p.x; cy+=p.y; }
-      cx/=f.points.length; cy/=f.points.length;
-      let x=0,y=0;
-      for(const c of full){ const side=Math.sign((cx-c.a.x)*c.nx+(cy-c.a.y)*c.ny); x+=side*PIECE_SPREAD*c.nx; y+=side*PIECE_SPREAD*c.ny; }
-      out.set(f,{x,y});
+  if(area.size>1 && total>0){
+    const c={x:tx/total,y:ty/total}, dir=new Map();
+    for(const [k,e] of area){
+      const dx=e.x/e.a-c.x, dy=e.y/e.a-c.y, l=Math.hypot(dx,dy);
+      dir.set(k,l>1e-6 ? {x:dx/l*PIECE_SPREAD,y:dy/l*PIECE_SPREAD} : {x:0,y:0});
     }
+    out=new Map();
+    faces.forEach((f,i)=>out.set(f,dir.get(piece[i])||{x:0,y:0}));
   }
   cache.set(faces,out); return out;
+}
+// Точка жеста на столе → точка материала: из нарисованного (сдвинутого) куска под пальцем.
+function unshiftCutPoint(p){
+  const shift=dishPieceShift(dish.faces); if(!shift) return {p,o:{x:0,y:0}};
+  for(const f of dish.faces){
+    if(f.kind!=="dough") continue;
+    const o=shift.get(f);
+    if(pointInFace(f.points,p.x-o.x,p.y-o.y)) return {p:{x:p.x-o.x,y:p.y-o.y},o};
+  }
+  return null;
 }
 function drawDishSections(g,screen,faces,sx,sy,zk=0,H=null){
   const sections=dishSectionGeometry(faces),pixel=Math.min(2,devicePixelRatio||1)*Math.min(sx,sy);
@@ -2044,7 +2128,8 @@ function drawDish(g,sx,sy){
   if(dish.mode==="fold" && !(dishGesture && dishGesture.preview)) drawDomes(g,screen,H,zk);
   if(dish.mode==="fold") drawPressDents(g,screen,H,zk,pose,sx,sy);
   if(dishGesture && !slide && dishGesture.zone!=="middle" && !(dishGesture.press && !dishGesture.moved)){
-    const d=dishGesture, a=screen(d.anchor||d.start),b=screen(d.target||d.end);
+    const d=dishGesture, o=d.cutShift||{x:0,y:0}, sh=q=>screen({x:q.x+o.x,y:q.y+o.y});
+    const a=sh(d.anchor||d.start),b=sh(d.target||d.end);
     g.strokeStyle=dish.mode==="fold" ? "#eab562" : "#f5ead6";g.lineWidth=Math.max(1,2*sx);
     g.beginPath();g.moveTo(a.x,a.y);g.lineTo(b.x,b.y);g.stroke();
     // Короткое лезвие остаётся под пальцем во время реза.
@@ -2982,14 +3067,15 @@ function audioDomeSigh(){
 }
 function audioDomePop(size){
   if(!AC || condition==="sight" || !noiseBuf) return;
-  const t=AC.currentTime, k=Math.max(.5,Math.min(1.5,size/.1));
+  // несколько хлопков разом — не один синфазный удар: сдвиг во времени и в буфере шума
+  const t=AC.currentTime+Math.random()*.06, k=Math.max(.5,Math.min(1.5,size/.1));
   const s=AC.createBufferSource(); s.buffer=noiseBuf;
   const f=AC.createBiquadFilter(); f.type="highpass"; f.frequency.value=2200;
   const g=AC.createGain(); g.gain.setValueAtTime(0.22*k,t); g.gain.exponentialRampToValueAtTime(0.001,t+.03);
-  s.connect(f); f.connect(g); g.connect(master); s.start(t); s.stop(t+.05);
+  s.connect(f); f.connect(g); g.connect(master); s.start(t,Math.random()*1.5); s.stop(t+.05);
   const x=AC.createBufferSource(); x.buffer=noiseBuf;
   const xf2=AC.createBiquadFilter(); xf2.type="bandpass"; xf2.frequency.value=900; xf2.Q.value=1.2;
-  const xg=AC.createGain(); xg.gain.setValueAtTime(0.0001,t+.01); xg.gain.exponentialRampToValueAtTime(0.07*k,t+.04); xg.gain.exponentialRampToValueAtTime(0.001,t+.3);
+  const xg=AC.createGain(); xg.gain.setValueAtTime(0.0001,t); xg.gain.setValueAtTime(0.0001,t+.01); xg.gain.exponentialRampToValueAtTime(0.07*k,t+.04); xg.gain.exponentialRampToValueAtTime(0.001,t+.3);
   x.connect(xf2); xf2.connect(xg); xg.connect(master); x.start(t); x.stop(t+.32);
 }
 // Голос прижима: громкость — от силы прижима, тембр и хруст — от воды под пальцем.
@@ -3153,7 +3239,7 @@ function onDown(id, cx, cy, t){
   if(dish){ audioInit(); if(AC && AC.state==="suspended") AC.resume();
             const p=toLocal(cx,cy);
             // Порядок попадания: кусок маргарина → лист → сталь.
-            if(!fatGesture && !dishGesture && dish.mode==="fold" && onButter(p)){ fatGesture={id,last:p}; return; }
+            if(!fatGesture && !dishGesture && dish.mode==="fold" && onButter(p,{x:cx,y:cy})){ fatGesture={id,last:p}; return; }
             if(fatGesture) return;
             beginDishGesture(id,p,{x:cx,y:cy},t); return; }
   if(action.pointerId !== null) return;              // один активный палец; второй игнорируется (audit §5)
