@@ -11,7 +11,7 @@
 // до 400%+ и лист «рвётся» в середине от любого движения. Замер это обнаружил сразу.
 // Число узлов сохранено (1 060 после обрезки по кругу; прежняя оценка «~1150» была на глаз,
 // пересчитано 07.09.2026), однородность рёбер восстановлена.
-const BUILD = "2026-09-17 · тесто в раме · 38";
+const BUILD = "2026-09-17 · выбор экрана · 39";
 const GRID = 38;                   // 38x38, в круг попадает 1 060 узлов (посчитано, не оценка)
 let SUBSTEPS = 8;                  // T2: 8–10 подшагов, 1 итерация
 let DAMP = 0.986;
@@ -164,7 +164,32 @@ if(typeof Image!=="undefined" && frameWantedSafe()){
   };
   frameImg.src = FRAME.src;
 }
-function frameWantedSafe(){ try { return frameWanted(); } catch(e) { return null; } }
+function frameWantedSafe(){
+  try { const u = frameWanted(); if(u) return u; } catch(e) {}
+  try { const k = localStorage.getItem("rotiFrame"); return FRAMES[k] ? k : null; } catch(e) { return null; }
+}
+// Переключение экрана на ходу (владелица 17.09: «между скринами можно переключить?»).
+function setFrame(key){
+  try { localStorage.setItem("rotiFrame", key || ""); } catch(e) {}
+  if(typeof document!=="undefined")
+    document.querySelectorAll("[data-frame]").forEach(b=>b.classList.toggle("on", b.dataset.frame===(key||"")));
+  if(!FRAMES[key]){                       // без рамы — обратно на свой стол
+    frameOn = false; FRAME = FRAMES.riverside; UNDER = TABLE; PAN_UNDER = null; PAL = buildPal();
+    if(typeof palPan!=="undefined" && palPan.clear) palPan.clear();
+    try { document.body.classList.remove("framed"); } catch(e) {}
+    try { resize(true); } catch(e) {}
+    return;
+  }
+  FRAME = FRAMES[key];
+  const img = new Image();
+  img.onload = ()=>{
+    frameImg = img; frameOn = true; sampleFrameColours();
+    try { variant = "C"; document.querySelectorAll("[data-v]").forEach(b=>b.classList.toggle("on", b.dataset.v==="C")); } catch(e) {}
+    try { document.body.classList.add("framed"); } catch(e) {}
+    try { resize(true); } catch(e) {}
+  };
+  img.src = FRAME.src;
+}
 // Цвет «под тестом» и «под роти» берётся с самой картинки: средний цвет рабочей поверхности и
 // середины тавы. Иначе тонкое тесто просвечивает цветом стола, которого в раме нет.
 function sampleFrameColours(){
@@ -4023,6 +4048,10 @@ function reset(){ recorded=false; resetMeters(); resize(true); }
 
 // Вид и условие меняют только draw() и звук — лист от них не зависит. Пересборка теряла
 // растянутый лист (A и B мерились на разных листах) и вбрасывала свой всплеск в «худший».
+document.querySelectorAll("[data-frame]").forEach(b=>{
+  b.classList.toggle("on", b.dataset.frame===(frameWantedSafe()||""));
+  b.addEventListener("click", ()=>setFrame(b.dataset.frame));
+});
 document.querySelectorAll("[data-z]").forEach(b=>{
   b.classList.toggle("on",+b.dataset.z===Z_EXAG);
   b.addEventListener("click",()=>setHeight(+b.dataset.z));

@@ -49,7 +49,7 @@
      display:contents, то есть в разметке не участвуют вовсе, а order возвращает
      группам исходный порядок панели: шаг · вид · судишь · порвётся · ощущение · служебные · статистика. */
   #core, #tools{ display:contents; }
-  #gStep{ order:1 } #gZ{ order:2 } #gView{ order:2 } #gCond{ order:3 } #tear{ order:4 }
+  #gStep{ order:1 } #gFrame{ order:2 } #gZ{ order:2 } #gView{ order:2 } #gCond{ order:3 } #tear{ order:4 }
   #gTune{ order:5 } #gThrough{ order:5 } #gFry{ order:5 } #gPress{ order:5 } #gSrv{ order:6 } #stats{ order:7 }
   #toolsBtn, #mini{ display:none; }
   /* Подсказка и крупный индикатор идут друг за другом: на телефоне подсказка в три строки
@@ -215,6 +215,11 @@
       <button id="serveDish" hidden>подать</button>
       <button id="undoDish" disabled>отменить</button>
     </div>
+    <div class="grp measure" id="gFrame"><b>экран</b>
+      <button data-frame="riverside">у реки</button>
+      <button data-frame="canal">у канала</button>
+      <button data-frame="" class="on">без рамы</button>
+    </div>
     <div class="grp measure" id="gZ"><b>высота</b>
       <button data-z="1.5">×1,5</button>
       <button data-z="2" class="on">×2</button>
@@ -266,6 +271,6 @@
   </div>
 </div>
 
-<script src="stand.js?v=2026-09-17-dough-38"></script>
+<script src="stand.js?v=2026-09-17-screens-39"></script>
 </body>
 </html>
