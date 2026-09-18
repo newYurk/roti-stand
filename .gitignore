@@ -17,13 +17,22 @@ runs/
 Roti-Obsidian/.obsidian/workspace.json
 Roti-Obsidian/.obsidian/workspace-mobile.json
 
-# код плагинов Obsidian в git не идёт никогда (у Excalidraw это ~5 МБ); настройки плагина (data.json)
-# и список включённых (community-plugins.json) — идут, чтобы хранилище вело себя одинаково везде
+# Excalidraw — общий стандарт трёх хранилищ (Темари, Ролльня, Роти), 17.09.2026.
+# Код плагинов в git не идёт никогда (у Excalidraw ~5 МБ). data.json плагинов — тоже: ИИ-режим Excalidraw
+# хранит там ключи API, а репозиторий публичный; обязательные настройки записаны в docs/corpus-map.md.
+# Список включённых плагинов (community-plugins.json) идёт в git.
 Roti-Obsidian/.obsidian/plugins/*/main.js
 Roti-Obsidian/.obsidian/plugins/*/styles.css
 Roti-Obsidian/.obsidian/plugins/*/manifest.json
-
-# экспорт рисунков Excalidraw — производное от *.excalidraw.md. По умолчанию не коммитится; лёгкий
-# экспорт, на который ссылается заметка, добавляется явно: git add -f (Home/CLAUDE.md, картинки в git)
+Roti-Obsidian/.obsidian/plugins/*/data.json
+# скрипты из магазина Excalidraw — чужой код
+Roti-Obsidian/Excalidraw/Scripts/
+# картинки в папке рисунков (экспорт и подложки) по умолчанию не в git; лёгкую картинку, на которую
+# ссылается заметка, добавлять явно: git add -f (Home/CLAUDE.md, картинки в git)
+Roti-Obsidian/Рисунки/**/*.png
+Roti-Obsidian/Рисунки/**/*.svg
+Roti-Obsidian/Рисунки/**/*.jpg
+Roti-Obsidian/Рисунки/**/*.jpeg
+Roti-Obsidian/Рисунки/**/*.webp
 Roti-Obsidian/**/*.excalidraw.png
 Roti-Obsidian/**/*.excalidraw.svg
