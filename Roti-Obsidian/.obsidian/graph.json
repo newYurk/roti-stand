@@ -6,7 +6,43 @@
   "hideUnresolved": false,
   "showOrphans": true,
   "collapse-color-groups": false,
-  "colorGroups": [],
+  "colorGroups": [
+    {
+      "query": "path:\"01 Люди\"",
+      "color": {
+        "a": 1,
+        "rgb": 15245898
+      }
+    },
+    {
+      "query": "path:\"02 Мир\"",
+      "color": {
+        "a": 1,
+        "rgb": 6000552
+      }
+    },
+    {
+      "query": "path:\"03 Тайны\"",
+      "color": {
+        "a": 1,
+        "rgb": 10190773
+      }
+    },
+    {
+      "query": "path:\"04 Дизайн\"",
+      "color": {
+        "a": 1,
+        "rgb": 8366207
+      }
+    },
+    {
+      "query": "path:\"05 Тележка\"",
+      "color": {
+        "a": 1,
+        "rgb": 11569512
+      }
+    }
+  ],
   "collapse-display": true,
   "showArrow": false,
   "textFadeMultiplier": 0,
@@ -18,5 +54,5 @@
   "linkStrength": 1,
   "linkDistance": 250,
   "scale": 1.462090065188811,
-  "close": false
+  "close": true
 }
