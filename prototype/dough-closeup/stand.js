@@ -11,7 +11,7 @@
 // до 400%+ и лист «рвётся» в середине от любого движения. Замер это обнаружил сразу.
 // Число узлов сохранено (1 060 после обрезки по кругу; прежняя оценка «~1150» была на глаз,
 // пересчитано 07.09.2026), однородность рёбер восстановлена.
-const BUILD = "2026-09-17 · две рамы · 37";
+const BUILD = "2026-09-17 · тесто в раме · 38";
 const GRID = 38;                   // 38x38, в круг попадает 1 060 узлов (посчитано, не оценка)
 let SUBSTEPS = 8;                  // T2: 8–10 подшагов, 1 итерация
 let DAMP = 0.986;
@@ -155,6 +155,7 @@ if(typeof Image!=="undefined" && frameWantedSafe()){
   frameImg = new Image();
   frameImg.onload = ()=>{
     frameOn = true;
+    sampleFrameColours();
     // Рама — это экран игры, а не замер: виды A/B рисуют кадр в 80 и 224 пикселя по ширине,
     // и картинка экрана в них превращается в мозаику. В раме всегда полный вид.
     try { variant = "C"; document.querySelectorAll("[data-v]").forEach(b=>b.classList.toggle("on", b.dataset.v==="C")); } catch(e) {}
@@ -164,6 +165,30 @@ if(typeof Image!=="undefined" && frameWantedSafe()){
   frameImg.src = FRAME.src;
 }
 function frameWantedSafe(){ try { return frameWanted(); } catch(e) { return null; } }
+// Цвет «под тестом» и «под роти» берётся с самой картинки: средний цвет рабочей поверхности и
+// середины тавы. Иначе тонкое тесто просвечивает цветом стола, которого в раме нет.
+function sampleFrameColours(){
+  try {
+    const c = document.createElement("canvas"); c.width = FRAME_W; c.height = FRAME_H;
+    const q = c.getContext("2d", {willReadFrequently:true});
+    q.drawImage(frameImg, 0, 0, FRAME_W, FRAME_H);
+    const avg = (x,y,w,h)=>{
+      const d = q.getImageData(Math.round(x), Math.round(y), Math.round(w), Math.round(h)).data;
+      let r=0,g=0,b=0,n=0;
+      for(let i=0;i<d.length;i+=4){ r+=d[i]; g+=d[i+1]; b+=d[i+2]; n++; }
+      return [Math.round(r/n), Math.round(g/n), Math.round(b/n)];
+    };
+    const W_ = FRAME.work, P_ = FRAME.pan;
+    // Просвечивание держим тёплым: у сырого роти тень под листом жёлто-песочная, а не стальная.
+    // С картинки берём только яркость места (день светлее, вечер темнее), цвет — тёплый.
+    const steel = avg(W_.x + W_.w*0.55, W_.y + W_.h*0.25, W_.w*0.4, W_.h*0.5);
+    const lum = Math.max(0.55, Math.min(1.25, (steel[0]*0.3 + steel[1]*0.59 + steel[2]*0.11)/145));
+    UNDER = [Math.round(176*lum), Math.round(146*lum), Math.round(104*lum)];
+    PAN_UNDER = avg(P_.cx - P_.rx*0.35, P_.cy - P_.ry*0.3, P_.rx*0.7, P_.ry*0.6);
+    PAL = buildPal();
+    if(typeof palPan!=="undefined" && palPan.clear) palPan.clear();
+  } catch(e) {}
+}
 function zone(name){
   if(frameOn){
     // Зоны рамы: прямоугольник картинки → координаты стола (через обратную проекцию углов).
@@ -4083,21 +4108,31 @@ document.getElementById("dump").addEventListener("click", async ()=>{
 // Тесто лежит на тёмной столешнице. Толстое — непрозрачное и бежевое; растянутое
 // истончается и НАЧИНАЕТ ПРОСВЕЧИВАТЬ, то есть темнеет к цвету стола.
 // Это и есть «растянуть почти до прозрачности» из v3, и это же — читаемый сигнал «сейчас порвётся».
-const DOUGH = [236, 219, 186], TABLE = [36, 28, 19];
+const DOUGH = [240, 224, 176], TABLE = [36, 28, 19];   // сырое масляное тесто — кремово-жёлтое (владелица, 17.09)
+// Под тестом — то, что реально лежит под ним: тёмный стол стенда или столешница с картинки рамы.
+// Без этого на светлой стали лист выглядел грязно-серым (владелица, 17.09): он «просвечивал»
+// цветом стола, которого в раме нет.
+let UNDER = TABLE, PAN_UNDER = null;
 function mix(t){                                   // t: 1 толстое → 0 тонкое
   // Пол просвечивания: самое тонкое тесто остаётся чуть светлее стола, иначе
   // дырка (настоящий стол и тень под ним) неотличима от тонкого места.
-  const k = 0.14 + Math.pow(Math.max(0,Math.min(1,t)), 0.85) * 0.86;
-  return [ Math.round(TABLE[0]+(DOUGH[0]-TABLE[0])*k),
-           Math.round(TABLE[1]+(DOUGH[1]-TABLE[1])*k),
-           Math.round(TABLE[2]+(DOUGH[2]-TABLE[2])*k) ];
+  // В раме пол выше: под тестом не тёмный стол, а светлая сталь. При 0,14 растянутый лист
+  // растворялся в столешнице и уходил в серый, а сырое роти на видео — кремово-жёлтое
+  // (владелица, 17.09). Просвечивание остаётся, но цвет держится своим.
+  const floor = frameOn ? 0.55 : 0.14;
+  const k = floor + Math.pow(Math.max(0,Math.min(1,t)), 0.85) * (1 - floor);
+  return [ Math.round(UNDER[0]+(DOUGH[0]-UNDER[0])*k),
+           Math.round(UNDER[1]+(DOUGH[1]-UNDER[1])*k),
+           Math.round(UNDER[2]+(DOUGH[2]-UNDER[2])*k) ];
 }
-const PAL = Array.from({length:16}, (_,i)=>{ const c = mix(i/15); return `rgb(${c[0]},${c[1]},${c[2]})`; });
+let PAL = buildPal();
+function buildPal(){ return Array.from({length:16}, (_,i)=>{ const c = mix(i/15); return `rgb(${c[0]},${c[1]},${c[2]})`; }); }
 function quant(t){ return PAL[Math.max(0,Math.min(15, Math.round(t*15)))]; }
 
 // На таве тонкое тесто просвечивает уже не столом, а дном тавы, и поверх ложится прожарка:
 // сырое → золотистое → коричневое → тёмное. Тёмное — не провал (см. docs/frying-mechanics.md).
-const PAN_BG = [66, 58, 48];
+const PAN_BG_DEFAULT = [66, 58, 48];
+function panBg(){ return PAN_UNDER || PAN_BG_DEFAULT; }
 const GOLD = [232,196,110], BROWN = [196,128,52], DARK = [122,66,26], CHAR = [62,34,16];
 function lerp3(a, b, k){ return [ a[0]+(b[0]-a[0])*k, a[1]+(b[1]-a[1])*k, a[2]+(b[2]-a[2])*k ]; }
 function mixOn(t, bg){
@@ -4117,10 +4152,10 @@ function quantOn(t, c){
   const tq = Math.max(0,Math.min(15, Math.round(t*15))), cq = Math.max(0,Math.min(15, Math.round(c/1.7*15)));
   const key = tq*16 + cq;
   let s = palPan.get(key);
-  if(!s){ s = rgb(cookColor(mixOn(tq/15, PAN_BG), cq/15*1.7)); palPan.set(key, s); }
+  if(!s){ s = rgb(cookColor(mixOn(tq/15, panBg()), cq/15*1.7)); palPan.set(key, s); }
   return s;
 }
-function shadeOn(t, c){ return rgb(cookColor(mixOn(t, PAN_BG), c)); }
+function shadeOn(t, c){ return rgb(cookColor(mixOn(t, panBg()), c)); }
 
 // Картинка листа в руке и в полёте: узлы физики стоят, а рисуем их со сдвигом,
 // поворотом и подъёмом из xf.
@@ -4243,6 +4278,9 @@ function draw(){
 function drawTable(g, sx, sy){   // пикселизация делается низкоразрешающей канвой, отдельный флаг сюда не нужен
   const w = zone("work");
   const R_ = (x)=>x*sx, D_ = (y)=>y*sy;
+  // В раме стол и тава уже нарисованы на картинке экрана — свои не рисуем. Но жир, кусочек
+  // маргарина и мишень растяжки остаются: это не декорация, а игра (владелица 17.09 о раме).
+  if(frameOn){ drawFatAndButter(g, sx, sy); return drawStretchTarget(g, sx, sy); }
 
   // Столешница — весь кадр: и рабочая зона, и зона тавы стоят на одном столе.
   // Раньше здесь стояла высота РАБОЧЕЙ зоны; пока зоны делились по ширине, это было
@@ -4273,8 +4311,11 @@ function drawTable(g, sx, sy){   // пикселизация делается н
   ell(PAN_R*0.30, "#6b5a2a");               // лужица маргарина в центре вогнутого дна
   ell(PAN_R*0.16, "#8a7436", -PAN_R*0.02);  // блик на масле
   drawFatAndButter(g, sx, sy);
-
-  // мишень: докуда растянуть лист — только пока лист на столе
+  drawStretchTarget(g, sx, sy);
+}
+// Мишень: докуда растянуть лист — только пока лист на столе.
+function drawStretchTarget(g, sx, sy){
+  const R_ = (x)=>x*sx, D_ = (y)=>y*sy;
   if(phase !== "TABLE") return;
   const c2 = centerOfSheet();
   const tR = stepNo===1 ? step1R : targetR;           // мишень текущего шага
