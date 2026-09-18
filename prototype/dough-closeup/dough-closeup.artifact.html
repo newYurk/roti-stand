@@ -285,7 +285,7 @@
 // до 400%+ и лист «рвётся» в середине от любого движения. Замер это обнаружил сразу.
 // Число узлов сохранено (1 060 после обрезки по кругу; прежняя оценка «~1150» была на глаз,
 // пересчитано 07.09.2026), однородность рёбер восстановлена.
-const BUILD = "2026-09-17 · маргарин в раме · 40";
+const BUILD = "2026-09-17 · вечерний экран крупнее · 41";
 const GRID = 38;                   // 38x38, в круг попадает 1 060 узлов (посчитано, не оценка)
 let SUBSTEPS = 8;                  // T2: 8–10 подшагов, 1 итерация
 let DAMP = 0.986;
@@ -390,7 +390,10 @@ let xf = null;                     // {cx,cy,ox,oy,th,lift}
 // Вид не сверху, а из-за прилавка: стол уходит от игрока, поэтому по вертикали
 // всё сжато, а дальний край ещё и сужен. Симуляция считается в плоскости стола,
 // экранные координаты получаются проекцией — обратное преобразование нужно вводу.
-const TILT = 0.56, PERSP = 0.22;
+const TILT_BASE = 0.56, PERSP = 0.22;
+// Наклон — свой у каждой рамы: камера стенда должна совпасть с камерой художника, иначе круглый
+// роти не ложится в нарисованную таву. Мерка — сама тава: высота её эллипса к ширине ≈ TILT/перспектива.
+let TILT = TILT_BASE;
 function horizon(){ return cv.height * 0.42; }
 function prX(x, y){
   const h = horizon(), k = 1 + ((y - h)/cv.height) * PERSP;
@@ -411,8 +414,11 @@ const FRAME_W = 1024, FRAME_H = 576;
 const FRAMES = {
   riverside: { src:"frame-riverside.jpg",                       // день у реки, бабушка за прилавком
     work:{x:24,y:246,w:420,h:225}, pan:{cx:800,cy:352,rx:228,ry:112}, band:{y0:235,y1:492} },
-  canal:     { src:"frame-canal.jpg",                           // вечер у канала, украшения над прилавком
-    work:{x:100,y:368,w:330,h:135}, pan:{cx:830,cy:440,rx:200,ry:85}, band:{y0:335,y1:522} },
+  // Вечер у канала, украшения над прилавком. Картинка переделана 17.09 (владелица: «очень уж получилось
+  // мелко… рабочая область должна быть намного больше»): полка и предметы мельче, стол глубже, лоток
+  // лопаток убран, вместо вока плоская тава (#44). Камера художника ниже нашей: тава 170×66, отсюда tilt.
+  canal:     { src:"frame-canal.jpg", tilt:0.41,
+    work:{x:120,y:340,w:495,h:180}, pan:{cx:824,cy:408,rx:170,ry:66}, band:{y0:300,y1:528} },
 };
 let frameImg = null, frameOn = false, FRAME = FRAMES.riverside;
 function frameWanted(){
@@ -428,7 +434,7 @@ if(typeof Image!=="undefined" && frameWantedSafe()){
   FRAME = FRAMES[frameWantedSafe()];
   frameImg = new Image();
   frameImg.onload = ()=>{
-    frameOn = true;
+    frameOn = true; setTilt(FRAME.tilt || TILT_BASE);
     sampleFrameColours();
     // Рама — это экран игры, а не замер: виды A/B рисуют кадр в 80 и 224 пикселя по ширине,
     // и картинка экрана в них превращается в мозаику. В раме всегда полный вид.
@@ -448,7 +454,7 @@ function setFrame(key){
   if(typeof document!=="undefined")
     document.querySelectorAll("[data-frame]").forEach(b=>b.classList.toggle("on", b.dataset.frame===(key||"")));
   if(!FRAMES[key]){                       // без рамы — обратно на свой стол
-    frameOn = false; FRAME = FRAMES.riverside; UNDER = TABLE; PAN_UNDER = null; PAL = buildPal();
+    frameOn = false; FRAME = FRAMES.riverside; UNDER = TABLE; PAN_UNDER = null; PAL = buildPal(); setTilt(TILT_BASE);
     if(typeof palPan!=="undefined" && palPan.clear) palPan.clear();
     try { document.body.classList.remove("framed"); } catch(e) {}
     try { resize(true); } catch(e) {}
@@ -457,7 +463,7 @@ function setFrame(key){
   FRAME = FRAMES[key];
   const img = new Image();
   img.onload = ()=>{
-    frameImg = img; frameOn = true; sampleFrameColours();
+    frameImg = img; frameOn = true; setTilt(FRAME.tilt || TILT_BASE); sampleFrameColours();
     try { variant = "C"; document.querySelectorAll("[data-v]").forEach(b=>b.classList.toggle("on", b.dataset.v==="C")); } catch(e) {}
     try { document.body.classList.add("framed"); } catch(e) {}
     try { resize(true); } catch(e) {}
@@ -2044,7 +2050,11 @@ function setHeight(z){
   if(typeof document!=="undefined") document.querySelectorAll("[data-z]").forEach(x=>x.classList.toggle("on",+x.dataset.z===z));
   draw();
 }
-const VIEW_UP = 0.83;    // вертикаль в кадре при наклоне стола, ≈ √(1 − TILT²)
+let VIEW_UP = 0.83;      // вертикаль в кадре при наклоне стола, ≈ √(1 − TILT²)
+function setTilt(t){     // рама с другой камерой; без рамы и у реки — TILT_BASE, VIEW_UP 0,83
+  TILT = t; VIEW_UP = +Math.sqrt(1 - t*t).toFixed(2);
+  drawDishTable.cache=null; drawDishTable.lru=[]; tableBlit.shown=null;
+}
 // Рельеф читается тенью и кромкой, а не высотой: геометрия — как в жизни (Z_EXAG), а свет, кромка,
 // тень и корки считаются по Z_RELIEF (см. выше). При ×2 без этого верх освещался ровно, складки
 // оставались царапинами, а в виде A стенок не было вовсе (проверка сборки 31).
@@ -2933,14 +2943,25 @@ let targetR = 1, startR = 1, step1R = 1;       // step1R = цель расплю
 let advancedAt = 0;                            // момент авто-перехода на шаг 2 (для баннера)
 let gestureScale = 1;                          // масштаб жеста: фиксирован от экрана, не от роста листа
 let FLAT_RATE = 0.55;                          // скорость расплющивания под пальцем
+// Мерка листа — меньшая сторона рабочей зоны; от неё доли комка, свежего листа и мишени.
+// В раме тава нарисована и не растягивается: мерка ещё и не больше той, при которой готовый лист
+// ложится в таву с тем же запасом, что на своём столе (тава в 1,25 раза шире роти). Иначе на
+// вечернем экране с глубоким столом лист выходил крупнее сковороды (сборка 41).
+function sheetSpan(z){
+  const s = Math.min(z.w, z.h);
+  if(!frameOn) return s;
+  layoutPan();                                   // в раме тава от листа не зависит
+  const k = 1 + ((panC.y - horizon())/cv.height) * PERSP;
+  return Math.min(s, PAN_R / (1.25 * k * TARGET_FRAC));
+}
 function build(){
   runTuneAtBuild = { ...TUNE };
   mixedTune = false;
-  const z = zone("work");
-  R0 = Math.min(z.w, z.h) * (stepNo===1 ? FLAT_START_FRAC : START_FRAC);
+  const z = zone("work"), span = sheetSpan(z);
+  R0 = span * (stepNo===1 ? FLAT_START_FRAC : START_FRAC);
   startR = R0;
-  targetR = Math.min(z.w, z.h) * TARGET_FRAC;
-  step1R  = Math.min(z.w, z.h) * START_FRAC;
+  targetR = span * TARGET_FRAC;
+  step1R  = span * START_FRAC;
   gestureScale = step1R;                       // мах меряем в долях «свежего листа шага 2»
   const h = (R0*2)/(GRID-1);                 // шаг решётки — одинаков везде
   const x0 = z.cx - R0, y0 = z.cy - R0;
@@ -4795,7 +4816,7 @@ function resize(force){
   const oldPan={...panC},oldR=targetR;
   cv.width = w; cv.height = h;
   if(dish && !force){
-    const z=zone("work"); targetR=Math.min(z.w,z.h)*TARGET_FRAC; layoutPan();
+    const z=zone("work"); targetR=sheetSpan(z)*TARGET_FRAC; layoutPan();
     const scale=targetR/oldR;
     for(let i=0;i<N;i++){px[i]=panC.x+(px[i]-oldPan.x)*scale;py[i]=panC.y+(py[i]-oldPan.y)*scale;prx[i]=px[i];pry[i]=py[i];}
     startR*=scale;step1R*=scale;gestureScale*=scale;R0*=scale;
