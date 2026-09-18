@@ -25,8 +25,8 @@ Roti-Obsidian/.obsidian/plugins/*/main.js
 Roti-Obsidian/.obsidian/plugins/*/styles.css
 Roti-Obsidian/.obsidian/plugins/*/manifest.json
 Roti-Obsidian/.obsidian/plugins/*/data.json
-# скрипты из магазина Excalidraw — чужой код
-Roti-Obsidian/Excalidraw/Scripts/
+# служебная папка плагина: скрипты из магазина (чужой код), библиотеки, шаблон, шрифты CJK (мегабайты)
+Roti-Obsidian/Excalidraw/
 # картинки в папке рисунков (экспорт и подложки) по умолчанию не в git; лёгкую картинку, на которую
 # ссылается заметка, добавлять явно: git add -f (Home/CLAUDE.md, картинки в git)
 Roti-Obsidian/Рисунки/**/*.png

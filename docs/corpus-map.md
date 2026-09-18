@@ -51,10 +51,16 @@
 плагина принудительно ставит `compress: true` — в коде 2.27.3: `onceOffCompressFlagReset||(this.settings.compress=!0,…)`;
 так случилось у «Темари» при установке),
 `autoexportPNG: true`, `autoexportSVG: false`, `exportWithBackground: true`, `keepInSync: true`,
-`pngExportScale: 1`; остальное — по умолчанию. Править файл — только при закрытом Obsidian, иначе
+`pngExportScale: 1`, `embedUseExcalidrawFolder: true` (иначе рисунок, созданный из заметки кнопкой
+«создать и вставить», ложится рядом с заметкой, а не в `Рисунки/`), `templateFilePath:
+"Excalidraw/Template.excalidraw"` (умолчание: шаблон — служебный файл, в `Рисунки/` его легко принять за
+рисунок владелицы); остальное — по умолчанию. И настройка самого Obsidian: `attachmentFolderPath:
+"Рисунки"` в `.obsidian/app.json` — Excalidraw кладёт вставленные картинки туда же, куда Obsidian
+(`getAvailablePathForAttachment`), и без неё скриншот уходил бы в корень хранилища, мимо `Рисунки/` и
+правил `.gitignore`. Править файл — только при закрытом Obsidian, иначе
 он его перезапишет; если открыт — попросить владелицу поставить галочки в интерфейсе.
 
-**Git:** код плагинов, `data.json` и `Excalidraw/Scripts/` — никогда; картинки в `Рисунки/` (экспорт и
+**Git:** код плагинов, `data.json` и служебная папка `Excalidraw/` — никогда; картинки в `Рисунки/` (экспорт и
 подложки) — по умолчанию нет, лёгкую и нужную — `git add -f`; рисунки `*.excalidraw.md` — да.
 
 ---
