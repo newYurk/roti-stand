@@ -12,5 +12,7 @@ mockups/originals/
 # рабочие материалы, регрессия вне git, логи и профиль своего браузера (Home/CLAUDE.md, 16.09.2026)
 runs/
 
-# настройки самого Obsidian (состояние окон и панелей) — заметки хранилища в git идут, настройки нет
-Roti-Obsidian/.obsidian/
+# настройки Obsidian едут в git (цвета графа, вид, включённые плагины) — как в «Темари»;
+# личное состояние окна у каждого своё
+Roti-Obsidian/.obsidian/workspace.json
+Roti-Obsidian/.obsidian/workspace-mobile.json
