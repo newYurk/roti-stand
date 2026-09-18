@@ -70,6 +70,10 @@
     color:var(--hot); font-size:clamp(18px,4vw,32px); letter-spacing:.08em;
     pointer-events:none; z-index:4; }
   #torn.on{ display:flex; }
+  /* Рама экрана (#102): показываем игру, а не измерительный стенд — приборы, ползунки и
+     переключатели видов прячутся, остаются шаги пути и подсказка. */
+  body.framed #tools, body.framed #gView, body.framed #gCond, body.framed #gTune,
+  body.framed #stats, body.framed #mini, body.framed #toolsBtn, body.framed #gZ{ display:none !important; }
   /* Значок предпросмотра ветки: его заполняет только локальный сервер предпросмотра
      (/__preview.json). На Pages адреса нет, и значок остаётся скрытым. */
   #previewBadge{ position:absolute; left:6px; bottom:6px; max-width:calc(100% - 12px);
@@ -277,7 +281,7 @@
 // до 400%+ и лист «рвётся» в середине от любого движения. Замер это обнаружил сразу.
 // Число узлов сохранено (1 060 после обрезки по кругу; прежняя оценка «~1150» была на глаз,
 // пересчитано 07.09.2026), однородность рёбер восстановлена.
-const BUILD = "2026-09-17 · кромка реза · 35";
+const BUILD = "2026-09-17 · рама экрана · 36";
 const GRID = 38;                   // 38x38, в круг попадает 1 060 узлов (посчитано, не оценка)
 let SUBSTEPS = 8;                  // T2: 8–10 подшагов, 1 итерация
 let DAMP = 0.986;
@@ -394,7 +398,52 @@ function unproject(sx, sy){
   const k = 1 + ((wy - h)/cv.height) * PERSP;
   return { x: cv.width*0.5 + (sx - cv.width*0.5)/k, y: wy };
 }
+// ─── Рама одобренного экрана (#102). Стенд рисует стол сам; в раме стол уже нарисован на картинке,
+// поэтому свой мы не рисуем, а зоны берём с неё. Включается адресом `?frame=riverside`.
+// Замеры по картинке 1024×576 (сетка, 17.09): полка кончается на y≈235, рабочая поверхность слева
+// x 20…450, лоток лопаток 455…560, тава — эллипс (800, 352) с полуосями 228×112, панель с y≈490.
+// Картинка — одобренный экран с ПУСТЫМ столом и пустой тавой: свой лист и роти рисует стенд.
+// Получена правкой одобренного экрана (Draw Things, 17.09), лежит рядом со стендом, 71 КБ.
+// Замеры сделаны по копии 1024×576, поэтому рисуем её в том же логическом размере.
+const FRAME_SRC = "frame-riverside.jpg", FRAME_W = 1024, FRAME_H = 576;
+const FRAME_WORK = {x:24, y:246, w:420, h:225};      // стальная поверхность под тесто
+const FRAME_PAN  = {cx:800, cy:352, rx:228, ry:112}; // тава
+const FRAME_BAND = {y0:235, y1:492};                 // играбельная полоса: от полки до нижней панели
+let frameImg = null, frameOn = false;
+if(typeof Image!=="undefined" && frameWantedSafe()){
+  frameImg = new Image();
+  frameImg.onload = ()=>{
+    frameOn = true;
+    // Рама — это экран игры, а не замер: виды A/B рисуют кадр в 80 и 224 пикселя по ширине,
+    // и картинка экрана в них превращается в мозаику. В раме всегда полный вид.
+    try { variant = "C"; document.querySelectorAll("[data-v]").forEach(b=>b.classList.toggle("on", b.dataset.v==="C")); } catch(e) {}
+    try { document.body.classList.add("framed"); } catch(e) {}
+    try { resize(true); } catch(e) {}
+  };
+  frameImg.src = FRAME_SRC;
+}
+function frameWantedSafe(){ try { return frameWanted(); } catch(e) { return false; } }
+function frameWanted(){
+  try { return new URLSearchParams(location.search).get("frame")==="riverside"; } catch(e) { return false; }
+}
+function frameFit(){                                  // картинка → холст: по ширине, полоса по центру
+  const k = cv.width / FRAME_W;
+  const bandMid = (FRAME_BAND.y0 + FRAME_BAND.y1) * 0.5;
+  return { k, dx: 0, dy: cv.height*0.5 - bandMid*k };
+}
+const frameX = x => { const f=frameFit(); return f.dx + x*f.k; };
+const frameY = y => { const f=frameFit(); return f.dy + y*f.k; };
 function zone(name){
+  if(frameOn){
+    // Зоны рамы: прямоугольник картинки → координаты стола (через обратную проекцию углов).
+    const W_ = FRAME_WORK, P_ = FRAME_PAN;
+    const box = name==="work"
+      ? [frameX(W_.x), frameY(W_.y), frameX(W_.x+W_.w), frameY(W_.y+W_.h)]
+      : [frameX(P_.cx-P_.rx), frameY(P_.cy-P_.ry), frameX(P_.cx+P_.rx), frameY(P_.cy+P_.ry)];
+    const a = unproject(box[0], box[1]), b = unproject(box[2], box[3]);
+    const x = Math.min(a.x,b.x), y = Math.min(a.y,b.y), w = Math.abs(b.x-a.x), h = Math.abs(b.y-a.y);
+    return { x, y, w, h, cx:x+w*0.5, cy:y+h*0.5 };
+  }
   const work = name === "work", f = work ? WORK_FRAC : 1 - WORK_FRAC;
   // Вертикальные границы зон — по ВИДИМОЙ полосе стола, а не по числу cv.height.
   // Перспектива сжимает стол в TILT раз, поэтому координата y = cv.height приходится
@@ -456,6 +505,11 @@ function layoutPan(){
       cyS = prY(0, pz.cy);
     }
     panC = unproject(cxS, cyS);
+  }
+  if(frameOn){                       // в раме тава уже нарисована — садимся ровно в неё
+    const c = unproject(frameX(FRAME_PAN.cx), frameY(FRAME_PAN.cy));
+    panC = c;
+    PAN_R = frameX(FRAME_PAN.rx) - frameX(0);
   }
 }
 
@@ -4365,7 +4419,10 @@ function draw(){
   }
 
   g.fillStyle = "#14100c"; g.fillRect(0,0,W,H);
-  drawTable(g, sx, sy);
+  if(frameOn){
+    const f = frameFit();
+    g.drawImage(frameImg, f.dx*sx, f.dy*sy, FRAME_W*f.k*sx, FRAME_H*f.k*sy);
+  } else drawTable(g, sx, sy);
 
   if(dish) drawDish(g,sx,sy);
   else {   // режим «только звук», в котором поле не рисовалось вовсе, снят 08.09.2026

@@ -70,6 +70,10 @@
     color:var(--hot); font-size:clamp(18px,4vw,32px); letter-spacing:.08em;
     pointer-events:none; z-index:4; }
   #torn.on{ display:flex; }
+  /* Рама экрана (#102): показываем игру, а не измерительный стенд — приборы, ползунки и
+     переключатели видов прячутся, остаются шаги пути и подсказка. */
+  body.framed #tools, body.framed #gView, body.framed #gCond, body.framed #gTune,
+  body.framed #stats, body.framed #mini, body.framed #toolsBtn, body.framed #gZ{ display:none !important; }
   /* Значок предпросмотра ветки: его заполняет только локальный сервер предпросмотра
      (/__preview.json). На Pages адреса нет, и значок остаётся скрытым. */
   #previewBadge{ position:absolute; left:6px; bottom:6px; max-width:calc(100% - 12px);
@@ -263,6 +267,6 @@
   </div>
 </div>
 
-<script src="stand.js?v=2026-09-17-rim-35"></script>
+<script src="stand.js?v=2026-09-17-frame-36"></script>
 </body>
 </html>
