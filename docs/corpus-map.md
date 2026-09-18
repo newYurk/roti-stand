@@ -47,7 +47,9 @@
 сам файл в git не идёт — там могут лежать ключи API): `folder: "Рисунки"`, `annotateFolder: "Рисунки"`
 («Image annotation file folder»), `cropFolder: "Рисунки"` («Crop file folder») — иначе пометки поверх
 картинки из любой заметки ложатся рядом с ней, вне `Рисунки/`, и их не видят ни правила агентов, ни
-`.gitignore`; `compress: false`,
+`.gitignore`; `compress: false` вместе с `onceOffCompressFlagReset: true` (без флага первая загрузка
+плагина принудительно ставит `compress: true` — в коде 2.27.3: `onceOffCompressFlagReset||(this.settings.compress=!0,…)`;
+так случилось у «Темари» при установке),
 `autoexportPNG: true`, `autoexportSVG: false`, `exportWithBackground: true`, `keepInSync: true`,
 `pngExportScale: 1`; остальное — по умолчанию. Править файл — только при закрытом Obsidian, иначе
 он его перезапишет; если открыт — попросить владелицу поставить галочки в интерфейсе.
