@@ -44,7 +44,10 @@
   когда без этого нельзя и не второй раз подряд.
 
 **Обязательные настройки Excalidraw** (2.27.3, `.obsidian/plugins/obsidian-excalidraw-plugin/data.json`;
-сам файл в git не идёт — там могут лежать ключи API): `folder: "Рисунки"`, `compress: false`,
+сам файл в git не идёт — там могут лежать ключи API): `folder: "Рисунки"`, `annotateFolder: "Рисунки"`
+(«Image annotation file folder»), `cropFolder: "Рисунки"` («Crop file folder») — иначе пометки поверх
+картинки из любой заметки ложатся рядом с ней, вне `Рисунки/`, и их не видят ни правила агентов, ни
+`.gitignore`; `compress: false`,
 `autoexportPNG: true`, `autoexportSVG: false`, `exportWithBackground: true`, `keepInSync: true`,
 `pngExportScale: 1`; остальное — по умолчанию. Править файл — только при закрытом Obsidian, иначе
 он его перезапишет; если открыт — попросить владелицу поставить галочки в интерфейсе.
