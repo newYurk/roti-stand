@@ -215,7 +215,6 @@
       <button id="serveDish" hidden>подать</button>
       <button id="undoDish" disabled>отменить</button>
     </div>
-    <button id="tear">СЕЙЧАС ПОРВЁТСЯ<span class="kbd"> (space)</span></button>
     <div class="grp measure" id="gZ"><b>высота</b>
       <button data-z="1.5">×1,5</button>
       <button data-z="2" class="on">×2</button>
@@ -281,7 +280,7 @@
 // до 400%+ и лист «рвётся» в середине от любого движения. Замер это обнаружил сразу.
 // Число узлов сохранено (1 060 после обрезки по кругу; прежняя оценка «~1150» была на глаз,
 // пересчитано 07.09.2026), однородность рёбер восстановлена.
-const BUILD = "2026-09-17 · рама экрана · 36";
+const BUILD = "2026-09-17 · две рамы · 37";
 const GRID = 38;                   // 38x38, в круг попадает 1 060 узлов (посчитано, не оценка)
 let SUBSTEPS = 8;                  // T2: 8–10 подшагов, 1 итерация
 let DAMP = 0.986;
@@ -399,18 +398,29 @@ function unproject(sx, sy){
   return { x: cv.width*0.5 + (sx - cv.width*0.5)/k, y: wy };
 }
 // ─── Рама одобренного экрана (#102). Стенд рисует стол сам; в раме стол уже нарисован на картинке,
-// поэтому свой мы не рисуем, а зоны берём с неё. Включается адресом `?frame=riverside`.
-// Замеры по картинке 1024×576 (сетка, 17.09): полка кончается на y≈235, рабочая поверхность слева
-// x 20…450, лоток лопаток 455…560, тава — эллипс (800, 352) с полуосями 228×112, панель с y≈490.
-// Картинка — одобренный экран с ПУСТЫМ столом и пустой тавой: свой лист и роти рисует стенд.
-// Получена правкой одобренного экрана (Draw Things, 17.09), лежит рядом со стендом, 71 КБ.
-// Замеры сделаны по копии 1024×576, поэтому рисуем её в том же логическом размере.
-const FRAME_SRC = "frame-riverside.jpg", FRAME_W = 1024, FRAME_H = 576;
-const FRAME_WORK = {x:24, y:246, w:420, h:225};      // стальная поверхность под тесто
-const FRAME_PAN  = {cx:800, cy:352, rx:228, ry:112}; // тава
-const FRAME_BAND = {y0:235, y1:492};                 // играбельная полоса: от полки до нижней панели
-let frameImg = null, frameOn = false;
+// поэтому свой мы не рисуем, а зоны берём с неё. Включается адресом `?frame=riverside` или `?frame=canal`.
+// Рамы: картинка одобренного экрана с ПУСТЫМ столом и пустой тавой (свой лист и роти рисует стенд).
+// Получены правкой одобренных экранов (Draw Things, 17.09), лежат рядом со стендом, ~70 КБ каждая.
+// Замеры сделаны по копиям 1024×576 — в этом же логическом размере картинки и рисуются.
+const FRAME_W = 1024, FRAME_H = 576;
+const FRAMES = {
+  riverside: { src:"frame-riverside.jpg",                       // день у реки, бабушка за прилавком
+    work:{x:24,y:246,w:420,h:225}, pan:{cx:800,cy:352,rx:228,ry:112}, band:{y0:235,y1:492} },
+  canal:     { src:"frame-canal.jpg",                           // вечер у канала, украшения над прилавком
+    work:{x:100,y:368,w:330,h:135}, pan:{cx:830,cy:440,rx:200,ry:85}, band:{y0:335,y1:522} },
+};
+let frameImg = null, frameOn = false, FRAME = FRAMES.riverside;
+function frameWanted(){
+  try { const k = new URLSearchParams(location.search).get("frame"); return FRAMES[k] ? k : null; } catch(e) { return null; }
+}
+function frameFit(){                                  // картинка → холст: по ширине, полоса по центру
+  const k = cv.width / FRAME_W, bandMid = (FRAME.band.y0 + FRAME.band.y1) * 0.5;
+  return { k, dx: 0, dy: cv.height*0.5 - bandMid*k };
+}
+const frameX = x => { const f=frameFit(); return f.dx + x*f.k; };
+const frameY = y => { const f=frameFit(); return f.dy + y*f.k; };
 if(typeof Image!=="undefined" && frameWantedSafe()){
+  FRAME = FRAMES[frameWantedSafe()];
   frameImg = new Image();
   frameImg.onload = ()=>{
     frameOn = true;
@@ -420,23 +430,13 @@ if(typeof Image!=="undefined" && frameWantedSafe()){
     try { document.body.classList.add("framed"); } catch(e) {}
     try { resize(true); } catch(e) {}
   };
-  frameImg.src = FRAME_SRC;
+  frameImg.src = FRAME.src;
 }
-function frameWantedSafe(){ try { return frameWanted(); } catch(e) { return false; } }
-function frameWanted(){
-  try { return new URLSearchParams(location.search).get("frame")==="riverside"; } catch(e) { return false; }
-}
-function frameFit(){                                  // картинка → холст: по ширине, полоса по центру
-  const k = cv.width / FRAME_W;
-  const bandMid = (FRAME_BAND.y0 + FRAME_BAND.y1) * 0.5;
-  return { k, dx: 0, dy: cv.height*0.5 - bandMid*k };
-}
-const frameX = x => { const f=frameFit(); return f.dx + x*f.k; };
-const frameY = y => { const f=frameFit(); return f.dy + y*f.k; };
+function frameWantedSafe(){ try { return frameWanted(); } catch(e) { return null; } }
 function zone(name){
   if(frameOn){
     // Зоны рамы: прямоугольник картинки → координаты стола (через обратную проекцию углов).
-    const W_ = FRAME_WORK, P_ = FRAME_PAN;
+    const W_ = FRAME.work, P_ = FRAME.pan;
     const box = name==="work"
       ? [frameX(W_.x), frameY(W_.y), frameX(W_.x+W_.w), frameY(W_.y+W_.h)]
       : [frameX(P_.cx-P_.rx), frameY(P_.cy-P_.ry), frameX(P_.cx+P_.rx), frameY(P_.cy+P_.ry)];
@@ -507,9 +507,9 @@ function layoutPan(){
     panC = unproject(cxS, cyS);
   }
   if(frameOn){                       // в раме тава уже нарисована — садимся ровно в неё
-    const c = unproject(frameX(FRAME_PAN.cx), frameY(FRAME_PAN.cy));
+    const c = unproject(frameX(FRAME.pan.cx), frameY(FRAME.pan.cy));
     panC = c;
-    PAN_R = frameX(FRAME_PAN.rx) - frameX(0);
+    PAN_R = frameX(FRAME.pan.rx) - frameX(0);
   }
 }
 
@@ -1419,7 +1419,7 @@ function updateDishTwist(dt){
 function syncDishUI(){
   document.getElementById("gDish").hidden=!dish;
   document.getElementById("gStep").hidden=!!dish;
-  document.getElementById("tear").hidden=!!dish;
+  { const b = document.getElementById("tear"); if(b) b.hidden=!!dish; }
   document.getElementById("gTune").hidden=!!dish;
   document.getElementById("gCond").hidden=!!dish;
   const cut=document.getElementById("cutMode");
@@ -4161,7 +4161,9 @@ addEventListener("keydown", e=>{
   if(e.code==="Space"){ e.preventDefault(); pressNow(); }
   if(e.code==="KeyR"){ reset(); }
 });
-document.getElementById("tear").addEventListener("click", pressNow);
+// Кнопка «сейчас порвётся» убрана с панели 17.09 (владелица: «ей не пользуюсь, место только занимает»).
+// Предсказание разрыва осталось в модели и на пробеле — им пользуется протокол замера, а не игрок.
+{ const b = document.getElementById("tear"); if(b) b.addEventListener("click", pressNow); }
 document.getElementById("reset").addEventListener("click", reset);
 // Техническое снятие — тот же перелёт на стол, что и у жеста.
 document.getElementById("cutMode").addEventListener("click", ()=>startRemoval());
