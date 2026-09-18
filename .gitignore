@@ -16,3 +16,14 @@ runs/
 # личное состояние окна у каждого своё
 Roti-Obsidian/.obsidian/workspace.json
 Roti-Obsidian/.obsidian/workspace-mobile.json
+
+# код плагинов Obsidian в git не идёт никогда (у Excalidraw это ~5 МБ); настройки плагина (data.json)
+# и список включённых (community-plugins.json) — идут, чтобы хранилище вело себя одинаково везде
+Roti-Obsidian/.obsidian/plugins/*/main.js
+Roti-Obsidian/.obsidian/plugins/*/styles.css
+Roti-Obsidian/.obsidian/plugins/*/manifest.json
+
+# экспорт рисунков Excalidraw — производное от *.excalidraw.md. По умолчанию не коммитится; лёгкий
+# экспорт, на который ссылается заметка, добавляется явно: git add -f (Home/CLAUDE.md, картинки в git)
+Roti-Obsidian/**/*.excalidraw.png
+Roti-Obsidian/**/*.excalidraw.svg
