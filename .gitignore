@@ -21,10 +21,9 @@ Roti-Obsidian/.obsidian/workspace-mobile.json
 # Код плагинов в git не идёт никогда (у Excalidraw ~5 МБ). data.json плагинов — тоже: ИИ-режим Excalidraw
 # хранит там ключи API, а репозиторий публичный; обязательные настройки записаны в docs/corpus-map.md.
 # Список включённых плагинов (community-plugins.json) идёт в git.
-Roti-Obsidian/.obsidian/plugins/*/main.js
-Roti-Obsidian/.obsidian/plugins/*/styles.css
-Roti-Obsidian/.obsidian/plugins/*/manifest.json
-Roti-Obsidian/.obsidian/plugins/*/data.json
+# Перечисление по именам файлов пропускало всё прочее, что кладут плагины
+# (у Breadcrumbs — data-backup после миграции настроек). Игнорируется папка целиком.
+Roti-Obsidian/.obsidian/plugins/
 # служебная папка плагина: скрипты из магазина (чужой код), библиотеки, шаблон, шрифты CJK (мегабайты)
 Roti-Obsidian/Excalidraw/
 # картинки в папке рисунков (экспорт и подложки) по умолчанию не в git; лёгкую картинку, на которую

@@ -1,9 +1,9 @@
 {
   "collapse-filter": false,
-  "search": "",
+  "search": "-file:\"00 Карта историй\"",
   "showTags": false,
   "showAttachments": false,
-  "hideUnresolved": false,
+  "hideUnresolved": true,
   "showOrphans": true,
   "collapse-color-groups": false,
   "colorGroups": [
@@ -44,15 +44,15 @@
     }
   ],
   "collapse-display": true,
-  "showArrow": false,
-  "textFadeMultiplier": 0,
-  "nodeSizeMultiplier": 1,
-  "lineSizeMultiplier": 1,
+  "showArrow": true,
+  "textFadeMultiplier": -3,
+  "nodeSizeMultiplier": 1.2,
+  "lineSizeMultiplier": 0.7,
   "collapse-forces": true,
-  "centerStrength": 0.518713248970312,
-  "repelStrength": 10,
-  "linkStrength": 1,
-  "linkDistance": 250,
-  "scale": 1.462090065188811,
-  "close": true
+  "centerStrength": 0.15,
+  "repelStrength": 15,
+  "linkStrength": 0.4,
+  "linkDistance": 420,
+  "scale": 1.5381034046870778,
+  "close": false
 }
