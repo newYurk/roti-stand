@@ -1,0 +1,154 @@
+{
+  "nodes": [
+    {
+      "id": "navigation",
+      "type": "text",
+      "x": 0,
+      "y": 0,
+      "width": 1070,
+      "height": 200,
+      "text": "# Мир\nКто с кем связан? Небольшой вход в людей, места и предметы.  \n[[00 Карта историй|Все виды]] · Рабочая версия, можно менять.  \nЧеловек · место · предмет подписаны на карточках. Линия без стрелки = отношение, не причина."
+    },
+    {
+      "id": "som",
+      "type": "text",
+      "x": 0,
+      "y": 230,
+      "width": 270,
+      "height": 180,
+      "text": "### [[01 Люди/Тётя Сом|Тётя Сом]]\n\nЧеловек. Соседка и давняя подруга Мали.",
+      "color": "2"
+    },
+    {
+      "id": "mali",
+      "type": "text",
+      "x": 400,
+      "y": 230,
+      "width": 270,
+      "height": 180,
+      "text": "### [[01 Люди/Бабушка Мали|Бабушка Мали]]\n\nЧеловек. Сама передаёт внукам смены.",
+      "color": "2"
+    },
+    {
+      "id": "hero",
+      "type": "text",
+      "x": 800,
+      "y": 230,
+      "width": 270,
+      "height": 180,
+      "text": "### [[01 Люди/Герой|Герой]]\n\nЧеловек. Брат или сестра, внуки Мали.",
+      "color": "2"
+    },
+    {
+      "id": "chat",
+      "type": "text",
+      "x": 0,
+      "y": 490,
+      "width": 270,
+      "height": 180,
+      "text": "### [[01 Люди/Дядюшка Чат|Дядюшка Чат]]\n\nЧеловек. Рыбак; общая история с Мали.",
+      "color": "2"
+    },
+    {
+      "id": "book",
+      "type": "text",
+      "x": 400,
+      "y": 490,
+      "width": 270,
+      "height": 180,
+      "text": "### [[03 Тайны/Тетрадь с ложкой|Тетрадь с ложкой]]\n\nПредмет. Тетрадь Мали и её недосказанности.",
+      "color": "6"
+    },
+    {
+      "id": "home",
+      "type": "text",
+      "x": 800,
+      "y": 490,
+      "width": 270,
+      "height": 180,
+      "text": "### [[02 Мир/Семейный дом Мали|Семейный дом]]\n\nМесто · заметка-черновик. Дом, переданный герою.",
+      "color": "5"
+    },
+    {
+      "id": "pier",
+      "type": "text",
+      "x": 0,
+      "y": 750,
+      "width": 270,
+      "height": 180,
+      "text": "### [[02 Мир/Старый пирс|Старый пирс]]\n\nМесто. Чат живёт рядом с пирсом.",
+      "color": "5"
+    },
+    {
+      "id": "more",
+      "type": "text",
+      "x": 400,
+      "y": 750,
+      "width": 670,
+      "height": 170,
+      "text": "### Дальше по миру\n[[01 Люди/Малышка Плой|Плой]] · [[01 Люди/Кот|Кот]] · [[01 Люди/Мама и дочка собаки|Собаки]]\n\n[[02 Мир/Деревня Банг Сао|Банг Сао]] · [[02 Мир/Священный Баньян|Баньян]] · [[02 Мир/Мангровый причал|Мангровый причал]]"
+    }
+  ],
+  "edges": [
+    {
+      "id": "friends",
+      "fromNode": "som",
+      "toNode": "mali",
+      "fromSide": "right",
+      "toSide": "left",
+      "fromEnd": "none",
+      "toEnd": "none",
+      "label": "соседки"
+    },
+    {
+      "id": "handover",
+      "fromNode": "mali",
+      "toNode": "hero",
+      "fromSide": "right",
+      "toSide": "left",
+      "fromEnd": "none",
+      "toEnd": "arrow",
+      "label": "смены"
+    },
+    {
+      "id": "notebook",
+      "fromNode": "mali",
+      "toNode": "book",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "fromEnd": "none",
+      "toEnd": "arrow",
+      "label": "её тетрадь"
+    },
+    {
+      "id": "shared-past",
+      "fromNode": "mali",
+      "toNode": "chat",
+      "fromSide": "left",
+      "toSide": "right",
+      "fromEnd": "none",
+      "toEnd": "none",
+      "label": "общая история"
+    },
+    {
+      "id": "home",
+      "fromNode": "hero",
+      "toNode": "home",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "fromEnd": "none",
+      "toEnd": "arrow",
+      "label": "передан дом"
+    },
+    {
+      "id": "lives-near",
+      "fromNode": "chat",
+      "toNode": "pier",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "fromEnd": "none",
+      "toEnd": "arrow",
+      "label": "живёт рядом"
+    }
+  ]
+}

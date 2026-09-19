@@ -1,0 +1,114 @@
+{
+  "nodes": [
+    {
+      "id": "navigation",
+      "type": "text",
+      "x": 0,
+      "y": 0,
+      "width": 1070,
+      "height": 200,
+      "text": "# Зависимости\nЧто нужно для действия, а что только расширяет возможности?  \n[[00 Карта историй|Все виды]] · Рабочая версия, можно менять.  \nВходы действия ≠ порядок разработки. Вторая горелка не нужна для базовой жарки."
+    },
+    {
+      "id": "ball",
+      "type": "text",
+      "x": 0,
+      "y": 255,
+      "width": 270,
+      "height": 180,
+      "text": "### [[06 Механики/Лист на столе|Шарик теста]]\n\nМатериал. Для расплющивания.\nБез ожидания партии.",
+      "color": "4"
+    },
+    {
+      "id": "sheet",
+      "type": "text",
+      "x": 400,
+      "y": 255,
+      "width": 270,
+      "height": 180,
+      "text": "### [[06 Механики/Лист на столе|Подготовить лист]]\n\nБаза. Расправить и растянуть тесто.",
+      "color": "4"
+    },
+    {
+      "id": "frying",
+      "type": "text",
+      "x": 800,
+      "y": 255,
+      "width": 270,
+      "height": 180,
+      "text": "### [[06 Механики/Жарка на таве|Жарка]]\n\nБаза. Работает без второй горелки.",
+      "color": "4"
+    },
+    {
+      "id": "not-required",
+      "type": "text",
+      "x": 0,
+      "y": 625,
+      "width": 270,
+      "height": 255,
+      "text": "### Не нужно для базы\nКарта, гости, каталог и реальное ожидание теста.\n\n[[04 Дизайн/Связи механик|Смысл всех типов связей]]"
+    },
+    {
+      "id": "burner",
+      "type": "text",
+      "x": 400,
+      "y": 625,
+      "width": 270,
+      "height": 205,
+      "text": "### [[06 Механики/Тележка — музей отношений|Вторая горелка]]\n\nДополнение. Подарок через отношения.\nНе обязательна для базы.",
+      "color": "3"
+    },
+    {
+      "id": "extension",
+      "type": "text",
+      "x": 800,
+      "y": 625,
+      "width": 270,
+      "height": 180,
+      "text": "### [[06 Механики/Тележка — музей отношений|Две основы]]\n\nРасширение. Дополнение к готовке.\nБаза не блокируется.",
+      "color": "3"
+    }
+  ],
+  "edges": [
+    {
+      "id": "ball-sheet",
+      "fromNode": "ball",
+      "toNode": "sheet",
+      "fromSide": "right",
+      "toSide": "left",
+      "fromEnd": "none",
+      "toEnd": "arrow",
+      "label": "шарик"
+    },
+    {
+      "id": "sheet-fry",
+      "fromNode": "sheet",
+      "toNode": "frying",
+      "fromSide": "right",
+      "toSide": "left",
+      "fromEnd": "none",
+      "toEnd": "arrow",
+      "label": "лист"
+    },
+    {
+      "id": "fry-extra",
+      "fromNode": "frying",
+      "toNode": "extension",
+      "fromSide": "bottom",
+      "toSide": "top",
+      "fromEnd": "none",
+      "toEnd": "arrow",
+      "label": "нужна базовая жарка"
+    },
+    {
+      "id": "burner-extra",
+      "fromNode": "burner",
+      "toNode": "extension",
+      "fromSide": "right",
+      "toSide": "left",
+      "fromEnd": "none",
+      "toEnd": "arrow",
+      "label": "горелка"
+    }
+  ]
+}

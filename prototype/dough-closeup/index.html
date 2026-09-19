@@ -49,14 +49,16 @@
      display:contents, то есть в разметке не участвуют вовсе, а order возвращает
      группам исходный порядок панели: шаг · вид · судишь · порвётся · ощущение · служебные · статистика. */
   #core, #tools{ display:contents; }
-  #gStep{ order:1 } #gView{ order:2 } #gCond{ order:3 } #tear{ order:4 }
-  #gTune{ order:5 } #gSrv{ order:6 } #stats{ order:7 }
+  #gStep{ order:1 } #gFrame{ order:2 } #gZ{ order:2 } #gView{ order:2 } #gCond{ order:3 } #tear{ order:4 }
+  #gTune{ order:5 } #gThrough{ order:5 } #gFry{ order:5 } #gPress{ order:5 } #gSrv{ order:6 } #stats{ order:7 }
   #toolsBtn, #mini{ display:none; }
-  #hint{ position:absolute; left:10px; top:10px; right:10px; color:var(--dim);
-    pointer-events:none; font-size:11px; }
+  /* Подсказка и крупный индикатор идут друг за другом: на телефоне подсказка в три строки
+     залезала под индикатор (независимая проверка 17.09). */
+  #topbar{ position:absolute; left:10px; right:10px; top:10px; pointer-events:none; }
+  #hint{ color:var(--dim); pointer-events:none; font-size:11px; }
   /* Крупный индикатор: мелкую строку внизу на телефоне не разглядеть,
      а без неё непонятно, дошло ли касание вообще. */
-  #live{ position:absolute; left:0; right:0; top:34px; text-align:center;
+  #live{ margin-top:6px; text-align:center;
     pointer-events:none; font-size:clamp(14px,3.4vw,20px); color:var(--hot); }
   /* Вспышка на предсказание. Было 0,18 за 90 мс — на телефоне не видно вовсе
      (замечание владельца 08.09.2026). Стало заметно и с затуханием, чтобы читалось
@@ -68,6 +70,23 @@
     color:var(--hot); font-size:clamp(18px,4vw,32px); letter-spacing:.08em;
     pointer-events:none; z-index:4; }
   #torn.on{ display:flex; }
+  /* Рама экрана (#102): показываем игру, а не измерительный стенд — приборы, ползунки и
+     переключатели видов прячутся, остаются шаги пути и подсказка. */
+  body.framed #tools, body.framed #gView, body.framed #gCond, body.framed #gTune,
+  body.framed #stats, body.framed #mini, body.framed #toolsBtn, body.framed #gZ{ display:none !important; }
+  /* Значок предпросмотра ветки: его заполняет только локальный сервер предпросмотра
+     (/__preview.json). На Pages адреса нет, и значок остаётся скрытым. */
+  #previewBadge{ position:absolute; left:6px; bottom:6px; max-width:calc(100% - 12px);
+    padding:2px 6px; font-size:10px; line-height:1.3; color:#f0c674;
+    background:rgba(20,16,12,.82); border:1px solid #5a4526; pointer-events:none;
+    z-index:3; overflow-wrap:anywhere; }
+  /* Карточка поданного роти: черновик стенда (#50 — что помнит след, ещё не решено). */
+  #card{ position:absolute; left:6%; right:6%; top:max(12%,64px); max-height:calc(100% - max(12%,64px) - 8px);
+    overflow:auto; z-index:5;
+    padding:12px 14px; background:rgba(20,16,12,.95); border:1px solid #5a4526; color:var(--ink);
+    font-size:13px; line-height:1.5; touch-action:pan-y; }
+  #cardBody{ white-space:pre-line; }
+  #card button{ margin-top:10px; padding:9px 14px; }
   /* Портрет БОЛЬШЕ НЕ ЗАКРЫТ (решение владельца 08.09.2026: «на вертикальном экране
      закидываем роти снизу вверх, и таву увеличим»). Заглушка «поверни телефон» стояла
      здесь потому, что в портрете сцена была широкой низкой полосой, лист и тава лежали
@@ -136,7 +155,7 @@
        Проверка 08.09: панели нужно 379 px, а Safari в ландшафте отдаёт меньше 393 —
        тулбар и home-indicator съедают разницу первыми. */
     #gStep{ order:1 } #gView{ order:2 } #tear{ order:3 } #mini{ order:4 } #toolsBtn{ order:5 }
-    #gCond{ order:1 } #gTune{ order:2 } #gSrv{ order:3 } #stats{ order:4 }
+    #gCond{ order:1 } #gTune{ order:2 } #gThrough{ order:2 } #gFry{ order:2 } #gPress{ order:2 } #gSrv{ order:3 } #stats{ order:4 }
     #tools .tune label{ width:100%; }
     #core .grp{ flex-direction:column; align-items:stretch; gap:3px; }
     #core .grp b{ margin:0; font-size:10px; }
@@ -168,9 +187,15 @@
 <body>
 <div id="stage">
   <canvas id="cv"></canvas>
-  <div id="hint">шаг 1: прижимай кусочек — расплющишь до пунктира · шаг 2: возьми край, миг подержи, резко махни — шлепок · шаг 3: возьми край и круговым махом-«запятой» перекинь на таву — полетит, повернётся, зашипит. Порвётся — останется рваный узор, так и пожарим</div>
-  <div id="live">прижми кусочек теста</div>
+  <div id="topbar"><div id="hint">шаг 1: прижимай кусочек — расплющишь до пунктира · шаг 2: возьми край, миг подержи, резко махни — шлепок · шаг 3: возьми край и круговым махом-«запятой» перекинь на таву — полетит, повернётся, зашипит. Порвётся — останется рваный узор, так и пожарим</div>
+  <div id="live">прижми кусочек теста</div></div>
   <div id="flash"></div>
+  <div id="previewBadge" hidden></div>
+  <!-- Карточка поданного роти — слой поверх поля, поэтому он есть в inUI() stand.js. -->
+  <div id="card" hidden>
+    <div id="cardBody"></div>
+    <button id="nextRoti">следующий роти</button>
+  </div>
 </div>
 
 <div id="panel">
@@ -185,10 +210,22 @@
       <button id="foldSample" title="Начать отдельную пробу складок на новом растянутом листе">проба конверта</button>
     </div>
     <div class="grp" id="gDish" hidden><b>конверт</b>
+      <button id="flipDish" disabled title="Технический вход: перевернуть лист на таве">перевернуть</button>
       <button id="cutMode" disabled>к нарезке →</button>
+      <button id="serveDish" hidden>подать</button>
       <button id="undoDish" disabled>отменить</button>
     </div>
-    <button id="tear">СЕЙЧАС ПОРВЁТСЯ<span class="kbd"> (space)</span></button>
+    <div class="grp measure" id="gFrame"><b>экран</b>
+      <button data-frame="riverside">у реки</button>
+      <button data-frame="canal">у канала</button>
+      <button data-frame="" class="on">без рамы</button>
+    </div>
+    <div class="grp measure" id="gZ"><b>высота</b>
+      <button data-z="1.5">×1,5</button>
+      <button data-z="2" class="on">×2</button>
+      <button data-z="3">×3</button>
+      <button data-z="5">×5</button>
+    </div>
     <div class="grp measure" id="gView"><b>вид</b>
       <button data-v="A" class="on">A · 80</button>
       <button data-v="B">B · 224</button>
@@ -208,6 +245,23 @@
       <button data-c="both" class="on">обоим</button>
       <button data-c="sight">картинке</button>
     </div>
+    <!-- Скорость жарки для пробы (17.09): сколько длится роти целиком. -->
+    <div class="grp measure" id="gFry"><b>жарка, роти</b>
+      <button data-f="40">40 с</button>
+      <button data-f="60" class="on">60 с</button>
+      <button data-f="85">85 с</button>
+    </div>
+    <!-- Сила прижима для пробы (17.09): во сколько раз больше жара под пальцем. -->
+    <div class="grp measure" id="gPress"><b>прижим</b>
+      <button data-p="0.35">0,35</button>
+      <button data-p="1" class="on">1</button>
+    </div>
+    <!-- Условность отрисовки (#21): сколько цвета нижней стороны видно сквозь тонкий лист. -->
+    <div class="grp measure" id="gThrough"><b>низ сквозь лист</b>
+      <button data-k="0">0</button>
+      <button data-k="0.3" class="on">0,3</button>
+      <button data-k="0.6">0,6</button>
+    </div>
     <div class="grp" id="gSrv">
       <button id="reset">заново</button>
       <button id="dump">лог</button>
@@ -217,6 +271,6 @@
   </div>
 </div>
 
-<script src="stand.js?v=2026-09-16-frying-2"></script>
+<script src="stand.js?v=2026-09-17-canal-41"></script>
 </body>
 </html>
