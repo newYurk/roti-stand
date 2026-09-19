@@ -116,26 +116,13 @@
     #panel button{ font-size:12px; padding:7px 8px; }
     .grp{ gap:5px; }
     .grp b{ font-size:11px; }
-    /* Высота ЗАКРЕПЛЕНА, и это не косметика. С `pre-wrap` первое же касание удлиняло
-       строку («задержка —» → «задержка 21 мс»), блок переносился на лишнюю строку,
-       панель подрастала, ResizeObserver дёргал resize() → build() → clearAction(),
-       и жест умирал через 9–14 мс после касания — палец дописывал запятую в пустоту.
-       Тот же приём уже применён к листу «прибор» в ландшафте (см. комментарий ниже). */
     #stats{ margin-left:0; width:100%; white-space:pre-wrap; text-align:left;
       font-size:11px; line-height:1.35; height:7em; overflow-y:auto; }
-    #tear .kbd{ display:none; }          /* пробела нет ни на телефоне, ни на планшете */
+    #tear .kbd{ display:none; }
     .tune label{ flex-direction:column; align-items:stretch; gap:1px; font-size:10px; }
     .tune input[type=range]{ width:88px; }
   }
 
-  /* ── ТЕЛЕФОН В ЛАНДШАФТЕ: панель уходит В КОЛОНКУ СБОКУ.
-     Внизу она забирала высоту первой (247–282 px из 340–430) и полю оставалась треть
-     экрана — «игровая область в верхней трети» — это буквальный замер, 24,9–37,2 %.
-     В ландшафте дефицит — высота, а ширина избыточна: панель тратит ширину.
-     Порог max-height:640px отсекает iPad (1024) и десктоп (900) — там нижняя панель
-     даёт полю 83–86 % и ломать её незачем. Взят с запасом над телефонами (430): при
-     ширине меньше ~1000 px нижняя панель не даёт 70 % НИ НА КАКОЙ высоте — 247 px
-     при 800 требуют экрана в 823 px, которого в ландшафте не бывает. */
   @media (orientation:landscape) and (max-height:640px){
     body{ --rail:clamp(112px,15vw,146px); flex-direction:row; }
     #panel{ position:relative; flex:0 0 var(--rail); width:var(--rail);
@@ -144,16 +131,6 @@
       padding:6px 6px calc(6px + env(safe-area-inset-bottom,0px)); }
     #core{ display:flex; flex:1; min-height:0; flex-direction:column;
       align-items:stretch; gap:5px; overflow-y:auto; touch-action:pan-y; }
-    /* Порядок панели-строки здесь не действует: в колонке свой — шаг, порвётся, прибор,
-       телеметрия внизу. Без этого #toolsBtn и #mini (order по умолчанию 0) уезжали
-       наверх, а «СЕЙЧАС ПОРВЁТСЯ» уходило под нижний край. */
-    /* В колонке — только то, чем пользуются во время замера: шаг, вид A/B/C, предсказание.
-       Ползунки «ощущение» за весь замер не трогают ни разу, а занимали 134 px из 381 —
-       ровно ту высоту, которой не хватало кнопкам под палец. Они уехали в лист «прибор». */
-    /* `#mini` выше кнопки «прибор»: если колонка не влезает по высоте, срезается кнопка,
-       которой во время прогона не пользуются, а не числа, ради которых прогон идёт.
-       Проверка 08.09: панели нужно 379 px, а Safari в ландшафте отдаёт меньше 393 —
-       тулбар и home-indicator съедают разницу первыми. */
     #gStep{ order:1 } #gView{ order:2 } #tear{ order:3 } #mini{ order:4 } #toolsBtn{ order:5 }
     #gCond{ order:1 } #gTune{ order:2 } #gThrough{ order:2 } #gFry{ order:2 } #gPress{ order:2 } #gSrv{ order:3 } #stats{ order:4 }
     #tools .tune label{ width:100%; }
@@ -161,16 +138,12 @@
     #core .grp b{ margin:0; font-size:10px; }
     #panel button{ font-size:10px; padding:9px 3px; white-space:normal; line-height:1.15; }
     #tear{ padding:14px 3px; font-size:11px; }
-    #tear .kbd{ display:none; }          /* на телефоне пробела нет */
+    #tear .kbd{ display:none; }
     #core .tune label{ flex-direction:column; align-items:stretch; gap:1px; }
     #core .tune input[type=range]{ width:100%; }
     #toolsBtn{ display:block; }
     #mini{ display:block; margin-top:auto; flex:none; color:var(--dim); font-size:11px;
       line-height:1.35; white-space:pre-line; overflow-wrap:anywhere; }
-    /* Прибор — отдельный лист ПОВЕРХ поля, а не рядом с ним: во-первых, в 112 px он
-       не помещается; во-вторых, любое изменение размера #stage пересобирает лист,
-       и открыть настройки стоило бы игроку теста. Колоночный перенос раскладывает
-       группы в столько столбцов, сколько нужно, — прокрутки нет ни на одной высоте. */
     #tools{ display:none; position:fixed; left:0; top:0; bottom:0; right:var(--rail);
       flex-flow:column wrap; align-content:flex-start; gap:8px 16px;
       padding:10px 12px calc(10px + env(safe-area-inset-bottom,0px));
@@ -178,7 +151,7 @@
     body.tools #tools{ display:flex; }
     #tools .grp{ width:min(212px,42vw); flex-wrap:wrap; align-items:center; }
     #tools .grp b{ width:100%; margin:0; }
-    #tools .measure{ opacity:1; }        /* поверх поля приглушать нечего */
+    #tools .measure{ opacity:1; }
     #stats{ width:min(248px,46vw); margin-left:0; text-align:left;
       white-space:pre-wrap; font-size:10px; line-height:1.35; }
   }
@@ -191,7 +164,6 @@
   <div id="live">прижми кусочек теста</div></div>
   <div id="flash"></div>
   <div id="previewBadge" hidden></div>
-  <!-- Карточка поданного роти — слой поверх поля, поэтому он есть в inUI() stand.js. -->
   <div id="card" hidden>
     <div id="cardBody"></div>
     <button id="nextRoti">следующий роти</button>
@@ -199,9 +171,6 @@
 </div>
 
 <div id="panel">
-  <!-- В ландшафте телефона #core — это узкая колонка сбоку (то, что нужно в игре),
-       а #tools открывается поверх поля кнопкой «прибор». В портрете и на большом
-       экране обе обёртки display:contents и панель остаётся прежней строкой. -->
   <div id="core">
     <div class="grp" id="gStep"><b>шаг</b>
       <button data-s="1" class="on">расплющить</button>
@@ -245,18 +214,15 @@
       <button data-c="both" class="on">обоим</button>
       <button data-c="sight">картинке</button>
     </div>
-    <!-- Скорость жарки для пробы (17.09): сколько длится роти целиком. -->
     <div class="grp measure" id="gFry"><b>жарка, роти</b>
       <button data-f="40">40 с</button>
       <button data-f="60" class="on">60 с</button>
       <button data-f="85">85 с</button>
     </div>
-    <!-- Сила прижима для пробы (17.09): во сколько раз больше жара под пальцем. -->
     <div class="grp measure" id="gPress"><b>прижим</b>
       <button data-p="0.35">0,35</button>
       <button data-p="1" class="on">1</button>
     </div>
-    <!-- Условность отрисовки (#21): сколько цвета нижней стороны видно сквозь тонкий лист. -->
     <div class="grp measure" id="gThrough"><b>низ сквозь лист</b>
       <button data-k="0">0</button>
       <button data-k="0.3" class="on">0,3</button>
@@ -272,9 +238,8 @@
 </div>
 
 <script src="stand.js?v=2026-09-17-canal-41"></script>
-<!-- предметы на стойке: появление по событию гостя, тап → в лоток -->
 <script src="counter-item.js?v=2026-09-19"></script>
-<!-- налив сгущёнки: жест в фазе CUT, fade-out, покрытие → разблокировать «подать» -->
-<script src="drizzle.js?v=2026-09-19"></script>
+<script src="drizzle.js?v=2026-09-19b"></script>
+<script src="step-nav.js?v=2026-09-19"></script>
 </body>
 </html>
