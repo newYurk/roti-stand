@@ -7,12 +7,16 @@ Mermaid syntax/rendering is a separate check; this suite checks meaning and link
 from pathlib import Path
 import re
 import unittest
+import json
 
 
 ROOT = Path(__file__).resolve().parents[1]
 VAULT = ROOT / "Roti-Obsidian"
 MECHANICS = VAULT / "06 Механики"
-OVERVIEW = VAULT / "00 Карта историй.md"
+OVERVIEW = VAULT / "04 Дизайн" / "Связи механик.md"
+HOME = VAULT / "00 Карта историй.md"
+VIEWS = VAULT / "07 Виды"
+VIEW_NAMES = ("Мир", "Игровая петля", "Зависимости", "Решения и риски")
 IMPACT = VAULT / "04 Дизайн" / "На чём это стоит.md"
 
 # These are the relations represented in the overview, not every possible input.
@@ -152,10 +156,17 @@ class VaultGraphTests(unittest.TestCase):
         paths = list(VAULT.rglob("*.md"))
         names = {p.stem for p in paths}
         relative = {str(p.relative_to(VAULT).with_suffix("")) for p in paths}
-        for path in paths:
-            for link in re.findall(r"\[\[([^\]]+)\]\]", read(path)):
+        texts = [(p, read(p)) for p in paths]
+        for path in VIEWS.glob("*.canvas"):
+            data = json.loads(read(path))
+            texts.extend((path, n["text"]) for n in data["nodes"] if n["type"] == "text")
+        for path, text in texts:
+            for link in re.findall(r"\[\[([^\]]+)\]\]", text):
                 target = link.split("|", 1)[0].split("#", 1)[0]
                 if not target:
+                    continue
+                if target.endswith(".canvas"):
+                    self.assertTrue((VAULT / target).is_file(), target)
                     continue
                 # Attachments are not notes and are outside this relation check.
                 if Path(target).suffix and not target.endswith(".md"):
@@ -164,6 +175,79 @@ class VaultGraphTests(unittest.TestCase):
                     target = target[:-3]
                 with self.subTest(file=path.name, target=target):
                     self.assertTrue(target in names or target in relative)
+
+    def test_home_is_short_and_opens_four_views(self):
+        text = read(HOME)
+        self.assertLessEqual(len(text.splitlines()), 25)
+        self.assertNotIn("```mermaid", text)
+        self.assertNotIn("|---", text)
+        for name in VIEW_NAMES:
+            self.assertIn(f"07 Виды/{name}.canvas|", text)
+        self.assertIn("можно менять", text)
+
+    def test_canvas_schema_and_targets(self):
+        for name in VIEW_NAMES:
+            with self.subTest(view=name):
+                data = json.loads(read(VIEWS / f"{name}.canvas"))
+                ids = [n["id"] for n in data["nodes"]]
+                self.assertEqual(len(ids), len(set(ids)))
+                self.assertLessEqual(len(ids), 10)
+                edge_ids = [e["id"] for e in data["edges"]]
+                self.assertEqual(len(edge_ids), len(set(edge_ids)))
+                for node in data["nodes"]:
+                    self.assertEqual(node["type"], "text")
+                    self.assertIn("[[", node["text"])
+                    for field in ("x", "y", "width", "height"):
+                        self.assertIsInstance(node[field], int)
+                    self.assertGreaterEqual(node["width"], 250)
+                    self.assertGreaterEqual(node["height"], 130)
+                for edge in data["edges"]:
+                    self.assertIn(edge["fromNode"], ids)
+                    self.assertIn(edge["toNode"], ids)
+                    self.assertTrue(edge["label"])
+                    for field in ("fromSide", "toSide"):
+                        self.assertIn(edge[field], ("left", "right", "top", "bottom"))
+                    for field in ("fromEnd", "toEnd"):
+                        self.assertIn(edge[field], ("none", "arrow"))
+
+    def test_canvas_cards_do_not_overlap(self):
+        for path in VIEWS.glob("*.canvas"):
+            nodes = json.loads(read(path))["nodes"]
+            for i, a in enumerate(nodes):
+                for b in nodes[i+1:]:
+                    overlap = (a["x"] < b["x"]+b["width"] and
+                               b["x"] < a["x"]+a["width"] and
+                               a["y"] < b["y"]+b["height"] and
+                               b["y"] < a["y"]+a["height"])
+                    self.assertFalse(overlap, f"{path.name}: {a['id']} / {b['id']}")
+
+    def test_canvas_dependency_does_not_block_base_frying(self):
+        data = json.loads(read(VIEWS / "Зависимости.canvas"))
+        pairs = {(e["fromNode"], e["toNode"]) for e in data["edges"]}
+        self.assertNotIn(("burner", "frying"), pairs)
+        self.assertIn(("burner", "extension"), pairs)
+        self.assertIn(("frying", "extension"), pairs)
+
+    def test_world_relationships_are_not_prerequisite_arrows(self):
+        data = json.loads(read(VIEWS / "Мир.canvas"))
+        relations = {e["id"]: e for e in data["edges"]}
+        self.assertEqual(relations["friends"]["toEnd"], "none")
+        self.assertEqual(relations["shared-past"]["toEnd"], "none")
+
+    def test_day_loop_has_continue_and_close_branches(self):
+        data = json.loads(read(VIEWS / "Игровая петля.canvas"))
+        relations = {e["id"]: e for e in data["edges"]}
+        self.assertEqual(relations["more-roti"]["toNode"], "point")
+        self.assertEqual(relations["memory-close"]["toNode"], "close")
+        self.assertEqual(relations["memory-close"]["label"], "нет теста")
+        self.assertEqual(relations["repeat"]["fromNode"], "close")
+
+    def test_every_view_has_return_navigation_and_revision_notice(self):
+        for path in VIEWS.glob("*.canvas"):
+            data = json.loads(read(path))
+            nav = next(n for n in data["nodes"] if n["id"] == "navigation")
+            self.assertIn("[[00 Карта историй|Все виды]]", nav["text"])
+            self.assertIn("можно менять", nav["text"])
 
 
 if __name__ == "__main__":
