@@ -137,13 +137,14 @@ function unproject(sx, sy){
 // Получены правкой одобренных экранов (Draw Things, 17.09), лежат рядом со стендом, ~70 КБ каждая.
 // Замеры сделаны по копиям 1024×576 — в этом же логическом размере картинки и рисуются.
 const FRAME_W = 1024, FRAME_H = 576;
+const STAND_BASE = (document.currentScript && document.currentScript.src || "").replace(/[^/]*$/, "");
 const FRAMES = {
-  riverside: { src:"frame-riverside.jpg",                       // день у реки, бабушка за прилавком
+  riverside: { src: STAND_BASE + "frame-riverside.jpg",                       // день у реки, бабушка за прилавком
     work:{x:24,y:246,w:420,h:225}, pan:{cx:800,cy:352,rx:228,ry:112}, band:{y0:235,y1:492} },
   // Вечер у канала, украшения над прилавком. Картинка переделана 17.09 (владелица: «очень уж получилось
   // мелко… рабочая область должна быть намного больше»): полка и предметы мельче, стол глубже, лоток
   // лопаток убран, вместо вока плоская тава (#44). Камера художника ниже нашей: тава 170×66, отсюда tilt.
-  canal:     { src:"frame-canal.jpg", tilt:0.41,
+  canal:     { src: STAND_BASE + "frame-canal.jpg", tilt:0.41,
     work:{x:120,y:340,w:495,h:180}, pan:{cx:824,cy:408,rx:170,ry:66}, band:{y0:300,y1:528} },
 };
 let frameImg = null, frameOn = false, FRAME = FRAMES.riverside;

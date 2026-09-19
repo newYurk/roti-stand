@@ -1,0 +1,145 @@
+:root{ --bg:#14100c; --ink:#e8ddcc; --dim:#8b7f6e; --line:#2a231b; --hot:#d98b3a; }
+  *{ box-sizing:border-box; -webkit-tap-highlight-color:transparent;
+     -webkit-touch-callout:none; -webkit-user-select:none; user-select:none; }
+  html,body{ margin:0; height:100%; background:var(--bg); color:var(--ink);
+    font:13px/1.45 ui-monospace,SFMono-Regular,Menlo,monospace; overscroll-behavior:none; }
+  body{ display:flex; flex-direction:column; touch-action:none; }
+  #stage{ flex:1; position:relative; min-height:0; min-width:0; }
+  canvas{ position:absolute; inset:0; width:100%; height:100%; display:block; touch-action:none; }
+  #panel{ border-top:1px solid var(--line); padding:8px 10px; display:flex; flex-wrap:wrap;
+    gap:6px 14px; align-items:center; background:#0f0c09; }
+  .grp{ display:flex; gap:4px; align-items:center; }
+  .grp b{ color:var(--dim); font-weight:400; margin-right:2px; }
+  /* Кнопки замера меняют условия эксперимента (вплоть до выключения картинки),
+     поэтому они приглушены и подписаны — иначе читаются как обычные настройки. */
+  .measure{ opacity:.62; }
+  .measure b{ color:#5d5346; font-size:11px; }
+  .tune label{ display:flex; align-items:center; gap:4px; color:var(--dim); font-size:11px; }
+  .tune input[type=range]{ width:74px; accent-color:var(--hot); }
+  button{ font:inherit; color:var(--ink); background:#1c1710; border:1px solid var(--line);
+    padding:4px 9px; cursor:pointer; }
+  button:hover{ border-color:var(--dim); }
+  button.on{ background:var(--hot); color:#14100c; border-color:var(--hot); }
+  button:disabled{ opacity:.4; cursor:default; }
+  [hidden]{ display:none !important; }
+  #gDish{ order:1; flex-wrap:wrap; }
+  #tear{ padding:8px 18px; font-weight:bold; }
+  /* `pre` не переносил строку вовсе, и правый конец уезжал за экран на любой ширине —
+     видно на скриншоте владельца 08.09.2026: обрезаны «сборка» и «худший кадр».
+     `min-width:0` обязателен: без него флекс-элемент не сжимается ниже содержимого. */
+  #stats{ color:var(--dim); margin-left:auto; text-align:right; white-space:pre-wrap;
+    min-width:0; overflow-wrap:anywhere; }
+  /* Смена подписи «ощущение своё» не должна менять высоту поля и стирать лист. */
+  @media (min-width:901px) and (min-height:641px){
+    #stats{ width:100%; height:7em; overflow-y:auto; }
+  }
+  /* #core и #tools — обёртки для ландшафта телефона. В остальных раскладках они
+     display:contents, то есть в разметке не участвуют вовсе, а order возвращает
+     группам исходный порядок панели: шаг · вид · судишь · порвётся · ощущение · служебные · статистика. */
+  #core, #tools{ display:contents; }
+  #gStep{ order:1 } #gFrame{ order:2 } #gZ{ order:2 } #gView{ order:2 } #gCond{ order:3 } #tear{ order:4 }
+  #gTune{ order:5 } #gThrough{ order:5 } #gFry{ order:5 } #gPress{ order:5 } #gSrv{ order:6 } #stats{ order:7 }
+  #toolsBtn, #mini{ display:none; }
+  /* Подсказка и крупный индикатор идут друг за другом: на телефоне подсказка в три строки
+     залезала под индикатор (независимая проверка 17.09). */
+  #topbar{ position:absolute; left:10px; right:10px; top:10px; pointer-events:none; }
+  #hint{ color:var(--dim); pointer-events:none; font-size:11px; }
+  /* Крупный индикатор: мелкую строку внизу на телефоне не разглядеть,
+     а без неё непонятно, дошло ли касание вообще. */
+  #live{ margin-top:6px; text-align:center;
+    pointer-events:none; font-size:clamp(14px,3.4vw,20px); color:var(--hot); }
+  /* Вспышка на предсказание. Было 0,18 за 90 мс — на телефоне не видно вовсе
+     (замечание владельца 08.09.2026). Стало заметно и с затуханием, чтобы читалось
+     как ответ прибора, а не как рывок кадра. */
+  #flash{ position:absolute; inset:0; pointer-events:none; opacity:0; background:#d98b3a;
+    transition:opacity .28s ease-out; }
+  #tear.armed{ background:var(--hot); color:#14100c; border-color:var(--hot); }
+  #torn{ position:absolute; inset:0; display:none; align-items:center; justify-content:center;
+    color:var(--hot); font-size:clamp(18px,4vw,32px); letter-spacing:.08em;
+    pointer-events:none; z-index:4; }
+  #torn.on{ display:flex; }
+  /* Рама экрана (#102): показываем игру, а не измерительный стенд — приборы, ползунки и
+     переключатели видов прячутся, остаются шаги пути и подсказка. */
+  body.framed #tools, body.framed #gView, body.framed #gCond, body.framed #gTune,
+  body.framed #stats, body.framed #mini, body.framed #toolsBtn, body.framed #gZ{ display:none !important; }
+  /* Значок предпросмотра ветки: его заполняет только локальный сервер предпросмотра
+     (/__preview.json). На Pages адреса нет, и значок остаётся скрытым. */
+  #previewBadge{ position:absolute; left:6px; bottom:6px; max-width:calc(100% - 12px);
+    padding:2px 6px; font-size:10px; line-height:1.3; color:#f0c674;
+    background:rgba(20,16,12,.82); border:1px solid #5a4526; pointer-events:none;
+    z-index:3; overflow-wrap:anywhere; }
+  /* Карточка поданного роти: черновик стенда (#50 — что помнит след, ещё не решено). */
+  #card{ position:absolute; left:6%; right:6%; top:max(12%,64px); max-height:calc(100% - max(12%,64px) - 8px);
+    overflow:auto; z-index:5;
+    padding:12px 14px; background:rgba(20,16,12,.95); border:1px solid #5a4526; color:var(--ink);
+    font-size:13px; line-height:1.5; touch-action:pan-y; }
+  #cardBody{ white-space:pre-line; }
+  #card button{ margin-top:10px; padding:9px 14px; }
+  /* Портрет БОЛЬШЕ НЕ ЗАКРЫТ (решение владельца 08.09.2026: «на вертикальном экране
+     закидываем роти снизу вверх, и таву увеличим»). Заглушка «поверни телефон» стояла
+     здесь потому, что в портрете сцена была широкой низкой полосой, лист и тава лежали
+     рядом, а две трети поля оставались пустым столом. Теперь зоны в портрете делятся
+     по ВЫСОТЕ: тесто внизу, тава вверху, — и пустая половина стала местом тавы.
+     Оговорка про замер не отменена, а переехала в строку телеметрии: числа портрета
+     с альбомными по-прежнему не сравнить, холст другого размера. Она предупреждает,
+     а не запрещает.
+     Высота поля привязана к ШИРИНЕ (`vw`, не `vh`): на iOS высота вьюпорта скачет от
+     тулбара Safari, а любой скачок высоты пересобирает лист. Поле не `flex:1`, значит
+     содержимое панели физически не может двигать его границу. */
+  @media (orientation:portrait) and (max-width:600px){
+    #stage{ flex:none; height:120vw; }
+    #panel{ flex:1 1 auto; align-content:flex-start;
+      overflow-y:auto; touch-action:pan-y; }
+    #stats{ height:auto; min-height:7em; }
+  }
+
+  /* Узкое окно, раскладка-строка. Панель ОБЯЗАНА переноситься: иначе правый край
+     уезжает за экран, а доскроллить нечем — body{touch-action:none}. Видно на скриншоте
+     владельца 08.09.2026: обрезаны «прочность», «скопировать лог» и «обновить».
+     Сюда попадают: портрет после «всё равно продолжить», планшет и узкое окно на десктопе.
+     Блок стоит ДО ландшафтного: там своя раскладка, и она должна перебивать эту. */
+  @media (max-width:900px){
+    .grp{ flex-wrap:wrap; }
+    #panel{ padding:6px 8px; gap:5px 8px; }
+    #panel button{ font-size:12px; padding:7px 8px; }
+    .grp{ gap:5px; }
+    .grp b{ font-size:11px; }
+    #stats{ margin-left:0; width:100%; white-space:pre-wrap; text-align:left;
+      font-size:11px; line-height:1.35; height:7em; overflow-y:auto; }
+    #tear .kbd{ display:none; }
+    .tune label{ flex-direction:column; align-items:stretch; gap:1px; font-size:10px; }
+    .tune input[type=range]{ width:88px; }
+  }
+
+  @media (orientation:landscape) and (max-height:640px){
+    body{ --rail:clamp(112px,15vw,146px); flex-direction:row; }
+    #panel{ position:relative; flex:0 0 var(--rail); width:var(--rail);
+      flex-direction:column; flex-wrap:nowrap; align-items:stretch; gap:5px;
+      border-top:0; border-left:1px solid var(--line);
+      padding:6px 6px calc(6px + env(safe-area-inset-bottom,0px)); }
+    #core{ display:flex; flex:1; min-height:0; flex-direction:column;
+      align-items:stretch; gap:5px; overflow-y:auto; touch-action:pan-y; }
+    #gStep{ order:1 } #gView{ order:2 } #tear{ order:3 } #mini{ order:4 } #toolsBtn{ order:5 }
+    #gCond{ order:1 } #gTune{ order:2 } #gThrough{ order:2 } #gFry{ order:2 } #gPress{ order:2 } #gSrv{ order:3 } #stats{ order:4 }
+    #tools .tune label{ width:100%; }
+    #core .grp{ flex-direction:column; align-items:stretch; gap:3px; }
+    #core .grp b{ margin:0; font-size:10px; }
+    #panel button{ font-size:10px; padding:9px 3px; white-space:normal; line-height:1.15; }
+    #tear{ padding:14px 3px; font-size:11px; }
+    #tear .kbd{ display:none; }
+    #core .tune label{ flex-direction:column; align-items:stretch; gap:1px; }
+    #core .tune input[type=range]{ width:100%; }
+    #toolsBtn{ display:block; }
+    #mini{ display:block; margin-top:auto; flex:none; color:var(--dim); font-size:11px;
+      line-height:1.35; white-space:pre-line; overflow-wrap:anywhere; }
+    #tools{ display:none; position:fixed; left:0; top:0; bottom:0; right:var(--rail);
+      flex-flow:column wrap; align-content:flex-start; gap:8px 16px;
+      padding:10px 12px calc(10px + env(safe-area-inset-bottom,0px));
+      background:rgba(15,12,9,.99); border-right:1px solid var(--line); z-index:6; }
+    body.tools #tools{ display:flex; }
+    #tools .grp{ width:min(212px,42vw); flex-wrap:wrap; align-items:center; }
+    #tools .grp b{ width:100%; margin:0; }
+    #tools .measure{ opacity:1; }
+    #stats{ width:min(248px,46vw); margin-left:0; text-align:left;
+      white-space:pre-wrap; font-size:10px; line-height:1.35; }
+  }
