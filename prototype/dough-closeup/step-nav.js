@@ -33,15 +33,17 @@
   // и обновляем подсказку чтобы игрок знал что делать.
   function activateDrizzle() {
     const live = document.getElementById("live");
-    if (typeof phase !== "undefined" && phase === "CUT") {
-      if (live) live.textContent = "веди пальцем по роти — польётся сгущёнка";
-    } else {
-      // Если ещё не нарезано — попробуем нажать cutMode
+    if (typeof phase === "undefined" || phase !== "CUT") {
       clickById("cutMode");
-      setTimeout(() => {
-        if (live) live.textContent = "веди пальцем по роти — польётся сгущёнка";
-      }, 150);
     }
+    setTimeout(() => {
+      if (typeof window.setDrizzleMode === "function") window.setDrizzleMode(true);
+      else {
+        const b = document.getElementById("drizzleMode");
+        if (b && !b.classList.contains("on")) b.click();
+      }
+      if (live) live.textContent = "веди пальцем по роти — польётся сгущёнка";
+    }, 160);
   }
 
   function go(delta) {
@@ -81,7 +83,8 @@
       `<button id="stepNavNext" title="следующий шаг">&#8594;</button>`;
 
     const gStep = document.getElementById("gStep");
-    panel.insertBefore(grp, gStep || panel.firstChild);
+    const parent = (gStep && gStep.parentNode) || panel;
+    parent.insertBefore(grp, gStep || parent.firstChild);
 
     document.getElementById("stepNavPrev").addEventListener("click", () => go(-1));
     document.getElementById("stepNavNext").addEventListener("click", () => go(+1));
