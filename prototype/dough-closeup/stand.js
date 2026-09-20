@@ -394,48 +394,10 @@ function startDish(){
       if(polyArea(p)>1e-10) faces.push({points:p,kind:"dough",source:q,tone,turned:false});
     }
   }
-  dish={mode:"fold",faces,folds:0,cuts:[],history:[],filling:[],message:"Начинка на месте · заверни края внутрь"};
+  dish={mode:"fold",faces,folds:0,cuts:[],history:[],filling:[],message:"Положи банан, потом заверни края"};
   if(!faces.length){ dish=null; return; }
-  const b=dishBounds(), cx=(b.left+b.right)/2, cy=(b.top+b.bottom)/2;
-  const span=Math.min(b.right-b.left,b.bottom-b.top), radius=span*.075;
-  const base=faces.slice();
-  // Начинка — ломтики банана, разложенные одним слоем пятном в середине листа (кадры уличного
-  // роти; владелица 17.09: семь горок «непонятно лежат группками»). Каждый ломтик — своя порция:
-  // круг радиусом ~1 см в масштабе роти, в середине и двумя неровными кольцами, часть мест пустует.
-  // Ломтик обрезается самим листом: через дырку не висит даже его край. Случайны места и пропуски,
-  // далее все части сохраняют id.
-  const slice=span*.05, spots=[[0,0]];
-  const turn1=Math.random()*Math.PI, turn2=Math.random()*Math.PI;
-  for(let j=0;j<6;j++) spots.push([Math.cos(turn1+j*Math.PI/3)*slice*2.15,Math.sin(turn1+j*Math.PI/3)*slice*2.15]);
-  for(let j=0;j<12;j++) spots.push([Math.cos(turn2+j*Math.PI/6)*slice*4.2,Math.sin(turn2+j*Math.PI/6)*slice*4.2]);
-  let id=0;
-  for(let k=0;k<spots.length;k++){
-    if(k>0 && Math.random()<.18) continue;             // просветы между ломтиками
-    const x=cx+spots[k][0]+(Math.random()-.5)*slice*.6;
-    const y=cy+spots[k][1]+(Math.random()-.5)*slice*.6;
-    const rr=slice*(.9+Math.random()*.2);
-    const ring=Array.from({length:12},(_,j)=>({x:x+Math.cos(j*Math.PI/6)*rr,y:y+Math.sin(j*Math.PI/6)*rr}));
-    let added=false;
-    for(const face of base){
-      let p=face.points;
-      for(let j=0;j<ring.length && p.length;j++){
-        const a=ring[j], z=ring[(j+1)%ring.length], nx=-(z.y-a.y), ny=z.x-a.x;
-        p=clipPoly(p,nx,ny,a.x*nx+a.y*ny);
-      }
-      if(p.length){ faces.push({points:p,kind:"filling",source:id,tone:id%3,turned:false,pc:{x,y},pr:rr,ph:FILL_MM}); added=true; }
-    }
-    if(added) dish.filling.push({id,x,y,radius:rr});
-    id++;
-  }
-  // Даже у маленького/сильно порванного листа остаётся проверяемая порция на материале.
-  if(!dish.filling.length){
-    const f=base.reduce((a,b)=>polyArea(a.points)>polyArea(b.points)?a:b);
-    const c=f.points.reduce((s,p)=>({x:s.x+p.x/3,y:s.y+p.y/3}),{x:0,y:0});
-    const pts=f.points.map(p=>({x:c.x+(p.x-c.x)*.7,y:c.y+(p.y-c.y)*.7}));
-    faces.push({...f,kind:"filling",source:0,tone:0,points:pts,pc:{x:c.x,y:c.y},
-      pr:Math.max(...pts.map(p=>Math.hypot(p.x-c.x,p.y-c.y)))*1.2,ph:FILL_MM});
-    dish.filling.push({id:0,x:c.x,y:c.y,radius:0});
-  }
+  // Ломтики кладёт игрок (`addBananaSlice`): авто-пятно в середине убрано,
+  // иначе жест «положить банан» не к чему было бы прикоснуться.
   // У материала две поверхности: 0 — та, что легла на таву при посадке, 1 — исходный
   // верх. Обе начинаются с нуля: startDish вызывается в момент посадки, и узловые
   // dry/cook к этому времени ещё не успели вырасти ни на одном пути.
@@ -465,6 +427,44 @@ function pointInFace(points,x,y){
 const DOUGH_UNIT_MM = 14;     // толщина 1 (кусочек) ≈ 14 мм → лист у мишени (0,035) ≈ 0,5 мм
 const SHEET_REF_MM = 0.5;     // при такой толщине сушка идёт с базовой скоростью
 const FILL_MM = 3;            // толщина ломтика банана (с 17.09 порция — один ломтик; было 4 мм на горку)
+const BANANA_MAX = 18;        // однослойное пятно, как уличное (~16 кружков)
+function canPlaceBanana(){
+  return !!dish && dish.mode==="fold" && dish.folds===0 && !dishFlight && !dishMove;
+}
+function addBananaSlice(x, y, opts){
+  if(!canPlaceBanana()) return false;
+  if(dish.filling.length>=BANANA_MAX) return false;
+  if(!onMaterial({x,y})) return false;
+  const b=dishBounds(), span=Math.min(b.right-b.left,b.bottom-b.top);
+  const slice=span*.05, rr=slice*(.88+Math.random()*.22);
+  for(const f of dish.filling){
+    if(Math.hypot(f.x-x,f.y-y)<rr*1.35) return false;
+  }
+  const ring=Array.from({length:12},(_,j)=>({x:x+Math.cos(j*Math.PI/6)*rr,y:y+Math.sin(j*Math.PI/6)*rr}));
+  const added=[];
+  const id=dish.filling.length ? dish.filling[dish.filling.length-1].id+1 : 0;
+  for(const face of dish.faces){
+    if(face.kind!=="dough") continue;
+    let p=face.points;
+    for(let j=0;j<ring.length && p.length;j++){
+      const a=ring[j], z=ring[(j+1)%ring.length], nx=-(z.y-a.y), ny=z.x-a.x;
+      p=clipPoly(p,nx,ny,a.x*nx+a.y*ny);
+    }
+    if(p.length) added.push({points:p,kind:"filling",source:id,tone:id%3,turned:false,pc:{x,y},pr:rr,ph:FILL_MM});
+  }
+  if(!added.length) return false;
+  if(!(opts && opts.silent)) rememberDish();
+  for(const f of added) dish.faces.push(f);
+  dish.filling.push({id,x,y,radius:rr});
+  rebuildDishContact();
+  dish.message=dish.filling.length>=BANANA_MAX
+    ? "Банан на месте · заверни края внутрь"
+    : "Банан · клади дальше или заверни края";
+  if(!(opts && opts.silent)) syncDishUI();
+  return true;
+}
+window.addBananaSlice = addBananaSlice;
+window.canPlaceBanana = canPlaceBanana;
 const DOUGH_HEAT_MM = 1.05;   // тепло сквозь слой теста exp(−мм/1,05): лист 0,5 мм пропускает 0,62, как раньше
 const FILL_HEAT_MM = 5;       // сквозь начинку exp(−мм/5), и ещё её тень: порция 4 мм пропускает 0,45 × 0,2
 const COVER_MM = 1;           // тень начинки на слоях под ней 1/(1+мм/1): 4 мм дают ×0,2 (спецификация §1: ×0,15…0,25)
@@ -1226,9 +1226,17 @@ function syncDishUI(){
   const served=!!dish && dish.mode==="served";
   for(const id of ["flipDish","cutMode","undoDish"]){ const b=document.getElementById(id); if(b) b.hidden=served; }
   if(dish) hintEl.textContent=dish.mode==="fold"
-    ? "край: внутрь — складка · мах — переворот · на стол — снять · держи — прижим"+(dish.folds ? " · "+TWIST_HINT : "")
+    ? (dish.folds ? "край: внутрь — складка · мах — переворот · на стол — снять · держи — прижим · "+TWIST_HINT
+       : (dish.filling && dish.filling.length
+         ? "банан на листе · край внутрь — складка"
+         : "положи банан на середину листа, потом заверни края"))
     : dish.mode==="served" ? "Подано · «следующий роти» — новый кусочек"
     : "Нарезка: проведи через конверт · "+TWIST_HINT+" · «подать» — когда готово";
+  const ban=document.getElementById("bananaMode");
+  if(ban){
+    ban.hidden=!dish || dish.mode!=="fold" || dish.folds>0;
+    ban.disabled=!!dishFlight || !!dishMove;
+  }
 }
 // Складка — только ВНУТРЬ листа. Раньше линия сгиба строилась по любому сдвигу длиннее
 // 0,12, и сдвиг пальца вдоль кромки на 10 CSS px складывал полсписта (портрет: сгиб
@@ -4441,6 +4449,7 @@ function loop(now){
   try{
     step(dt);
     audioFrame();
+    if (typeof bananaUpdate === "function") bananaUpdate(dt);
     if (typeof drizzleUpdate === "function") drizzleUpdate(dt);
     draw();
     if (typeof drizzleDraw === "function") drizzleDraw(ctx);

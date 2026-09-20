@@ -1,243 +1,232 @@
-/* banana.js — жест сыпки банана на пожаренный лист.
-   Подключается ПОСЛЕ stand.js. Никаких правок в stand.js не требует.
+/* banana.js — жест: ломтики банана на открытый лист.
+   Подключается ПОСЛЕ stand.js. Ломтик — настоящая начинка (addBananaSlice):
+   конверт его прячет, на срезе видна мякоть.
 
-   Когда работает:
-     Фаза PAN, dish.mode === "fold" (лист уже на таве, ещё не перешёл к нарезке).
-     Игрок ведёт пальцем по тесту — дольки ложатся за пальцем, потом тают.
-     После достаточного покрытия кнопка «к нарезке» разблокируется.
-
-   API:
-     bananaSprinkleUpdate(dt)    — вызывать из game-loop
-     bananaSprinkleDraw(ctx)     — вызывать из drawFrame после теста
-     bananaSprinkleReset()       — сброс (новый роти)
-     bananaSprinkleCoverage      — текущее покрытие [0..1]
-
-   BANANA_COVERAGE (default 0) — порог для разблокировки кнопки «к нарезке».
-   0 — банан декоративный, не обязательный.
+   На открытом листе (folds=0) середина кладёт кружки, край по-прежнему
+   складывает. После первой складки жест гаснет.
 */
 
 "use strict";
+window.__bananaBoot = 1;
 
-// ─────────────────────────── параметры
+const BANANA_EDGE = 0.30;   // дальше — середина (как zone middle в stand.js)
 
-// Цвет дольки: жёлто-кремовый, тёплый.
-// Два цвета — наружная жареная корочка + светлая мякоть.
-const BANANA_OUTER   = "rgba(220, 185, 90, 0.90)";
-const BANANA_INNER   = "rgba(245, 225, 145, 0.70)";
-const BANANA_FADE_T  = 1.4;   // секунд fade-out дольки
-const BANANA_SLIDE   = 0.18;  // долька скользит вниз (в PAN_R) пока тает
+let _modeOn     = false;
+let _userOff    = false;
+let _active     = false;
+let _captureId  = null;
+let _last       = null;
+let _remembered = false;
 
-// Порог покрытия [0..1] — при достижении разблокирует кнопку «к нарезке».
-// 0 — банан декоративный, не обязательный.
-let BANANA_COVERAGE  = 0.0;
+Object.defineProperty(window, "bananaModeOn",
+  { get: () => _modeOn, configurable: true });
 
-// ─────────────────────────── состояние
-
-// chunk: { x, y, r, vx, vy, alpha }  — одна долька/кружок
-let chunks = [];
-let bananaCoverage = 0;
-
-Object.defineProperty(window, "bananaSprinkleCoverage", { get: () => bananaCoverage, configurable: true });
-
-// ─────────────────────────── API
-
-function bananaSprinkleReset() {
-  chunks = []; bananaCoverage = 0;
+function bananaReset() {
+  _modeOn = false; _userOff = false; _active = false; _captureId = null;
+  _last = null; _remembered = false;
+  _syncButton();
 }
 
-/**
- * Обновить дольки: падают, скользят, тают.
- * dt — секунды.
- */
-function bananaSprinkleUpdate(dt) {
-  const slide = (typeof PAN_R !== "undefined" ? PAN_R : 80) * BANANA_SLIDE * dt;
-  for (let i = chunks.length - 1; i >= 0; i--) {
-    const c = chunks[i];
-    // Скольжение: долька постепенно замедляется (vx уменьшается).
-    c.x  += c.vx * slide;
-    c.y  += c.vy * slide;
-    c.vx *= 0.82;
-    c.vy *= 0.82;
-    c.alpha -= dt / BANANA_FADE_T;
-    if (c.alpha <= 0) { chunks.splice(i, 1); }
+function bananaUpdate() {
+  if (typeof canPlaceBanana !== "function") return;
+  if (canPlaceBanana()) {
+    if (!_userOff && !_modeOn) _modeOn = true;
+  } else if (_modeOn) {
+    _modeOn = false; _userOff = false; _active = false; _captureId = null; _last = null;
   }
-  if (BANANA_COVERAGE > 0) _updateCutButton();
+  _syncButton();
 }
 
-/**
- * Нарисовать дольки банана.
- * Рисовать ПОСЛЕ теста, ДО карточки.
- */
-function bananaSprinkleDraw(ctx) {
-  if (!chunks.length) return;
-  ctx.save();
-  for (const c of chunks) {
-    if (c.alpha <= 0) continue;
-    const sx = prX(c.x, c.y);
-    const sy = prY(c.x, c.y);
-    const r  = c.r;
-    ctx.globalAlpha = Math.min(1, c.alpha);
-    // Корочка: овал сплющен в TILT раз, как всё на столе.
-    ctx.beginPath();
-    ctx.ellipse(sx, sy, r, r * TILT, 0, 0, Math.PI * 2);
-    ctx.fillStyle = BANANA_OUTER;
-    ctx.fill();
-    // Светлая мякоть внутри
-    ctx.beginPath();
-    ctx.ellipse(sx - r * 0.2, sy - r * TILT * 0.2, r * 0.45, r * TILT * 0.45, 0, 0, Math.PI * 2);
-    ctx.fillStyle = BANANA_INNER;
-    ctx.fill();
-  }
-  ctx.globalAlpha = 1;
-  ctx.restore();
+function _inBananaPhase() {
+  return _modeOn && typeof canPlaceBanana === "function" && canPlaceBanana();
 }
 
-// ─────────────────────────── внутренние функции
-
-/**
- * Роняем дольки в точке (x, y) в координатах стола.
- * n — количество долек; по умолчанию 4–6.
- */
-function _spawnChunks(x, y, n) {
-  const baseR = (typeof PAN_R !== "undefined" ? PAN_R : 80) * 0.022;
-  for (let i = 0; i < n; i++) {
-    const angle = Math.random() * Math.PI * 2;
-    const speed = 0.6 + Math.random() * 0.8;
-    chunks.push({
-      x, y,
-      r:  baseR * (0.6 + Math.random() * 0.8),
-      vx: Math.cos(angle) * speed,
-      vy: Math.sin(angle) * speed,
-      alpha: 0.85 + Math.random() * 0.15,
-    });
-  }
-  // Пересчитываем покрытие: количество долек / норма (= диагональ блюда / 2×baseR).
-  const ref = (typeof PAN_R !== "undefined" ? PAN_R : 80) * 0.22 * 2 / (baseR * 2);
-  bananaCoverage = Math.min(1, chunks.length / ref);
+function _ui(e) {
+  return typeof inUI === "function" && inUI(e.target);
 }
 
-// Разблокировать / заблокировать кнопку «к нарезке».
-function _updateCutButton() {
-  const btn = document.getElementById("cutMode");
-  if (!btn) return;
-  // stand.js сам управляет disabled кнопки; мы только добавляем свою блокировку.
-  const covered = bananaCoverage >= BANANA_COVERAGE;
-  // Снимаем / вешаем атрибут data-banana-locked.
-  if (covered) {
-    btn.removeAttribute("data-banana-locked");
-  } else {
-    btn.setAttribute("data-banana-locked", "1");
-    btn.disabled = true;
+function _local(e) {
+  const table = typeof toLocal === "function"
+    ? toLocal(e.clientX, e.clientY)
+    : { x: e.clientX, y: e.clientY };
+  return typeof dishLocal === "function" ? dishLocal(table) : table;
+}
+
+function _hullDist(p) {
+  if (typeof dish === "undefined" || !dish || !dish.hull || dish.hull.length < 2) return Infinity;
+  let distance = Infinity;
+  for (let i = 0; i < dish.hull.length; i++) {
+    const a = dish.hull[i], b = dish.hull[(i + 1) % dish.hull.length];
+    const dx = b.x - a.x, dy = b.y - a.y;
+    const t = Math.max(0, Math.min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / (dx * dx + dy * dy || 1)));
+    const d = Math.hypot(a.x + t * dx - p.x, a.y + t * dy - p.y);
+    if (d < distance) distance = d;
   }
-  if (covered && btn._bananaTip !== true) {
-    btn._bananaTip = true;
+  return distance;
+}
+
+function _isMiddle(p) {
+  if (typeof onMaterial === "function" && !onMaterial(p)) return false;
+  return _hullDist(p) > BANANA_EDGE;
+}
+
+function _place(e) {
+  if (typeof addBananaSlice !== "function") return;
+  const p = _local(e);
+  if (!_isMiddle(p)) return;
+  if (_last && Math.hypot(p.x - _last.x, p.y - _last.y) < 0.045) return;
+  const ok = addBananaSlice(p.x, p.y, { silent: true });
+  if (ok) {
+    _last = p;
+    if (typeof dish !== "undefined" && dish && dish.message) {
+      const live = document.getElementById("live");
+      if (live) live.textContent = dish.message;
+    }
+  }
+}
+
+function _onDown(e) {
+  if (!_inBananaPhase() || _ui(e)) return;
+  if (e.button != null && e.button !== 0) return;
+  if (_active) return;
+  const p = _local(e);
+  if (!_isMiddle(p)) return;
+  _active = true;
+  _captureId = e.pointerId;
+  _last = null;
+  if (!_remembered && typeof rememberDish === "function") {
+    rememberDish();
+    _remembered = true;
+  }
+  _place(e);
+  e.stopImmediatePropagation();
+  e.preventDefault();
+}
+
+function _onMove(e) {
+  if (!_active || e.pointerId !== _captureId) return;
+  _place(e);
+  e.stopImmediatePropagation();
+}
+
+function _onUp(e) {
+  if (e.pointerId !== _captureId) return;
+  _active = false;
+  _captureId = null;
+  _last = null;
+  _remembered = false;
+  if (typeof syncDishUI === "function") syncDishUI();
+}
+
+function _setMode(on) {
+  if (on && typeof canPlaceBanana === "function" && !canPlaceBanana()) {
     const live = document.getElementById("live");
-    if (live) live.textContent = "Банан на месте · можно к нарезке";
+    if (live) live.textContent = "банан — на открытый лист, до складки";
+    _modeOn = false;
+    _userOff = true;
+    _syncButton();
+    return;
   }
+  _modeOn = !!on;
+  _userOff = !_modeOn;
+  if (!_modeOn) { _active = false; _captureId = null; _last = null; }
+  _syncButton();
+  const live = document.getElementById("live");
+  if (_modeOn && live) live.textContent = "середина листа — ломтики · край — складка";
 }
 
-// ─────────────────────────── хуки
+function _syncButton() {
+  const b = document.getElementById("bananaMode");
+  if (!b) return;
+  const can = typeof canPlaceBanana === "function" && canPlaceBanana();
+  b.hidden = !can && !_modeOn;
+  b.disabled = !can;
+  b.classList.toggle("on", _modeOn);
+  b.textContent = _modeOn ? "банан ✓" : "банан";
+}
 
-// 1. reset()
+window.setBananaMode = _setMode;
+window.bananaUpdate = bananaUpdate;
+window.bananaReset = bananaReset;
+
 (function hookReset() {
   if (typeof reset === "function") {
-    const _orig = reset;
-    window.reset = function () {
-      bananaSprinkleReset();
-      return _orig.apply(this, arguments);
-    };
-  } else { document.addEventListener("DOMContentLoaded", hookReset); }
+    const orig = reset;
+    if (orig._bananaReset) return;
+    const wrapped = function () { bananaReset(); return orig.apply(this, arguments); };
+    wrapped._bananaReset = true;
+    window.reset = wrapped;
+  } else {
+    window.addEventListener("load", hookReset);
+  }
 })();
 
-// 2. pointerdown в фазе PAN / fold: отслеживаем pointermove и роняем дольки.
+(function hookStandInput() {
+  function wrap(name) {
+    const orig = window[name];
+    if (typeof orig !== "function" || orig._bananaWrap) return false;
+    const wrapped = function (id, cx, cy, t) {
+      if (name === "onDown" && _inBananaPhase() && typeof toLocal === "function") {
+        const table = toLocal(cx, cy);
+        const local = typeof dishLocal === "function" ? dishLocal(table) : table;
+        if (_isMiddle(local)) return;
+      }
+      if (name !== "onDown" && _active) return;
+      return orig.apply(this, arguments);
+    };
+    wrapped._bananaWrap = true;
+    window[name] = wrapped;
+    return true;
+  }
+  function tryWrap() {
+    if (typeof window.onDown !== "function") { setTimeout(tryWrap, 50); return; }
+    wrap("onDown"); wrap("onMove"); wrap("onUp");
+  }
+  tryWrap();
+})();
+
 (function hookPointer() {
-  const cv = document.getElementById("cv");
-  if (!cv) { document.addEventListener("DOMContentLoaded", hookPointer); return; }
+  window.addEventListener("pointerdown",   _onDown,  { capture: true });
+  window.addEventListener("pointermove",   _onMove,  { capture: true });
+  window.addEventListener("pointerup",     _onUp,    { capture: true });
+  window.addEventListener("pointercancel", _onUp,    { capture: true });
 
-  function toLocalB(e) {
-    if (typeof toLocal === "function") return toLocal(e.clientX, e.clientY);
-    const r = cv.getBoundingClientRect();
-    return { x: e.clientX - r.left, y: e.clientY - r.top };
-  }
-
-  let captureId = null;
-  let lastPt    = null;
-  // Шаг выборки долек: 1 долька на каждые ~16 px пути.
-  const STEP_PX = 16;
-  let accDist   = 0;
-
-  function _inBananaPhase() {
-    return typeof phase !== "undefined" && phase === "PAN" &&
-           typeof dish   !== "undefined" && dish && dish.mode === "fold";
-  }
-
-  cv.addEventListener("pointerdown", function(e) {
-    if (!_inBananaPhase()) return;
-    // Не перехватываем событие — жесты переворота должны работать.
-    captureId = e.pointerId;
-    lastPt    = toLocalB(e);
-    accDist   = 0;
-  }, { capture: false });
-
-  cv.addEventListener("pointermove", function(e) {
-    if (!_inBananaPhase() || e.pointerId !== captureId || !lastPt) return;
-    const p  = toLocalB(e);
-    const dx = p.x - lastPt.x, dy = p.y - lastPt.y;
-    const d  = Math.hypot(dx, dy);
-    accDist += d;
-    // Роняем дольки по достижении STEP_PX, пропорционально скорости.
-    while (accDist >= STEP_PX) {
-      accDist -= STEP_PX;
-      // Позиция — след пальца, небольшой разброс.
-      _spawnChunks(
-        lastPt.x + (p.x - lastPt.x) * (accDist / d || 0) + (Math.random() - 0.5) * STEP_PX * 0.5,
-        lastPt.y + (p.y - lastPt.y) * (accDist / d || 0) + (Math.random() - 0.5) * STEP_PX * 0.5,
-        4 + Math.floor(Math.random() * 3)   // 4–6 долек
-      );
-    }
-    lastPt = p;
-  }, { capture: false });
-
-  cv.addEventListener("pointerup",     function(e) { if (e.pointerId === captureId) { captureId = null; lastPt = null; } }, { capture: false });
-  cv.addEventListener("pointercancel", function(e) { if (e.pointerId === captureId) { captureId = null; lastPt = null; } }, { capture: false });
-})();
-
-// 3. Хук в RAF (тот же паттерн, что в drizzle.js — если drizzle.js уже перехватил, банан встаёт после него).
-(function hookLoop() {
-  const _raf = window.requestAnimationFrame;
-  let lastT = 0;
-  window.requestAnimationFrame = function(cb) {
-    return _raf.call(window, function(t) {
-      const dt = lastT ? Math.min((t - lastT) / 1000, 0.05) : 0;
-      lastT = t;
-      bananaSprinkleUpdate(dt);
-      return cb(t);
-    });
-  };
-})();
-
-// 4. Хук в drawFrame.
-(function hookDrawFrame() {
-  if (typeof drawFrame === "function") {
-    const _orig = drawFrame;
-    window.drawFrame = function() {
-      _orig.apply(this, arguments);
-      const ctx = document.getElementById("cv") && document.getElementById("cv").getContext("2d");
-      if (ctx) bananaSprinkleDraw(ctx);
+  function touchFake(e, t) {
+    return {
+      pointerId: "t" + t.identifier,
+      button: 0,
+      clientX: t.clientX,
+      clientY: t.clientY,
+      target: e.target,
+      preventDefault() { e.preventDefault(); },
+      stopImmediatePropagation() { e.stopImmediatePropagation(); }
     };
-  } else { document.addEventListener("DOMContentLoaded", hookDrawFrame); }
+  }
+  window.addEventListener("touchstart", e => {
+    if (!_inBananaPhase() || _ui(e) || _active) return;
+    const t = e.changedTouches[0];
+    if (t) _onDown(touchFake(e, t));
+  }, { capture: true, passive: false });
+  window.addEventListener("touchmove", e => {
+    if (!_active) return;
+    for (const t of e.changedTouches) {
+      if ("t" + t.identifier === _captureId) { _onMove(touchFake(e, t)); break; }
+    }
+  }, { capture: true, passive: false });
+  window.addEventListener("touchend", e => {
+    for (const t of e.changedTouches) {
+      if ("t" + t.identifier === _captureId) { _onUp(touchFake(e, t)); break; }
+    }
+  }, { capture: true, passive: false });
 })();
 
-/* ─────────────────────────── ПОРЯДОК СКРИПТОВ в index.html
-
-   <script src="stand.js?v=2026-09-17-canal-41"></script>
-   <script src="counter-item.js?v=2026-09-19"></script>
-   <script src="drizzle.js?v=2026-09-19"></script>
-   <script src="banana.js?v=2026-09-19"></script>   ← в конце
-
-   Чтобы банан стал обязательным:
-     BANANA_COVERAGE = 0.30;   // игрок должен покрыть хотя бы 30 % поверхности
-
-   С BANANA_COVERAGE = 0 (default) банан декоративный — дольки сыпются, но
-   кнопка «к нарезке» не заблокирована.
-*/
+(function buildBtn() {
+  function bind() {
+    const b = document.getElementById("bananaMode");
+    if (!b || b._bananaBound) return;
+    b._bananaBound = true;
+    b.addEventListener("click", () => _setMode(!_modeOn));
+  }
+  if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", bind);
+  else bind();
+})();
