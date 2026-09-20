@@ -2851,9 +2851,9 @@ let stepNo = 1;                                // текущий шаг стен
 let targetR = 1, startR = 1, step1R = 1;       // step1R = цель расплющивания (42% мишени)
 let advancedAt = 0;                            // момент авто-перехода на шаг 2 (для баннера)
 let gestureScale = 1;                          // масштаб жеста: фиксирован от экрана, не от роста листа
-let FLAT_RATE = 2.4;                           // нажим должен быть виден за полсекунды
-const FLAT_FLOW = 1.15;                        // тесто уезжает из-под пальца, доли радиуса/с
+let FLAT_RATE = 2.8;                           // сколько толщины снимает нажим за секунду
 const FLAT_READY = 0.42;                       // выше этого кусок ещё толстый — тянуть рано
+let flatH = null;                              // карта нажима: 1 толстое, меньше — где провели
 // Мерка листа — меньшая сторона рабочей зоны; от неё доли комка, свежего листа и мишени.
 // В раме тава нарисована и не растягивается: мерка ещё и не больше той, при которой готовый лист
 // ложится в таву с тем же запасом, что на своём столе (тава в 1,25 раза шире роти). Иначе на
@@ -2890,6 +2890,7 @@ function build(){
   vx = new Float32Array(N); vy = new Float32Array(N);
   prx = new Float32Array(N); pry = new Float32Array(N);
   pinned = new Uint8Array(N); thick = new Float32Array(N).fill(1);
+  flatH = new Float32Array(N).fill(1);
 
   const c = [];
   const at = (i,j) => (i<0||j<0||i>=GRID||j>=GRID) ? -1 : gi[j*GRID+i];
@@ -3001,6 +3002,13 @@ function step(dt){
   if(action.state==="CARRY" || action.state==="TOSS"){ updateAction(dt); return; }
   if(dish){ updateDishFlight(); updateDishMove(); updateDishTwist(dt); cookDish(dt); return; }
   if(phase==="PAN"){ cookStep(dt); return; }
+  // Шаг 1 — не физика листа, а карта нажима. XPBD здесь не гоняем: это и был лаг.
+  if(stepNo===1){
+    if(action.state==="ARMED" && action.kind!=="lump") pressFlatten(dt);
+    if(sheetReadyToStretch()) bakeFlatten();
+    updateAction(dt);
+    return;
+  }
   const h = dt / SUBSTEPS;
   // Затухание зависит от фазы: в полёте лист скользит свободнее, после удара,
   // когда окно пластичности закрылось, — успокаивается быстрее (audit §5).
@@ -3035,12 +3043,6 @@ function step(dt){
     }
   }
   plasticT = Math.max(0, plasticT - dt);
-  if(stepNo===1 && action.state==="ARMED" && action.kind!=="lump") pressFlatten(dt);
-  if(stepNo===1 && sheetReadyToStretch()){
-    stepNo = 2; advancedAt = performance.now();          // весь кусок тонкий — дальше шлепки, тем же листом
-    try{ localStorage.setItem("dough_step","2"); }catch(e){}
-    syncStepButtons();
-  }
   // Шаг 2 → 3 так же автоматически и ТЕМ ЖЕ ЛИСТОМ. Раньше перехода не было вовсе:
   // строка говорила «✓ готов · запятой на таву», а шаг оставался вторым, и нажатие
   // «на таву» вручную ПЕРЕСОБИРАЛО лист — растянутый своими руками уходил в мусор,
@@ -3101,10 +3103,11 @@ function centerOfSheet(){
   return { x:sx/n, y:sy/n };
 }
 function flattenStats(){
+  const h = flatH || thick;
   let mx=0, mn=1, sum=0, n=0, over=0;
   for(let i=0;i<N;i++){
     if(conDeg && conDeg[i]<=0) continue;
-    const t=thick[i]; if(t>mx) mx=t; if(t<mn) mn=t; sum+=t; n++;
+    const t=h[i]; if(t>mx) mx=t; if(t<mn) mn=t; sum+=t; n++;
     if(t>FLAT_READY) over++;
   }
   return {max:mx, min:n?mn:0, mean:n?sum/n:1, over:n?over/n:1, n};
@@ -3164,39 +3167,42 @@ function armAction(pointerId, p){
   if(stepNo!==1) updateGripFromHold();                 // на шаге 1 дуга хвата не нужна
 }
 
-// Шаг 1: палец давит тесто. Длины покоя растут ТОЛЬКО под пальцем — края остаются
-// толстыми, пока их не прижмут. Тесто уезжает из-под пальца, в середине ямка.
+// Шаг 1: палец красит карту толщины. Физику листа не трогаем — это и был лаг.
 function pressFlatten(dt){
+  if(!flatH) return;
   const at = flattenAt(action.last);
   const fx = at.x, fy = at.y;
   const sr = Math.max(R0, sheetRadius());
-  const sigma = Math.max(sr * 0.55, gestureScale * 0.18);
+  const sigma = Math.max(sr * 0.50, gestureScale * 0.16);
   const s2 = sigma*sigma || 1;
-  for(let k2=0;k2<cons.length;k2++){
-    const c2 = cons[k2]; if(c2.broken) continue;
-    const mx = (px[c2.a]+px[c2.b])/2 - fx, my = (py[c2.a]+py[c2.b])/2 - fy;
-    const w = Math.exp(-(mx*mx + my*my)/s2);
-    if(w < 0.03) continue;
-    const t = ((thick[c2.a]||1)+(thick[c2.b]||1))/2;
-    if(t < 0.12) continue;                     // дальше уже не плющим — иначе дыра от нажима
-    c2.rest *= 1 + FLAT_RATE * w * dt;
-  }
-  const flow = FLAT_FLOW * sr * dt;
+  const drop = FLAT_RATE * dt;
   for(let i=0;i<N;i++){
     if(conDeg && conDeg[i]<=0) continue;
     const dx = px[i]-fx, dy = py[i]-fy;
-    const d2 = dx*dx + dy*dy;
-    const w = Math.exp(-d2/s2);
-    if(w < 0.04) continue;
-    const d = Math.sqrt(d2);
-    if(d > 1e-3){
-      const push = flow * w;
-      px[i] += dx/d * push; py[i] += dy/d * push;
-      prx[i] = px[i]; pry[i] = py[i];
-    }
-    vx[i] *= 1 - 0.55*w; vy[i] *= 1 - 0.55*w;
+    const w = Math.exp(-(dx*dx + dy*dy)/s2);
+    if(w < 0.03) continue;
+    flatH[i] = Math.max(0.12, flatH[i] - drop * w);
+  }
+}
+function bakeFlatten(){
+  const c = centerOfSheet(), r = Math.max(1e-3, sheetRadius());
+  const s = step1R / r;
+  for(let i=0;i<N;i++){
+    px[i] = c.x + (px[i]-c.x)*s;
+    py[i] = c.y + (py[i]-c.y)*s;
+    prx[i]=px[i]; pry[i]=py[i]; vx[i]=0; vy[i]=0;
+  }
+  for(const cc of cons) if(!cc.broken) cc.rest = Math.hypot(px[cc.a]-px[cc.b], py[cc.a]-py[cc.b]);
+  if(!quadRest || quadRest.length!==quads.length) quadRest = new Float32Array(quads.length);
+  for(let q=0;q<quads.length;q++){
+    const qq=quads[q], a=area(qq)||1e-6;
+    const h = ((flatH[qq[0]]||1)+(flatH[qq[1]]||1)+(flatH[qq[2]]||1)+(flatH[qq[3]]||1))/4;
+    quadRest[q] = a * h;
   }
   measureThickness();
+  stepNo = 2; advancedAt = performance.now();
+  try{ localStorage.setItem("dough_step","2"); }catch(e){}
+  syncStepButtons();
 }
 
 function lumpFollow(p){
@@ -3673,7 +3679,6 @@ let evenBuf = null;
 function evenOut(dt){
   // Тесто под руками выравнивается: толстые места отдают тонким. Без этого
   // жёсткий лист рвался у точки захвата на 90% пути, так и не дойдя до цели.
-  if(stepNo===1 && action.state==="ARMED" && action.kind!=="lump") return;
   const k = Math.min(0.5, 3.2*dt);
   if(!evenBuf || evenBuf.length !== cons.length) evenBuf = new Float32Array(cons.length);
   let sum = 0, n = 0;
@@ -4486,14 +4491,8 @@ function cookColor(base, c){
 }
 const rgb = (c)=>`rgb(${Math.round(c[0])},${Math.round(c[1])},${Math.round(c[2])})`;
 function doughLift(i){
-  // Отрезанный кусок ~14 мм при радиусе ~21 мм — приземистый диск на столе.
-  // Z_EXAG×2 поднимал верх на целый радиус: тень внизу, тесто в воздухе.
-  return (thick[i]||0) * DOUGH_UNIT_MM / ROTI_R_MM * targetR;
-}
-function doughDome(i){
-  const c=centerOfSheet(), r=Math.max(1e-3, sheetRadius());
-  const q=Math.min(1, Math.hypot(px[i]-c.x, py[i]-c.y)/r);
-  return 1 - 0.30*q*q;
+  const h = (flatH && stepNo===1 ? flatH[i] : thick[i]) || 0;
+  return h * DOUGH_UNIT_MM / ROTI_R_MM * targetR;
 }
 const palPan = new Map();   // 16 ступеней толщины × 16 ступеней прожарки — для пиксельных вариантов
 function quantOn(t, c){
@@ -4571,15 +4570,22 @@ function draw(){
       g.fill();
     }
     const onPan = phase === "PAN";
-    const bump = !onPan && !xf;
+    const bump = !onPan && !xf && stepNo===1;
+    const lift = bump ? new Float32Array(N) : null;
+    if(lift){
+      const k = DOUGH_UNIT_MM / ROTI_R_MM * targetR * VIEW_UP;
+      const H = flatH || thick;
+      for(let i=0;i<N;i++) lift[i] = (H[i]||0) * k;
+    }
     const Pnt=(i)=>({
       x: prX(X[i],Y[i])*sx+ox,
-      y: (prY(X[i],Y[i]) - (bump ? doughLift(i)*doughDome(i)*VIEW_UP : 0))*sy+oy
+      y: (prY(X[i],Y[i]) - (lift ? lift[i] : 0))*sy+oy
     });
     const Tab=(i)=>({ x: prX(X[i],Y[i])*sx+ox, y: prY(X[i],Y[i])*sy+oy });
     let nearWalls=null;
     const drawWall=(i,j,k)=>{
-      const t=((thick[i]||0)+(thick[j]||0))/2;
+      const H=flatH||thick;
+      const t=((H[i]||0)+(H[j]||0))/2;
       const col=mix(Math.min(1, t));
       const lit=0.62 + 0.22*k;
       g.fillStyle=`rgb(${Math.round(col[0]*lit)},${Math.round(col[1]*lit*0.96)},${Math.round(col[2]*lit*0.88)})`;
@@ -4587,7 +4593,7 @@ function draw(){
       g.beginPath(); g.moveTo(A.x,A.y); g.lineTo(B.x,B.y); g.lineTo(C.x,C.y); g.lineTo(D.x,D.y); g.closePath(); g.fill();
     };
     if(bump){
-      const c0 = centerOfSheet(), r0 = sheetRadius();
+      const c0 = bodyC, r0 = sheetRadius();
       g.fillStyle = "rgba(10,6,2,0.22)";
       g.beginPath();
       g.ellipse(prX(c0.x, c0.y + r0*0.06)*sx+ox, prY(c0.x, c0.y + r0*0.06)*sy+oy,
@@ -4607,7 +4613,9 @@ function draw(){
       const qc = quadCons[q];
       const [a,b2,c,d] = quads[q];
       const torn = qc[0].broken || (qc[1]&&qc[1].broken) || (qc[2]&&qc[2].broken) || (qc[3]&&qc[3].broken);
-      let t=(thick[a]+thick[b2]+thick[c]+thick[d])/4;
+      let t= bump && flatH
+        ? (flatH[a]+flatH[b2]+flatH[c]+flatH[d])/4
+        : (thick[a]+thick[b2]+thick[c]+thick[d])/4;
       if(torn){
         const inside =
           (px[a]-bodyC.x)**2+(py[a]-bodyC.y)**2 < bodyR2 &&
