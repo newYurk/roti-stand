@@ -275,9 +275,7 @@ function _updateServe() {
 function _syncButton() {
   const b = document.getElementById("drizzleMode");
   if (!b) return;
-  const onTable = typeof dish !== "undefined" && dish && dish.mode === "cut";
-  b.hidden = !onTable;
-  if (!onTable && _modeOn) _modeOn = false;
+  b.hidden = false;
   b.classList.toggle("on", _modeOn);
   b.textContent = _modeOn ? "сгущёнка ✓" : "сгущёнка";
 }
