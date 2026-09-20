@@ -3113,21 +3113,20 @@ function flattenStats(){
   return {max:mx, min:n?mn:0, mean:n?sum/n:1, over:n?over/n:1, n};
 }
 function sheetReadyToStretch(){
-  const s=flattenStats();
-  return s.n>20 && s.over < 0.06;   // почти каждая живая часть ниже порога
+  return sheetRadius() >= step1R * 0.92;
 }
 function flattenLiveWord(){
   const s=flattenStats();
-  const pct=Math.round((1-Math.min(1,s.max))*100);
+  const pct=Math.min(100, Math.round(sheetRadius()/step1R*100));
   if(action.kind==="lump") return "кусок толстый — прыгает за рукой, сначала расплющи";
-  if(s.over < 0.06) return "✓ тонкий — можно тянуть край";
+  if(pct>=92) return "✓ диск — можно тянуть край";
   if(s.mean < 0.55 && s.max > FLAT_READY)
     return action.state==="ARMED"
-      ? `края ещё толстые · прижми по кругу · ${pct}%`
+      ? `края ещё толстые · веди по кругу · ${pct}%`
       : `края ещё толстые — пройди пальцем по ободу · ${pct}%`;
   return action.state==="ARMED"
-    ? `расплющиваешь · где ведёшь — тоньше · ${pct}%`
-    : `прижми кусок · где ведёшь — там тоньше · ${pct}%`;
+    ? `плющишь — диск растёт · ${pct}%`
+    : `прижми и веди: тоньше и шире · ${pct}%`;
 }
 
 // ─── Жест «поднять и шлёпнуть» — ฟาด как единица действия (audit §5–6) ───
@@ -3167,11 +3166,14 @@ function armAction(pointerId, p){
   if(stepNo!==1) updateGripFromHold();                 // на шаге 1 дуга хвата не нужна
 }
 
-// Шаг 1: палец красит карту толщины. Физику листа не трогаем — это и был лаг.
+// Шаг 1: ладонь плющит шар в диск. Объём бережём: где прижали — ниже,
+// тесто уезжает в стороны, диаметр растёт сразу, без скачка в конце.
+// (Rasa Malaysia: palm → 6″ disc; Roti King: push outward against the table.)
 function pressFlatten(dt){
   if(!flatH) return;
   const at = flattenAt(action.last);
   const fx = at.x, fy = at.y;
+  const c = centerOfSheet();
   const sr = Math.max(R0, sheetRadius());
   const sigma = Math.max(sr * 0.50, gestureScale * 0.16);
   const s2 = sigma*sigma || 1;
@@ -3181,17 +3183,30 @@ function pressFlatten(dt){
     const dx = px[i]-fx, dy = py[i]-fy;
     const w = Math.exp(-(dx*dx + dy*dy)/s2);
     if(w < 0.03) continue;
-    flatH[i] = Math.max(0.12, flatH[i] - drop * w);
+    const got = Math.min(Math.max(0, flatH[i]-0.12), drop * w);
+    if(got<=0) continue;
+    flatH[i] -= got;
+    const d = Math.hypot(dx,dy);
+    if(d > 1e-3){
+      const push = got * sr * 0.55;
+      px[i] += dx/d * push; py[i] += dy/d * push;
+      prx[i]=px[i]; pry[i]=py[i];
+    }
+  }
+  const mean = flattenStats().mean;
+  const want = Math.min(step1R, R0 * Math.sqrt(1 / Math.max(0.18, mean)));
+  const r = Math.max(1e-3, sheetRadius());
+  if(want > r * 1.004){
+    const s = 1 + Math.min(0.50 * dt, want/r - 1);
+    const c2 = centerOfSheet();
+    for(let i=0;i<N;i++){
+      px[i] = c2.x + (px[i]-c2.x)*s;
+      py[i] = c2.y + (py[i]-c2.y)*s;
+      prx[i]=px[i]; pry[i]=py[i];
+    }
   }
 }
 function bakeFlatten(){
-  const c = centerOfSheet(), r = Math.max(1e-3, sheetRadius());
-  const s = step1R / r;
-  for(let i=0;i<N;i++){
-    px[i] = c.x + (px[i]-c.x)*s;
-    py[i] = c.y + (py[i]-c.y)*s;
-    prx[i]=px[i]; pry[i]=py[i]; vx[i]=0; vy[i]=0;
-  }
   for(const cc of cons) if(!cc.broken) cc.rest = Math.hypot(px[cc.a]-px[cc.b], py[cc.a]-py[cc.b]);
   if(!quadRest || quadRest.length!==quads.length) quadRest = new Float32Array(quads.length);
   for(let q=0;q<quads.length;q++){
