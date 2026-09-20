@@ -4512,9 +4512,7 @@ function cookColor(base, c){
 }
 const rgb = (c)=>`rgb(${Math.round(c[0])},${Math.round(c[1])},${Math.round(c[2])})`;
 function visDiscLift(h){
-  const raw = (h||0) * DOUGH_UNIT_MM / ROTI_R_MM * targetR;
-  const discMin = targetR * 0.07 * Math.min(1, (h||0) / 0.12);
-  return Math.max(raw, discMin) * VIEW_UP;
+  return (h||0) * DOUGH_UNIT_MM / ROTI_R_MM * targetR * VIEW_UP;
 }
 function doughLift(i){
   const h = (flatH && stepNo===1 ? flatH[i] : thick[i]) || 0;
@@ -4608,6 +4606,8 @@ function draw(){
         if(!conDeg || conDeg[i]>0){ sH+=h; nH++; }
       }
       hMean = nH ? sH/nH : 1;
+      const cap = sheetRadius() * TILT * 0.38;
+      for(let i=0;i<N;i++) if(lift[i] > cap) lift[i] = cap;
     }
     const Pnt=(i)=>({
       x: prX(X[i],Y[i])*sx+ox,
@@ -4617,14 +4617,12 @@ function draw(){
       const c0 = bodyC, r0 = sheetRadius();
       const x = prX(c0.x,c0.y)*sx+ox, y = prY(c0.x,c0.y)*sy+oy;
       const rx = r0*sx, ry = r0*TILT*sy;
-      const hPx = Math.max(3, visDiscLift(hMean) * sy);
-      g.fillStyle = "rgba(10,6,2,0.22)";
-      g.beginPath(); g.ellipse(x, y+ry*0.10, rx*1.05, ry*1.08, 0, 0, Math.PI*2); g.fill();
-      const col = mix(Math.max(0.55, hMean));
-      g.fillStyle = `rgb(${(col[0]*0.70)|0},${(col[1]*0.66)|0},${(col[2]*0.58)|0})`;
+      const hPx = Math.min(visDiscLift(hMean) * sy, ry * 0.38);
+      g.fillStyle = "rgba(10,6,2,0.26)";
+      g.beginPath(); g.ellipse(x, y + Math.min(hPx*0.18, ry*0.07), rx*1.03, ry*1.04, 0, 0, Math.PI*2); g.fill();
+      const col = mix(Math.max(0.62, hMean));
+      g.fillStyle = `rgb(${(col[0]*0.88)|0},${(col[1]*0.84)|0},${(col[2]*0.78)|0})`;
       g.beginPath(); g.ellipse(x, y, rx, ry, 0, 0, Math.PI*2); g.fill();
-      g.fillStyle = `rgb(${col[0]},${col[1]},${col[2]})`;
-      g.beginPath(); g.ellipse(x, y-hPx, rx, ry, 0, 0, Math.PI*2); g.fill();
     }
     for(let q=0;q<quads.length;q++){
       const qc = quadCons[q];
