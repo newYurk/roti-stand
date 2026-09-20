@@ -173,12 +173,20 @@ function _bead(x, y, pan) {
 }
 
 function _inDrizzlePhase() {
-  return _modeOn && typeof phase !== "undefined" && phase === "CUT";
+  return _modeOn
+    && typeof phase !== "undefined" && phase === "CUT"
+    && typeof dish !== "undefined" && dish && dish.mode === "cut"
+    && !dishMove;
+}
+
+function _ui(e) {
+  return typeof inUI === "function" && inUI(e.target);
 }
 
 function _onDown(e) {
-  if (!_inDrizzlePhase()) return;
-  if (typeof dish !== "undefined" && dish && dish.mode === "served") return;
+  if (!_inDrizzlePhase() || _ui(e)) return;
+  if (e.button != null && e.button !== 0) return;
+  if (_active) return;
   _active = true;
   _captureId = e.pointerId;
   _coast = null;
@@ -281,13 +289,23 @@ function _syncButton() {
 }
 
 function _setMode(on) {
+  if (on && typeof dish !== "undefined" && dish && dish.mode === "fold") {
+    const ok = typeof startRemoval === "function" && startRemoval();
+    if (!ok) {
+      const live = document.getElementById("live");
+      if (live) live.textContent = "сначала сложи конверт, потом сгущёнка";
+      _modeOn = false;
+      _syncButton();
+      return;
+    }
+  }
   _modeOn = !!on;
   if (!_modeOn) {
     _active = false; _captureId = null; _coast = null; _currentTrail = null;
   }
   _syncButton();
   const live = document.getElementById("live");
-  if (_modeOn && live) live.textContent = "веди пальцем по роти — польётся сгущёнка";
+  if (_modeOn && live) live.textContent = "веди мышью или пальцем по роти — польётся сгущёнка";
   else if (!_modeOn && live && typeof phase !== "undefined" && phase === "CUT")
     live.textContent = "Проведи через конверт · длину и направление выбираешь сама";
 }
@@ -336,12 +354,10 @@ window.setDrizzleMode = _setMode;
 })();
 
 (function hookPointer() {
-  const cv = document.getElementById("cv");
-  if (!cv) { window.addEventListener("load", hookPointer); return; }
-  cv.addEventListener("pointerdown",   _onDown,  { capture: true });
-  cv.addEventListener("pointermove",   _onMove,  { capture: true });
-  cv.addEventListener("pointerup",     _onUp,    { capture: true });
-  cv.addEventListener("pointercancel", _onUp,    { capture: true });
+  window.addEventListener("pointerdown",   _onDown,  { capture: true });
+  window.addEventListener("pointermove",   _onMove,  { capture: true });
+  window.addEventListener("pointerup",     _onUp,    { capture: true });
+  window.addEventListener("pointercancel", _onUp,    { capture: true });
 })();
 
 (function hookLoop() {

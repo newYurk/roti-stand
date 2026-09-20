@@ -318,7 +318,7 @@ let dishFlight = null;
 let dishMove = null;
 // Поворот в процессе (предпросмотр): {input, angle, pivot, …}; запекается на отпускании (rotateDish).
 let dishTwist = null;
-const TWIST_HINT = "повернуть: два пальца, колесо или ⌥ + перетаскивание";
+const TWIST_HINT = "повернуть: два пальца, колесо или ⌥ + перетаскивание · раздвинуть: два пальца или ⌥ + колёсико";
 const dishTouches = new Map();   // касания поля при блюде: id → точка стола (второй палец — поворот)
 // Развести куски двумя пальцами и заглянуть в срезы (владелица 17.09: «два пальца развести, и
 // кусочки разлетятся… а потом отпускаешь — обычный масштаб»). Щель живая, геометрию не трогает:
@@ -1227,7 +1227,7 @@ function syncDishUI(){
   if(dish) hintEl.textContent=dish.mode==="fold"
     ? "край: внутрь — складка · мах — переворот · на стол — снять · держи — прижим"+(dish.folds ? " · "+TWIST_HINT : "")
     : dish.mode==="served" ? "Подано · «следующий роти» — новый кусочек"
-    : "Нарезка: проведи через конверт прямым жестом · "+TWIST_HINT+" · развести два пальца — заглянуть в срезы · «подать» — когда готово";
+    : "Нарезка: проведи через конверт · "+TWIST_HINT+" · «подать» — когда готово";
 }
 // Складка — только ВНУТРЬ листа. Раньше линия сгиба строилась по любому сдвигу длиннее
 // 0,12, и сдвиг пальца вдоль кромки на 10 CSS px складывал полсписта (портрет: сгиб
@@ -3934,17 +3934,32 @@ for(const type of ["gesturestart","gesturechange","gestureend"]) window.addEvent
   else if(type==="gestureend") endTwist(true);
 }, {passive:false, capture:true});
 // Колесо и прокрутка тачпада над полем крутят блюдо; фиксируется после паузы (TWIST_IDLE_MS).
+// ⌥ + колёсико — раздвинуть куски и заглянуть в срезы (владелица 19.09: мышью двух пальцев нет).
 // Щипок тачпада (ctrlKey) не трогаем. Без блюда колесо листает страницу, как раньше.
 window.addEventListener("wheel", e=>{
   if(inUI(e.target) || e.ctrlKey || !dish) return;
+  const d=Math.abs(e.deltaY)>=Math.abs(e.deltaX) ? e.deltaY : e.deltaX;
+  const px=d*(e.deltaMode===1 ? 16 : e.deltaMode===2 ? 400 : 1);
+  if(e.altKey){
+    if(dishPinch && dishPinch.wheel && !canSpread() && dishSpread<=1){ dishPinch=null; return; }
+    if(!canSpread() && !(dishPinch && dishPinch.wheel)) return;
+    e.preventDefault();
+    if(dishTwist && dishTwist.input==="wheel") endTwist(true);
+    if(!(dishPinch && (dishPinch.ids || dishPinch.gesture))) dishPinch={wheel:true};
+    spreadTo(dishSpread + Math.max(-40,Math.min(40,px))*0.012);
+    return;
+  }
+  if(dishPinch && dishPinch.wheel) dishPinch=null;
   if(dishTwist ? dishTwist.input!=="wheel" : !canTwist() || !!dishGesture) return;
   e.preventDefault();
   if(!dishTwist && !beginTwist("wheel",{})) return;
-  const d=Math.abs(e.deltaY)>=Math.abs(e.deltaX) ? e.deltaY : e.deltaX;
-  const px=d*(e.deltaMode===1 ? 16 : e.deltaMode===2 ? 400 : 1);
   dishTwist.angle+=Math.max(-40,Math.min(40,px))*TWIST_WHEEL_DEG*Math.PI/180;
   dishTwist.lastT=performance.now();
 }, {passive:false, capture:true});
+window.addEventListener("keyup", e=>{
+  if((e.key==="Alt" || e.code==="AltLeft" || e.code==="AltRight") && dishPinch && dishPinch.wheel)
+    dishPinch=null;
+}, true);
 window.addEventListener("pointermove", e=>{
   if(e.pointerType === "touch" || inUI(e.target)) return;
   onMove("p"+e.pointerId, e.clientX, e.clientY, evTime(e));
