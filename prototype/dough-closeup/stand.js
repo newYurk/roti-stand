@@ -1156,7 +1156,7 @@ function updateDishFlight(){
 const TWIST_MIN_DEG = 1, TWIST_IDLE_MS = 220, TWIST_WHEEL_DEG = 0.25;   // градусов на пиксель прокрутки
 function canTwist(){
   if(!dish || dishFlight || dishMove || dish.mode==="served") return false;
-  if(dish.mode==="fold") return phase==="PAN" && dish.folds>0;
+  if(dish.mode==="fold") return phase==="PAN";
   return dish.mode==="cut";
 }
 function twistPivot(){ return dish.mode==="cut" ? {...dish.cutCenter} : dishCentroid(); }
@@ -4057,7 +4057,9 @@ window.addEventListener("wheel", e=>{
     return;
   }
   if(dishPinch && dishPinch.wheel) dishPinch=null;
-  if(dishTwist ? dishTwist.input!=="wheel" : !canTwist() || !!dishGesture) return;
+  if(!canTwist() && !(dishTwist && dishTwist.input==="wheel")) return;
+  if(dishTwist && dishTwist.input!=="wheel") endTwist(true);
+  if(dishGesture){ releasePress(dishGesture); dishGesture=null; }
   e.preventDefault();
   if(!dishTwist && !beginTwist("wheel",{})) return;
   dishTwist.angle+=Math.max(-40,Math.min(40,px))*TWIST_WHEEL_DEG*Math.PI/180;

@@ -31,8 +31,10 @@ function bananaUpdate() {
   if (typeof canPlaceBanana !== "function") return;
   if (canPlaceBanana()) {
     if (!_userOff && !_modeOn && !window.eggModeOn) _modeOn = true;
-  } else if (_modeOn) {
-    _modeOn = false; _userOff = false; _active = false; _captureId = null; _last = null;
+  } else {
+    if (_modeOn || _active) {
+      _modeOn = false; _userOff = false; _active = false; _captureId = null; _last = null;
+    }
   }
   _syncButton();
 }
@@ -172,7 +174,7 @@ window.bananaReset = bananaReset;
         const local = typeof dishLocal === "function" ? dishLocal(table) : table;
         if (_isMiddle(local)) return;
       }
-      if (name !== "onDown" && _active) return;
+      if (name !== "onDown" && _active && _inBananaPhase()) return;
       return orig.apply(this, arguments);
     };
     wrapped._bananaWrap = true;

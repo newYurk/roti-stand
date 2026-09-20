@@ -29,10 +29,10 @@ function eggReset() {
 
 function eggUpdate() {
   if (typeof canPlaceEgg !== "function") return;
-  if (canPlaceEgg()) {
-    /* яйцо не включается само — сначала банан, яйцо по кнопке */
-  } else if (_modeOn) {
-    _modeOn = false; _userOff = false; _active = false; _captureId = null; _last = null;
+  if (!canPlaceEgg()) {
+    if (_modeOn || _active) {
+      _modeOn = false; _userOff = false; _active = false; _captureId = null; _last = null;
+    }
   }
   _syncButton();
 }
@@ -172,7 +172,7 @@ window.eggReset = eggReset;
         const local = typeof dishLocal === "function" ? dishLocal(table) : table;
         if (_isMiddle(local)) return;
       }
-      if (name !== "onDown" && _active) return;
+      if (name !== "onDown" && _active && _inEggPhase()) return;
       return orig.apply(this, arguments);
     };
     wrapped._eggWrap = true;
