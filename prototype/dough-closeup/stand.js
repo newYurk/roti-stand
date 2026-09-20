@@ -394,7 +394,7 @@ function startDish(){
       if(polyArea(p)>1e-10) faces.push({points:p,kind:"dough",source:q,tone,turned:false});
     }
   }
-  dish={mode:"fold",faces,folds:0,cuts:[],history:[],filling:[],message:"Положи банан, потом заверни края"};
+  dish={mode:"fold",faces,folds:0,cuts:[],history:[],filling:[],message:"Положи банан и яйцо, потом заверни края"};
   if(!faces.length){ dish=null; return; }
   // Ломтики кладёт игрок (`addBananaSlice`): авто-пятно в середине убрано,
   // иначе жест «положить банан» не к чему было бы прикоснуться.
@@ -431,13 +431,17 @@ const BANANA_MAX = 18;        // однослойное пятно, как ул�
 function canPlaceBanana(){
   return !!dish && dish.mode==="fold" && dish.folds===0 && !dishFlight && !dishMove;
 }
+function _fillingOf(kind){
+  return (dish.filling||[]).filter(f => (f.kind||"banana")===kind);
+}
 function addBananaSlice(x, y, opts){
   if(!canPlaceBanana()) return false;
-  if(dish.filling.length>=BANANA_MAX) return false;
+  const bananas=_fillingOf("banana");
+  if(bananas.length>=BANANA_MAX) return false;
   if(!onMaterial({x,y})) return false;
   const b=dishBounds(), span=Math.min(b.right-b.left,b.bottom-b.top);
   const slice=span*.05, rr=slice*(.88+Math.random()*.22);
-  for(const f of dish.filling){
+  for(const f of bananas){
     if(Math.hypot(f.x-x,f.y-y)<rr*1.35) return false;
   }
   const ring=Array.from({length:12},(_,j)=>({x:x+Math.cos(j*Math.PI/6)*rr,y:y+Math.sin(j*Math.PI/6)*rr}));
@@ -450,24 +454,65 @@ function addBananaSlice(x, y, opts){
       const a=ring[j], z=ring[(j+1)%ring.length], nx=-(z.y-a.y), ny=z.x-a.x;
       p=clipPoly(p,nx,ny,a.x*nx+a.y*ny);
     }
-    if(p.length) added.push({points:p,kind:"filling",source:id,tone:id%3,turned:false,pc:{x,y},pr:rr,ph:FILL_MM});
+    if(p.length) added.push({points:p,kind:"filling",fill:"banana",source:id,tone:id%3,turned:false,pc:{x,y},pr:rr,ph:FILL_MM});
   }
   if(!added.length) return false;
   if(!(opts && opts.silent)) rememberDish();
-  // Новый массив: stackHeights и прочие WeakMap ключуют по ссылке на faces.
-  // push оставлял старый кэш без начинки — ломтики рисовались бледными кружками,
-  // пока складка не подменяла faces (тогда банан «проявлялся»).
   dish.faces = dish.faces.concat(added);
-  dish.filling = dish.filling.concat([{id,x,y,radius:rr}]);
+  dish.filling = dish.filling.concat([{id,x,y,radius:rr,kind:"banana"}]);
   rebuildDishContact();
-  dish.message=dish.filling.length>=BANANA_MAX
-    ? "Банан на месте · заверни края внутрь"
-    : "Банан · клади дальше или заверни края";
+  dish.message=bananas.length+1>=BANANA_MAX
+    ? "Банан на месте · яйцо или заверни края"
+    : "Банан · клади дальше, лей яйцо или заверни края";
   if(!(opts && opts.silent)) syncDishUI();
   return true;
 }
 window.addBananaSlice = addBananaSlice;
 window.canPlaceBanana = canPlaceBanana;
+const EGG_MM = 1.6;
+const EGG_MAX = 24;
+function canPlaceEgg(){
+  return !!dish && dish.mode==="fold" && dish.folds===0 && !dishFlight && !dishMove;
+}
+function addEgg(x, y, opts){
+  if(!canPlaceEgg()) return false;
+  if(!onMaterial({x,y})) return false;
+  const eggs=_fillingOf("egg");
+  if(eggs.length>=EGG_MAX) return false;
+  const b=dishBounds(), span=Math.min(b.right-b.left,b.bottom-b.top);
+  const blob=span*.075, rr=blob*(.8+Math.random()*.35);
+  for(const f of eggs){
+    if(Math.hypot(f.x-x,f.y-y)<rr*.48) return false;
+  }
+  const id=dish.filling.length ? dish.filling[dish.filling.length-1].id+1 : 0;
+  const ring=Array.from({length:14},(_,j)=>{
+    const a=j*Math.PI/7;
+    const wob=0.76+0.24*(0.5+0.5*Math.sin(j*1.7+id*0.9));
+    return {x:x+Math.cos(a)*rr*wob, y:y+Math.sin(a)*rr*wob};
+  });
+  const added=[];
+  for(const face of dish.faces){
+    if(face.kind!=="dough") continue;
+    let p=face.points;
+    for(let j=0;j<ring.length && p.length;j++){
+      const a=ring[j], z=ring[(j+1)%ring.length], nx=-(z.y-a.y), ny=z.x-a.x;
+      p=clipPoly(p,nx,ny,a.x*nx+a.y*ny);
+    }
+    if(p.length) added.push({points:p,kind:"filling",fill:"egg",source:id,tone:0,turned:false,pc:{x,y},pr:rr,ph:EGG_MM});
+  }
+  if(!added.length) return false;
+  if(!(opts && opts.silent)) rememberDish();
+  dish.faces = dish.faces.concat(added);
+  dish.filling = dish.filling.concat([{id,x,y,radius:rr,kind:"egg"}]);
+  rebuildDishContact();
+  dish.message=eggs.length+1>=EGG_MAX
+    ? "Яйцо на месте · заверни края внутрь"
+    : "Яйцо · веди дальше или заверни края";
+  if(!(opts && opts.silent)) syncDishUI();
+  return true;
+}
+window.addEgg = addEgg;
+window.canPlaceEgg = canPlaceEgg;
 const DOUGH_HEAT_MM = 1.05;   // тепло сквозь слой теста exp(−мм/1,05): лист 0,5 мм пропускает 0,62, как раньше
 const FILL_HEAT_MM = 5;       // сквозь начинку exp(−мм/5), и ещё её тень: порция 4 мм пропускает 0,45 × 0,2
 const COVER_MM = 1;           // тень начинки на слоях под ней 1/(1+мм/1): 4 мм дают ×0,2 (спецификация §1: ×0,15…0,25)
@@ -1221,14 +1266,19 @@ function syncDishUI(){
   if(dish) hintEl.textContent=dish.mode==="fold"
     ? (dish.folds ? "край: внутрь — складка · мах — переворот · на стол — снять · держи — прижим · "+TWIST_HINT
        : (dish.filling && dish.filling.length
-         ? "банан на листе · край внутрь — складка"
-         : "положи банан на середину листа, потом заверни края"))
+         ? "начинка на листе · край внутрь — складка"
+         : "положи банан и яйцо на середину, потом заверни края"))
     : dish.mode==="served" ? "Подано · «следующий роти» — новый кусочек"
     : "Нарезка: проведи через конверт · "+TWIST_HINT;
   const ban=document.getElementById("bananaMode");
   if(ban){
     ban.hidden=!dish || dish.mode!=="fold" || dish.folds>0;
     ban.disabled=!!dishFlight || !!dishMove;
+  }
+  const egg=document.getElementById("eggMode");
+  if(egg){
+    egg.hidden=!dish || dish.mode!=="fold" || dish.folds>0;
+    egg.disabled=!!dishFlight || !!dishMove;
   }
 }
 // Складка — только ВНУТРЬ листа. Раньше линия сгиба строилась по любому сдвигу длиннее
@@ -1727,8 +1777,10 @@ function drawDishSections(g,screen,faces,sx,sy,zk=0,H=null){
       // бруски по краям разрывов).
       if(f.kind==="filling" && !w.cut){ band(bottom,top,dishCookColor(w.stack[0],1,false).map(c=>Math.round(c*.7+62))); bottom=top; continue; }
       if(f.kind==="filling"){
-        // Начинка в срезе — банан в яйце: насыщенно-жёлтая полоса с бледными овалами ломтиков,
-        // чтобы отличаться от мякиша (владелица 17.09: «начинка в резах не видна»).
+        if(f.fill==="egg"){
+          band(bottom,top,EGG_SECTION);
+          bottom=top; continue;
+        }
         band(bottom,top,SECTION_FILL);
         const L=Math.hypot(b.x-a.x,b.y-a.y), n=Math.floor(L/Math.max(6,10*pixel)), hh=(top-bottom)*.32;
         g.fillStyle=rgb(BANANA_FLESH[0]);
@@ -1789,6 +1841,10 @@ function setTilt(t){     // рама с другой камерой; без ра
 const FILL_COLORS = [[236,218,158],[232,213,150],[239,222,166]];
 const SECTION_FILL = [232,176,58];
 const BANANA_FLESH = [[253,234,156],[249,228,146],[254,239,170]], BANANA_RIM = "rgba(196,156,78,.5)", BANANA_SEED = "rgba(128,96,54,.45)";
+const EGG_COLORS = [[252,196,48],[255,210,62],[240,184,40]];
+const EGG_SECTION = [236,178,42];
+const EGG_RIM = "rgba(196,140,28,.55)";
+const EGG_GLOSS = "rgba(255,248,210,.38)";
 // Высота стопки под каждой гранью и верх материала на сетке 48×48. Грани идут снизу
 // вверх; грань поднимается на высоту того, что уже лежит под её центром. Кэш — по массиву
 // граней, как у торца: снимок геометрии неизменяем. zb/zt — настоящие миллиметры (карточка,
@@ -2037,7 +2093,9 @@ function drawDishFaces(g,faces,screen,H,zk,shadow=true,shift=null){
   // Тень конверта на стали и боковая сторона у его края. Отдельные заливки мелких
   // треугольников: один общий путь из тысяч наложенных контуров растеризуется в разы дольше.
   const tone=(f,k)=>{
-    let color=f.kind==="filling" ? FILL_COLORS[Math.round(f.tone)%3] : dishCookColor(f);
+    let color=f.kind==="filling"
+      ? (f.fill==="egg" ? EGG_COLORS[Math.round(f.tone)%3] : FILL_COLORS[Math.round(f.tone)%3])
+      : dishCookColor(f);
     return k===1 ? color : color.map(c=>Math.min(255,c*k));
   };
   const top=(i,off)=>{
@@ -2102,14 +2160,17 @@ function drawDishFaces(g,faces,screen,H,zk,shadow=true,shift=null){
   }
   for(const k of open) paint(k);
   g.globalAlpha=1;
-  if(H && open.length) drawBananaSlices(g,faces,open,screen,H,zk);
+  if(H && open.length){
+    drawEggFilm(g,faces,open,screen,H,zk);
+    drawBananaSlices(g,faces,open,screen,H,zk);
+  }
 }
 // Ломтик поверх открытой порции (порция и есть ломтик): обрезка по её открытым граням и куску
 // стола, чтобы ломтик не лёг на клапан.
 function drawBananaSlices(g,faces,open,screen,H,zk){
   const groups=new Map();
   for(const k of open){
-    const f=faces[k]; if(!f.pc || !(f.pr>0)) continue;
+    const f=faces[k]; if(f.fill==="egg" || !f.pc || !(f.pr>0)) continue;
     // Один кусок стола — один сдвиг: сравниваем точку со сдвигом куска и без него.
     const probe=screen(f.points[0],f), bare=screen(f.points[0]);
     const gk=f.source+"|"+f.turned+"|"+Math.round(probe.x-bare.x)+","+Math.round(probe.y-bare.y);
@@ -2143,6 +2204,43 @@ function drawBananaSlices(g,faces,open,screen,H,zk){
         g.beginPath(); g.ellipse(q.x,q.y-lift,d,d*.7,0,0,Math.PI*2); g.fill();
       }
     }
+    g.restore();
+  }
+}
+function drawEggFilm(g,faces,open,screen,H,zk){
+  const groups=new Map();
+  for(const k of open){
+    const f=faces[k]; if(f.fill!=="egg" || !f.pc || !(f.pr>0)) continue;
+    const probe=screen(f.points[0],f), bare=screen(f.points[0]);
+    const gk=f.source+"|"+f.turned+"|"+Math.round(probe.x-bare.x)+","+Math.round(probe.y-bare.y);
+    if(!groups.has(gk)) groups.set(gk,{f,list:[]});
+    groups.get(gk).list.push(k);
+  }
+  for(const {f,list} of groups.values()){
+    g.save(); g.beginPath();
+    for(const k of list){
+      const ps=faces[k].points, hs=H.vert(k);
+      const p=screen(ps[0],faces[k]); g.moveTo(p.x,p.y-hs[0]*zk);
+      for(let m=1;m<ps.length;m++){ const q=screen(ps[m],faces[k]); g.lineTo(q.x,q.y-hs[m]*zk); }
+      g.closePath();
+    }
+    g.clip();
+    const R=f.pr, c=f.pc, lift=H.at(c)*zk;
+    const ring=[];
+    for(let j=0;j<16;j++){
+      const a=j*Math.PI/8;
+      const wob=0.78+0.22*(0.5+0.5*Math.sin(j*1.7+f.source*0.9));
+      ring.push(screen({x:c.x+Math.cos(a)*R*wob,y:c.y+Math.sin(a)*R*wob},f));
+    }
+    g.beginPath(); g.moveTo(ring[0].x,ring[0].y-lift);
+    for(let j=1;j<ring.length;j++) g.lineTo(ring[j].x,ring[j].y-lift);
+    g.closePath();
+    g.fillStyle=rgb(EGG_COLORS[f.source%3]); g.fill();
+    g.strokeStyle=EGG_RIM; g.lineWidth=Math.max(.6,Math.hypot(ring[0].x-ring[8].x,ring[0].y-ring[8].y)*.035);
+    g.stroke();
+    const hi=screen({x:c.x-R*.22,y:c.y-R*.28},f);
+    const d=Math.max(1.2,Math.hypot(ring[0].x-ring[8].x,ring[0].y-ring[8].y)*.18);
+    g.fillStyle=EGG_GLOSS; g.beginPath(); g.ellipse(hi.x,hi.y-lift,d,d*.55,-.4,0,Math.PI*2); g.fill();
     g.restore();
   }
 }
@@ -2445,10 +2543,16 @@ function renderDishTable(faces,screen,H,zk,W,Hc,s,opts={}){
     R=col[c*3]; G=col[c*3+1]; B=col[c*3+2];
     if(f.kind==="filling" && f.pc && f.pr>0){
       const d=Math.hypot(tu[c]-f.pc.x,tv[c]-f.pc.y)/f.pr;
-      if(d>.84){ R=R*.6+78.4; G=G*.6+62.4; B=B*.6+31.2; }
-      for(let k=0;k<3;k++){ const a=(k*120+f.source*53)*Math.PI/180;
-        if(Math.hypot(tu[c]-f.pc.x-Math.cos(a)*f.pr*.16,tv[c]-f.pc.y-Math.sin(a)*f.pr*.16)<f.pr*.055){ R=R*.55+57.6; G=G*.55+43.2; B=B*.55+24.3; } }
-      stat.fill++;
+      if(f.fill==="egg"){
+        if(d>.82){ R=R*.7+70; G=G*.7+42; B=B*.7+8; }
+        else { R=EGG_SECTION[0]; G=EGG_SECTION[1]; B=EGG_SECTION[2]; }
+        stat.fill++;
+      } else {
+        if(d>.84){ R=R*.6+78.4; G=G*.6+62.4; B=B*.6+31.2; }
+        for(let k=0;k<3;k++){ const a=(k*120+f.source*53)*Math.PI/180;
+          if(Math.hypot(tu[c]-f.pc.x-Math.cos(a)*f.pr*.16,tv[c]-f.pc.y-Math.sin(a)*f.pr*.16)<f.pr*.055){ R=R*.55+57.6; G=G*.55+43.2; B=B*.55+24.3; } }
+        stat.fill++;
+      }
     } else if(cutFace[tf[c]] && nearCut(tu[c],tv[c]) && ncD<rimW && hasFill(c)){
       // полоска начинки: жёлто-яичная с неровными бледными ломтиками вдоль реза, у кромки темнее
       const pu=per*unit, k=Math.floor(ncAlong/pu), hsh=Math.abs(Math.sin(k*12.9898+cutSeed)*43758.5453)%1;
@@ -2494,7 +2598,8 @@ function renderDishTable(faces,screen,H,zk,W,Hc,s,opts={}){
       const zf=b.from*h, zt=b.to*h;
       if(b.f.kind==="filling"){
         const pu=per*unit, ph=((w.along%pu)+pu)%pu/pu-.5, dz=(z-(zf+zt)/2)/Math.max(.5,(zt-zf)/2);
-        c=(ph/.34)**2+(dz/.62)**2<1 ? flesh : FILL; kind="filling";
+        if(b.f.fill==="egg"){ c=EGG_SECTION; kind="filling"; }
+        else { c=(ph/.34)**2+(dz/.62)**2<1 ? flesh : FILL; kind="filling"; }
         stat.wallFill++;
       } else { // корка не толще 40 % полосы, но не тоньше пикселя: иначе на низкой стенке её нет вовсе
         const cw=Math.max(.9,Math.min(cp,.4*(zt-zf)));
@@ -4443,6 +4548,7 @@ function loop(now){
     step(dt);
     audioFrame();
     if (typeof bananaUpdate === "function") bananaUpdate(dt);
+    if (typeof eggUpdate === "function") eggUpdate(dt);
     if (typeof drizzleUpdate === "function") drizzleUpdate(dt);
     draw();
     if (typeof drizzleDraw === "function") drizzleDraw(ctx);

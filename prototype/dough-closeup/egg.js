@@ -1,15 +1,15 @@
-/* banana.js — жест: ломтики банана на открытый лист.
-   Подключается ПОСЛЕ stand.js. Ломтик — настоящая начинка (addBananaSlice):
-   конверт его прячет, на срезе видна мякоть.
+/* egg.js — жест: яйцо на открытый лист.
+   Подключается ПОСЛЕ banana.js. Лужица — настоящая начинка (addEgg):
+   конверт прячет, на срезе жёлтая полоса.
 
-   На открытом листе (folds=0) середина кладёт кружки, край по-прежнему
-   складывает. После первой складки жест гаснет.
+   Кнопка #eggMode. Середина листа льёт, край складывает.
+   С бананом взаимно исключается.
 */
 
 "use strict";
-window.__bananaBoot = 1;
+window.__eggBoot = 1;
 
-const BANANA_EDGE = 0.30;   // дальше — середина (как zone middle в stand.js)
+const EGG_EDGE = 0.30;
 
 let _modeOn     = false;
 let _userOff    = false;
@@ -18,27 +18,27 @@ let _captureId  = null;
 let _last       = null;
 let _remembered = false;
 
-Object.defineProperty(window, "bananaModeOn",
+Object.defineProperty(window, "eggModeOn",
   { get: () => _modeOn, configurable: true });
 
-function bananaReset() {
+function eggReset() {
   _modeOn = false; _userOff = false; _active = false; _captureId = null;
   _last = null; _remembered = false;
   _syncButton();
 }
 
-function bananaUpdate() {
-  if (typeof canPlaceBanana !== "function") return;
-  if (canPlaceBanana()) {
-    if (!_userOff && !_modeOn && !window.eggModeOn) _modeOn = true;
+function eggUpdate() {
+  if (typeof canPlaceEgg !== "function") return;
+  if (canPlaceEgg()) {
+    /* яйцо не включается само — сначала банан, яйцо по кнопке */
   } else if (_modeOn) {
     _modeOn = false; _userOff = false; _active = false; _captureId = null; _last = null;
   }
   _syncButton();
 }
 
-function _inBananaPhase() {
-  return _modeOn && typeof canPlaceBanana === "function" && canPlaceBanana();
+function _inEggPhase() {
+  return _modeOn && typeof canPlaceEgg === "function" && canPlaceEgg();
 }
 
 function _ui(e) {
@@ -67,15 +67,15 @@ function _hullDist(p) {
 
 function _isMiddle(p) {
   if (typeof onMaterial === "function" && !onMaterial(p)) return false;
-  return _hullDist(p) > BANANA_EDGE;
+  return _hullDist(p) > EGG_EDGE;
 }
 
 function _place(e) {
-  if (typeof addBananaSlice !== "function") return;
+  if (typeof addEgg !== "function") return;
   const p = _local(e);
   if (!_isMiddle(p)) return;
-  if (_last && Math.hypot(p.x - _last.x, p.y - _last.y) < 0.045) return;
-  const ok = addBananaSlice(p.x, p.y, { silent: true });
+  if (_last && Math.hypot(p.x - _last.x, p.y - _last.y) < 0.028) return;
+  const ok = addEgg(p.x, p.y, { silent: true });
   if (ok) {
     _last = p;
     if (typeof dish !== "undefined" && dish && dish.message) {
@@ -86,7 +86,7 @@ function _place(e) {
 }
 
 function _onDown(e) {
-  if (!_inBananaPhase() || _ui(e)) return;
+  if (!_inEggPhase() || _ui(e)) return;
   if (e.button != null && e.button !== 0) return;
   if (_active) return;
   const p = _local(e);
@@ -119,9 +119,9 @@ function _onUp(e) {
 }
 
 function _setMode(on) {
-  if (on && typeof canPlaceBanana === "function" && !canPlaceBanana()) {
+  if (on && typeof canPlaceEgg === "function" && !canPlaceEgg()) {
     const live = document.getElementById("live");
-    if (live) live.textContent = "банан — на открытый лист, до складки";
+    if (live) live.textContent = "яйцо — на открытый лист, до складки";
     _modeOn = false;
     _userOff = true;
     _syncButton();
@@ -131,31 +131,31 @@ function _setMode(on) {
   _userOff = !_modeOn;
   if (!_modeOn) { _active = false; _captureId = null; _last = null; }
   _syncButton();
-  if (_modeOn && typeof setEggMode === "function" && window.eggModeOn) setEggMode(false);
+  if (_modeOn && typeof setBananaMode === "function" && window.bananaModeOn) setBananaMode(false);
   const live = document.getElementById("live");
-  if (_modeOn && live) live.textContent = "середина листа — ломтики · край — складка";
+  if (_modeOn && live) live.textContent = "середина листа — яйцо · край — складка";
 }
 
 function _syncButton() {
-  const b = document.getElementById("bananaMode");
+  const b = document.getElementById("eggMode");
   if (!b) return;
-  const can = typeof canPlaceBanana === "function" && canPlaceBanana();
+  const can = typeof canPlaceEgg === "function" && canPlaceEgg();
   b.hidden = !can && !_modeOn;
   b.disabled = !can;
   b.classList.toggle("on", _modeOn);
-  b.textContent = _modeOn ? "банан ✓" : "банан";
+  b.textContent = _modeOn ? "яйцо ✓" : "яйцо";
 }
 
-window.setBananaMode = _setMode;
-window.bananaUpdate = bananaUpdate;
-window.bananaReset = bananaReset;
+window.setEggMode = _setMode;
+window.eggUpdate = eggUpdate;
+window.eggReset = eggReset;
 
 (function hookReset() {
   if (typeof reset === "function") {
     const orig = reset;
-    if (orig._bananaReset) return;
-    const wrapped = function () { bananaReset(); return orig.apply(this, arguments); };
-    wrapped._bananaReset = true;
+    if (orig._eggReset) return;
+    const wrapped = function () { eggReset(); return orig.apply(this, arguments); };
+    wrapped._eggReset = true;
     window.reset = wrapped;
   } else {
     window.addEventListener("load", hookReset);
@@ -165,9 +165,9 @@ window.bananaReset = bananaReset;
 (function hookStandInput() {
   function wrap(name) {
     const orig = window[name];
-    if (typeof orig !== "function" || orig._bananaWrap) return false;
+    if (typeof orig !== "function" || orig._eggWrap) return false;
     const wrapped = function (id, cx, cy, t) {
-      if (name === "onDown" && _inBananaPhase() && typeof toLocal === "function") {
+      if (name === "onDown" && _inEggPhase() && typeof toLocal === "function") {
         const table = toLocal(cx, cy);
         const local = typeof dishLocal === "function" ? dishLocal(table) : table;
         if (_isMiddle(local)) return;
@@ -175,7 +175,7 @@ window.bananaReset = bananaReset;
       if (name !== "onDown" && _active) return;
       return orig.apply(this, arguments);
     };
-    wrapped._bananaWrap = true;
+    wrapped._eggWrap = true;
     window[name] = wrapped;
     return true;
   }
@@ -204,7 +204,7 @@ window.bananaReset = bananaReset;
     };
   }
   window.addEventListener("touchstart", e => {
-    if (!_inBananaPhase() || _ui(e) || _active) return;
+    if (!_inEggPhase() || _ui(e) || _active) return;
     const t = e.changedTouches[0];
     if (t) _onDown(touchFake(e, t));
   }, { capture: true, passive: false });
@@ -223,9 +223,9 @@ window.bananaReset = bananaReset;
 
 (function buildBtn() {
   function bind() {
-    const b = document.getElementById("bananaMode");
-    if (!b || b._bananaBound) return;
-    b._bananaBound = true;
+    const b = document.getElementById("eggMode");
+    if (!b || b._eggBound) return;
+    b._eggBound = true;
     b.addEventListener("click", () => _setMode(!_modeOn));
   }
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", bind);
