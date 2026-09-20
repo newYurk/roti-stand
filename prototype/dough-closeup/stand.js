@@ -878,25 +878,42 @@ function cookDish(dt){
   updatePanPress(dt);
   updateDomes(dt);
   updateFat(dt);
-  // Быстрый путь: без прижима, куполов и жира — прежние приводы без перерасчёта.
   const D=panModsActive() && dish.heatTable ? moddedDrives() : dish;
   for(let i=0;i<dish.thermal.length;i++){
     const t=dish.thermal[i]; if(!t) continue;
-    // Толще листа-эталона — сохнет медленнее, тоньше — быстрее (время сушки ∝ толщине, §1).
     const thin=Math.max(.25,Math.min(2.5,SHEET_REF_MM/Math.max(.05,doughMM(t.tone))));
     for(let side=0;side<2;side++){
-      // Сторона сначала сохнет, и только потом набирает цвет — как было для листа целиком.
       if(t.dry[side]<1) t.dry[side]=Math.min(1,t.dry[side]+dt*DRY_RATE*D.dryDrive[i][side]*thin);
-      else t.cook[side]+=dt*COOK_RATE*D.cookDrive[i][side];
+      // Пятна начинаются ещё на гибком листе (dry≥0,5), полная скорость — после сушки.
+      const ready=t.dry[side]>=1 ? 1 : t.dry[side]>=.45 ? Math.max(.4, t.dry[side]) : 0;
+      if(ready) t.cook[side]+=dt*COOK_RATE*D.cookDrive[i][side]*ready;
     }
   }
-  // Время на таве по «сеансам»: посадка и каждый переворот открывают новый. Золото низа
-  // (средний цвет прижатых сторон 0,4) — ответ на вопрос бюджета 30–60 с (#21).
   if(dish.sessions){
     dish.panTime=(dish.panTime||0)+dt;
     const cur=dish.sessions[dish.sessions.length-1];
     if(cur.gold===null && dishSideMean("cook","contactWeights")>=0.4) cur.gold=dish.panTime-cur.start;
   }
+  if(!(typeof bananaModeOn!=="undefined" && bananaModeOn) && !(typeof eggModeOn!=="undefined" && eggModeOn)){
+    if(dish.folds || dish.flips || (dish.filling&&dish.filling.length)){
+      const h=fryHint();
+      if(h && dish.message!==h){
+        dish.message=h;
+        const live=document.getElementById("live");
+        if(live) live.textContent=h;
+      }
+    }
+  }
+}
+function fryHint(){
+  const mc=dishSideMean("cook","contactWeights"), md=dishSideMean("dry","contactWeights");
+  const up=dishSideMean("cook","topWeights");
+  if(up>=0.18 && mc<0.25) return "золотой верх · низ дожаривается";
+  if(md<0.4) return "шипит · схватывается";
+  if(mc<0.1) return "низ подсыхает · держи на таве";
+  if(mc<0.35) return "золото снизу · переверни";
+  if(up<0.2) return "низ золотой · переверни — увидишь";
+  return "жарится · ещё сторона или к нарезке";
 }
 // Среднее по сторонам с весами: contactWeights — то, что лежит на стали (звук и «низ»),
 // topWeights — то, что открыто сверху и видно игроку («верх»).
@@ -929,10 +946,17 @@ function dishCookColor(f,side,through=true){
   const t=dish.thermal && dish.thermal[f.source];
   if(!t) return cookColor(base,0);
   if(side===undefined) side=f.turned ? 0 : 1;           // видна верхняя сторона грани
-  const own=cookColor(base,t.cook[side]);
-  if(!through || SHOW_THROUGH<=0) return own;
-  const w=Math.max(0,Math.min(1,1-t.tone))*SHOW_THROUGH;
-  return lerp3(own,cookColor(base,t.cook[1-side]),w);
+  const spot=0.55+0.8*(t.contact||1);
+  const vis=t.cook[side]*spot;
+  const own=cookColor(base, vis);
+  if(through===false) return own;
+  // Тонкий лист: жар той стороны, что на стали, просвечивает, пока верх сырой.
+  // Старый ползунок SHOW_THROUGH=0 прятал жарку целиком (владелица 20.09: «держи — видно»).
+  const down=f.turned ? 1 : 0;
+  const bot=t.cook[down]*spot;
+  if(bot<=vis+0.02) return own;
+  const w=Math.min(0.8, 0.42+bot);
+  return lerp3(own, cookColor(base, bot), w);
 }
 
 function foldGeometry(anchor,end){
@@ -2126,8 +2150,8 @@ function drawDishFaces(g,faces,screen,H,zk,shadow=true,shift=null){
     // Корочка низа по краю: нижняя полоса стенки — цвет стороны на стали. Так жарку снизу видно
     // сверху, как продавец смотрит на кромку (владелица 17.09: «держала долго — ничего не поджарилось»).
     for(const i of crust){
-      const f=faces[i], hs=H.vert(i), band=hs.map(h=>Math.min(h,Math.max(1.8/Math.max(zk,1e-6),.4*h)));
-      g.fillStyle=rgb(dishCookColor(f,f.turned ? 1 : 0,false).map(c=>c*.86));
+      const f=faces[i], hs=H.vert(i), band=hs.map(h=>Math.min(h,Math.max(2.2/Math.max(zk,1e-6),.55*h)));
+      g.fillStyle=rgb(dishCookColor(f,f.turned ? 1 : 0,false));
       drawFaceWalls(g,f.points,faceScreen(f),band,zk);
     }
   }
@@ -2137,7 +2161,8 @@ function drawDishFaces(g,faces,screen,H,zk,shadow=true,shift=null){
     const f=faces[k];
     // Открытая начинка без светотени купола: это плоская россыпь ломтиков, а не горка.
     const flat=H && f.kind==="filling" && H.exposed(k);
-    g.fillStyle=rgb(tone(f,H && !flat ? (turn && H.lightAtAngle ? H.lightAtAngle(k,turn) : H.lightAt(k)) : 1));
+    const lit=H && !flat ? (turn && H.lightAtAngle ? H.lightAtAngle(k,turn) : H.lightAt(k)) : 1;
+    g.fillStyle=rgb(tone(f, f.kind==="filling" ? 1 : Math.max(.88, lit)));
     g.globalAlpha=f.kind==="filling" ? 1
       : H ? Math.min(.95,.72+doughMM(f.tone)*.3)
       : Math.max(.48,Math.min(.92,.48+doughMM(f.tone)*.3));
@@ -4291,7 +4316,7 @@ function quant(t){ return PAL[Math.max(0,Math.min(15, Math.round(t*15)))]; }
 // сырое → золотистое → коричневое → тёмное. Тёмное — не провал (см. docs/frying-mechanics.md).
 const PAN_BG_DEFAULT = [66, 58, 48];
 function panBg(){ return PAN_UNDER || PAN_BG_DEFAULT; }
-const GOLD = [232,196,110], BROWN = [196,128,52], DARK = [122,66,26], CHAR = [62,34,16];
+const GOLD = [214,132,38], BROWN = [168,86,28], DARK = [118,58,22], CHAR = [58,32,14];
 function lerp3(a, b, k){ return [ a[0]+(b[0]-a[0])*k, a[1]+(b[1]-a[1])*k, a[2]+(b[2]-a[2])*k ]; }
 function mixOn(t, bg){
   const k = 0.14 + Math.pow(Math.max(0,Math.min(1,t)), 0.85) * 0.86;
@@ -4299,10 +4324,10 @@ function mixOn(t, bg){
 }
 function cookColor(base, c){
   if(c <= 0) return base;
-  if(c < 0.4) return lerp3(base, GOLD, c/0.4);
-  if(c < 0.8) return lerp3(GOLD, BROWN, (c-0.4)/0.4);
-  if(c < 1.2) return lerp3(BROWN, DARK, (c-0.8)/0.4);
-  return lerp3(DARK, CHAR, Math.min(1, (c-1.2)/0.5));
+  if(c < 0.18) return lerp3(base, GOLD, Math.min(1, Math.sqrt(c/0.10)));
+  if(c < 0.55) return lerp3(GOLD, BROWN, (c-0.18)/0.37);
+  if(c < 1.0) return lerp3(BROWN, DARK, (c-0.55)/0.45);
+  return lerp3(DARK, CHAR, Math.min(1, (c-1.0)/0.5));
 }
 const rgb = (c)=>`rgb(${Math.round(c[0])},${Math.round(c[1])},${Math.round(c[2])})`;
 const palPan = new Map();   // 16 ступеней толщины × 16 ступеней прожарки — для пиксельных вариантов
