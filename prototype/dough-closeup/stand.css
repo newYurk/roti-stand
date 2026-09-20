@@ -63,7 +63,8 @@
   /* Игровой стенд (владелица 19.09): приборы замера и стрелки шага не показываем.
      Узлы остаются в DOM — stand.js к ним обращается. */
   #gZ, #gView, #gTune, #gCond, #gFry, #gPress, #gThrough,
-  #stats, #mini, #toolsBtn, #hardReload, #gStepNav { display:none !important; }
+  #stats, #mini, #toolsBtn, #hardReload, #gStepNav,
+  #serveDish, #card { display:none !important; }
   /* Значок предпросмотра ветки: его заполняет только локальный сервер предпросмотра
      (/__preview.json). На Pages адреса нет, и значок остаётся скрытым. */
   #previewBadge{ position:absolute; left:6px; bottom:6px; max-width:calc(100% - 12px);

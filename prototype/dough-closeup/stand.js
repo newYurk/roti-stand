@@ -946,30 +946,18 @@ function dishCard(){
     sessions:(dish.sessions||[]).map(x=>x.gold===null ? "—" : typeof x.gold==="string" ? x.gold : Math.round(x.gold)+" с") };
 }
 function serveDish(){
+  // Карточка и кнопка убраны (владелица 20.09): черновик с неверной сводкой.
+  // След остаётся в дампе, блюдо на столе не блокируется.
+  if(!dish || dishMove || dishGesture) return false;
   if(dishTwist) endTwist(false);
-  if(!dish || dish.mode!=="cut" || dishMove || dishGesture) return false;
-  const c=dishCard(), f=v=>v.toFixed(2).replace(".",",");
-  dish.mode="served"; dish.card=c; servedCount++;
+  const c=dishCard();
+  servedCount++;
   try{ localStorage.setItem("dough_served", String(servedCount)); }catch(e){}
   gestures.push({ ...measurementContext(), kind:"serve", n:servedCount, ...c, ts:new Date().toISOString() });
   if(gestures.length>200) gestures.shift();
   try{ localStorage.setItem("dough_gestures", JSON.stringify(gestures)); }catch(e){}
-  const lines=[
-    `Роти №${servedCount} подано`,
-    `Складок ${c.folds} · переворотов ${c.flips} · резов ${c.cuts}`,
-    `Снизу ${c.bottomWord} (${f(c.bottom)}) · сверху ${c.topWord} (${f(c.top)})`,
-    `На таве ${c.panSeconds} с`,
-    `Золото низа по сеансам: ${c.sessions.join(" / ")}`,
-    `Банан: ${c.portions} ломт. · ${c.holes ? `рваный узор, ${c.holes} яч.` : "без дырок"}`,
-    `Толщина конверта до ${String(c.thickMM).replace(".",",")} мм · край ${c.crispWord}`,
-  ];
-  if(!c.folds) lines.push("Не сложено");
-  else if(c.top<.05) lines.push("Верх не прожарен — конверт не переворачивали");
-  if(!c.cuts) lines.push("Не нарезано");
-  lines.push("", "черновик карточки стенда · что помнит след — ещё не решено (#50)");
-  document.getElementById("cardBody").textContent=lines.join("\n");
-  document.getElementById("card").hidden=false;
-  dish.message="Подано";
+  const card=document.getElementById("card");
+  if(card) card.hidden=true;
   syncDishUI(); return true;
 }
 function nextRoti(){
@@ -1223,7 +1211,9 @@ function syncDishUI(){
   cut.disabled=cut.disabled || !!dishFlight || !!dishMove;
   document.getElementById("undoDish").disabled=!dish || !dish.history.length || !!dishFlight || dish.mode==="served";
   const serve=document.getElementById("serveDish");
-  if(serve){ serve.hidden=!dish || dish.mode==="fold"; serve.disabled=!dish || dish.mode!=="cut" || !!dishMove; }
+  if(serve) serve.hidden=true;
+  const card=document.getElementById("card");
+  if(card) card.hidden=true;
   const flip=document.getElementById("flipDish");
   if(flip) flip.disabled=!dish || dish.mode!=="fold" || !!dishFlight;
   const served=!!dish && dish.mode==="served";
@@ -1234,7 +1224,7 @@ function syncDishUI(){
          ? "банан на листе · край внутрь — складка"
          : "положи банан на середину листа, потом заверни края"))
     : dish.mode==="served" ? "Подано · «следующий роти» — новый кусочек"
-    : "Нарезка: проведи через конверт · "+TWIST_HINT+" · «подать» — когда готово";
+    : "Нарезка: проведи через конверт · "+TWIST_HINT;
   const ban=document.getElementById("bananaMode");
   if(ban){
     ban.hidden=!dish || dish.mode!=="fold" || dish.folds>0;

@@ -428,15 +428,7 @@ function _ensureCardLine() {
 }
 
 function _updateServe() {
-  const btn = document.getElementById("serveDish");
-  if (!btn) return;
-  const ok = _coverage >= DRIZZLE_COVERAGE;
-  if (ok && !btn.hidden) btn.disabled = false;
-  if (ok && !btn._drizzleTip) {
-    btn._drizzleTip = true;
-    const live = document.getElementById("live");
-    if (live) live.textContent = "Сгущёнка налита · нажми «подать»";
-  }
+  // Кнопка «подать» скрыта — покрытие только в дамп, без подсказки про подачу.
 }
 
 function _syncButton() {
