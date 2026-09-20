@@ -1056,7 +1056,17 @@ function cutDish(a,b){
     for(const [ex,ey,offset] of edges){
       if(!inside.length) break;
       const outside=clipPoly(inside,ex,ey,offset,false);
-      if(outside.length) faces.push({...f,points:outside});
+      if(outside.length){
+        const next={...f,points:outside};
+        // Осколок начинки по ту сторону реза больше не тот же диск: pc в щели рисовал
+        // «выпавшую» монету. Оставляем диск, только если центр ещё на этом куске.
+        if(f.kind==="filling" && f.pc && f.pr>0 && !pointInFace(outside,f.pc.x,f.pc.y)){
+          let cx=0,cy=0; for(const p of outside){ cx+=p.x; cy+=p.y; }
+          cx/=outside.length; cy/=outside.length;
+          if(Math.hypot(cx-f.pc.x,cy-f.pc.y)>f.pr){ next.pc=undefined; next.pr=0; }
+        }
+        faces.push(next);
+      }
       inside=clipPoly(inside,ex,ey,offset);
     }
     if(inside.length) removed+=polyArea(inside);
@@ -1637,23 +1647,73 @@ function dishPieces(faces){
   if(cache.has(faces)) return cache.get(faces);
   const parent=faces.map((_,i)=>i);
   const find=i=>{ while(parent[i]!==i){ parent[i]=parent[parent[i]]; i=parent[i]; } return i; };
-  const key=p=>Math.round(p.x*1e7)+","+Math.round(p.y*1e7);
+  const unite=(a,b)=>{ a=find(a); b=find(b); if(a!==b) parent[a]=b; };
+  // 1e5, не 1e7: после клипа реза общие вершины расходятся на 1e-6, и один кусок
+  // распадался на крошки, которые не ехали со своими.
+  const key=p=>Math.round(p.x*1e5)+","+Math.round(p.y*1e5);
   const edges=new Map();
+  const doughIdx=[];
   faces.forEach((f,i)=>{
     if(f.kind!=="dough") return;
+    doughIdx.push(i);
     const ps=f.points;
     for(let j=0;j<ps.length;j++){
       const a=key(ps[j]), b=key(ps[(j+1)%ps.length]), k=a<b ? a+"/"+b : b+"/"+a;
-      const o=edges.get(k); if(o===undefined) edges.set(k,i); else parent[find(i)]=find(o);
+      const o=edges.get(k); if(o===undefined) edges.set(k,i); else unite(i,o);
     }
   });
+  // Слои конверта занимают одно место на столе и не делят ребро — только перекрытие.
+  // Щель реза их уже развела, поэтому два берега не склеятся.
+  const cents=new Array(faces.length), bb=new Array(faces.length);
+  const cell=0.06, grid=new Map();
+  const gkey=(x,y)=>((x/cell)|0)+","+((y/cell)|0);
+  for(const i of doughIdx){
+    const ps=faces[i].points; let cx=0,cy=0,x0=Infinity,x1=-Infinity,y0=Infinity,y1=-Infinity;
+    for(const p of ps){ cx+=p.x; cy+=p.y; if(p.x<x0)x0=p.x; if(p.x>x1)x1=p.x; if(p.y<y0)y0=p.y; if(p.y>y1)y1=p.y; }
+    cents[i]={x:cx/ps.length,y:cy/ps.length}; bb[i]={x0,x1,y0,y1};
+    const k=gkey(cents[i].x,cents[i].y), b=grid.get(k); if(b) b.push(i); else grid.set(k,[i]);
+  }
+  for(const i of doughIdx){
+    const c=cents[i], gx=(c.x/cell)|0, gy=(c.y/cell)|0;
+    for(let dx=-1;dx<=1;dx++) for(let dy=-1;dy<=1;dy++){
+      const bucket=grid.get((gx+dx)+","+(gy+dy)); if(!bucket) continue;
+      for(const j of bucket){
+        if(j<=i || find(i)===find(j)) continue;
+        if(pointInFace(faces[j].points,c.x,c.y)||pointInFace(faces[i].points,cents[j].x,cents[j].y))
+          unite(i,j);
+      }
+    }
+  }
   const piece=new Array(faces.length).fill(-1);
   faces.forEach((f,i)=>{ if(f.kind==="dough") piece[i]=find(i); });
-  // Начинка — кусок того теста, на котором лежит её центр.
+  // Начинка едет с тестом, на котором лежит. Центр осколка часто падает в щель реза —
+  // тогда кусок банана оставался на столе, а тесто уезжало.
   faces.forEach((f,i)=>{
     if(f.kind==="dough") return;
-    let cx=0,cy=0; for(const p of f.points){ cx+=p.x; cy+=p.y; } cx/=f.points.length; cy/=f.points.length;
-    for(let j=0;j<faces.length;j++) if(faces[j].kind==="dough" && pointInFace(faces[j].points,cx,cy)){ piece[i]=piece[j]; break; }
+    const ps=f.points; let x0=Infinity,x1=-Infinity,y0=Infinity,y1=-Infinity;
+    for(const p of ps){ if(p.x<x0)x0=p.x; if(p.x>x1)x1=p.x; if(p.y<y0)y0=p.y; if(p.y>y1)y1=p.y; }
+    const votes=new Map();
+    const gx=( (x0+x1)/2/cell )|0, gy=( (y0+y1)/2/cell )|0;
+    for(let dx=-2;dx<=2;dx++) for(let dy=-2;dy<=2;dy++){
+      const bucket=grid.get((gx+dx)+","+(gy+dy)); if(!bucket) continue;
+      for(const j of bucket){
+        const b=bb[j]; if(x1<b.x0||x0>b.x1||y1<b.y0||y0>b.y1) continue;
+        let n=0; for(const p of ps) if(pointInFace(faces[j].points,p.x,p.y)) n++;
+        if(n) votes.set(piece[j], (votes.get(piece[j])||0)+n);
+      }
+    }
+    let best=-1, n=0;
+    for(const [id,c] of votes) if(c>n){ n=c; best=id; }
+    if(best<0){
+      let cx=0,cy=0; for(const p of ps){ cx+=p.x; cy+=p.y; }
+      cx/=ps.length; cy/=ps.length;
+      let bd=Infinity;
+      for(const j of doughIdx){
+        const d=Math.hypot(cents[j].x-cx,cents[j].y-cy);
+        if(d<bd){ bd=d; best=piece[j]; }
+      }
+    }
+    piece[i]=best;
   });
   cache.set(faces,piece); return piece;
 }
@@ -1671,7 +1731,7 @@ function dishPieceShift(faces){
       if(f.kind!=="dough") return;
       for(const p of f.points){
         const along=(p.x-c.a.x)*ux+(p.y-c.a.y)*uy, across=(p.x-c.a.x)*-uy+(p.y-c.a.y)*ux;
-        if(along<-1e-6 || along>len+1e-6 || Math.abs(Math.abs(across)-c.width/2)>1e-6) continue;
+        if(along<-1e-4 || along>len+1e-4 || Math.abs(Math.abs(across)-c.width/2)>c.width*0.35) continue;
         let m=touch.get(piece[i]); if(!m) touch.set(piece[i],m=new Map());
         m.set(ci,(m.get(ci)||0)|(across>0 ? 1 : 2));
       }
