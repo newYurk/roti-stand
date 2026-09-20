@@ -4,8 +4,11 @@
 
    Кнопка #eggMode. Середина листа льёт, край складывает.
    С бананом взаимно исключается.
-*/
 
+   IIFE: иначе let _modeOn совпадает с drizzle.js/banana.js и скрипт не стартует
+   на GitHub Pages (classic scripts, общий лексический скоуп).
+*/
+(function () {
 "use strict";
 window.__eggBoot = 1;
 
@@ -230,4 +233,5 @@ window.eggReset = eggReset;
   }
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", bind);
   else bind();
+})();
 })();

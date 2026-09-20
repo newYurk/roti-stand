@@ -4,8 +4,11 @@
 
    На открытом листе (folds=0) середина кладёт кружки, край по-прежнему
    складывает. После первой складки жест гаснет.
-*/
 
+   IIFE: иначе let _modeOn в banana/egg/drizzle дерутся в одном глобальном
+   скоупе classic-скриптов (GitHub Pages), и banana.js молча не стартует.
+*/
+(function () {
 "use strict";
 window.__bananaBoot = 1;
 
@@ -232,4 +235,5 @@ window.bananaReset = bananaReset;
   }
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", bind);
   else bind();
+})();
 })();
