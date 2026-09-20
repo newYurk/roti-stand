@@ -35,6 +35,7 @@ let _captureId    = null;
 let _trails       = [];
 let _currentTrail = null;
 let _drops        = [];
+let _falls        = [];
 let _coverage     = 0;
 let _samples      = [];
 let _coast        = null;
@@ -47,7 +48,7 @@ Object.defineProperty(window, "drizzleModeOn",
 
 function drizzleReset() {
   _modeOn = false; _active = false; _captureId = null;
-  _trails = []; _currentTrail = null; _drops = []; _coverage = 0;
+  _trails = []; _currentTrail = null; _drops = []; _falls = []; _coverage = 0;
   _samples = []; _coast = null; _cardDone = false;
   const body = document.getElementById("cardBody");
   if (body) delete body.dataset.drizzle;
@@ -70,9 +71,17 @@ function drizzleUpdate(dt) {
       _coast.x += _coast.vx * dt;
       _coast.y += _coast.vy * dt;
       _stamp(_currentTrail, _coast.x, _coast.y, sp);
-      if (Math.random() < 0.08) _bead(_coast.x, _coast.y, pan);
     }
   }
+
+  const g = typeof PAN_R === "number" ? PAN_R * 2.4 : 200;
+  for (const d of _falls) {
+    d.t += dt;
+    d.vy += g * dt;
+    d.y += d.vy * dt;
+    d.a = Math.max(0, d.a0 * (1 - d.t / d.life));
+  }
+  if (_falls.length) _falls = _falls.filter(d => d.t < d.life && d.a > 0.02);
 
   for (const t of _trails) {
     if (t.settling && t.wet > STAIN_WET) {
@@ -91,59 +100,123 @@ function drizzleUpdate(dt) {
 }
 
 function drizzleDraw(ctx) {
-  if (!_trails.length && !_drops.length) return;
+  if (!_trails.length && !_drops.length && !_falls.length) return;
   const tilt = typeof TILT === "number" ? TILT : 0.56;
   ctx.save();
   ctx.lineJoin = "round";
   ctx.lineCap = "round";
   for (const trail of _trails) {
-    const pts = trail.pts;
-    if (!pts.length) continue;
-    let wAvg = 0;
-    for (const p of pts) wAvg += p.w;
-    wAvg /= pts.length;
-    const rimW = Math.max(12, wAvg * 2.6);
-    const fillW = Math.max(8, wAvg * 1.9);
-    ctx.globalAlpha = Math.min(1, trail.wet + 0.18);
-    ctx.beginPath();
-    for (let i = 0; i < pts.length; i++) {
-      const sx = _px(pts[i].x, pts[i].y), sy = _py(pts[i].x, pts[i].y);
-      if (i === 0) ctx.moveTo(sx, sy); else ctx.lineTo(sx, sy);
-    }
-    if (pts.length === 1) {
-      const sx = _px(pts[0].x, pts[0].y), sy = _py(pts[0].x, pts[0].y);
-      ctx.fillStyle = DRIZZLE_COLOR_RIM;
-      ctx.beginPath();
-      ctx.ellipse(sx, sy, rimW * 0.5, rimW * 0.5 * tilt, 0, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.fillStyle = DRIZZLE_COLOR_FILL;
-      ctx.beginPath();
-      ctx.ellipse(sx, sy, fillW * 0.5, fillW * 0.5 * tilt, 0, 0, Math.PI * 2);
-      ctx.fill();
-    } else {
-      ctx.strokeStyle = DRIZZLE_COLOR_RIM;
-      ctx.lineWidth = rimW;
-      ctx.stroke();
-      ctx.strokeStyle = DRIZZLE_COLOR_FILL;
-      ctx.lineWidth = fillW;
-      ctx.stroke();
-      if (trail.wet > 0.88) {
-        ctx.globalAlpha = (trail.wet - 0.88) * 2.8;
-        ctx.strokeStyle = DRIZZLE_COLOR_WET;
-        ctx.lineWidth = Math.max(3, fillW * 0.35);
-        ctx.stroke();
-      }
-    }
+    const runs = _runs(trail.pts);
+    ctx.globalAlpha = Math.min(1, trail.wet + 0.12);
+    for (const run of runs) _strokeRun(ctx, run, tilt);
   }
   for (const d of _drops) {
+    const s = _screen(d.x, d.y, d.face);
+    if (!s) continue;
     ctx.globalAlpha = d.alpha;
     ctx.fillStyle = DRIZZLE_COLOR_DROP;
+    ctx.beginPath();
+    ctx.ellipse(s.x, s.y, Math.max(d.r, 2), Math.max(d.r, 2) * tilt, 0, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  for (const d of _falls) {
+    ctx.globalAlpha = d.a;
+    ctx.fillStyle = DRIZZLE_COLOR_FILL;
     const sx = _px(d.x, d.y), sy = _py(d.x, d.y);
     ctx.beginPath();
-    ctx.ellipse(sx, sy, Math.max(d.r, 3), Math.max(d.r, 3) * tilt, 0, 0, Math.PI * 2);
+    ctx.ellipse(sx, sy, d.r, d.r * tilt * 1.6, 0, 0, Math.PI * 2);
     ctx.fill();
   }
   ctx.globalAlpha = 1;
+  ctx.restore();
+}
+
+function _shiftOf(face) {
+  if (typeof dish === "undefined" || !dish || typeof pieceShiftLive !== "function") return { x: 0, y: 0 };
+  const f = dish.faces[face];
+  const sh = pieceShiftLive(dish.faces);
+  return (f && sh && sh.get(f)) || { x: 0, y: 0 };
+}
+
+function _tableFromLocal(mx, my, face) {
+  const o = _shiftOf(face);
+  let p = { x: mx + o.x, y: my + o.y };
+  if (typeof dishTwist !== "undefined" && dishTwist && typeof rotAbout === "function")
+    p = rotAbout(p, dishTwist.pivot, Math.cos(dishTwist.angle), Math.sin(dishTwist.angle));
+  const pose = typeof dishPose === "function" ? dishPose() : { x: 0, y: 0, scale: 1 };
+  return { x: pose.x + p.x * pose.scale, y: pose.y + p.y * pose.scale };
+}
+
+function _screen(mx, my, face) {
+  const t = _tableFromLocal(mx, my, face);
+  return { x: _px(t.x, t.y), y: _py(t.x, t.y) };
+}
+
+function _runs(pts) {
+  const out = [];
+  let cur = [];
+  for (const p of pts) {
+    if (!p || p.break) {
+      if (cur.length) out.push(cur);
+      cur = [];
+      continue;
+    }
+    if (cur.length && cur[0].face !== p.face) {
+      out.push(cur);
+      cur = [];
+    }
+    cur.push(p);
+  }
+  if (cur.length) out.push(cur);
+  return out;
+}
+
+function _clipFace(ctx, face) {
+  if (typeof dish === "undefined" || !dish || !dish.faces[face]) return false;
+  const f = dish.faces[face];
+  if (!f.points || f.points.length < 3) return false;
+  ctx.beginPath();
+  for (let i = 0; i < f.points.length; i++) {
+    const s = _screen(f.points[i].x, f.points[i].y, face);
+    if (i === 0) ctx.moveTo(s.x, s.y); else ctx.lineTo(s.x, s.y);
+  }
+  ctx.closePath();
+  ctx.clip();
+  return true;
+}
+
+function _strokeRun(ctx, run, tilt) {
+  if (!run.length) return;
+  let wAvg = 0;
+  for (const p of run) wAvg += p.w;
+  wAvg /= run.length;
+  const rimW = Math.max(4, wAvg * 2.05);
+  const fillW = Math.max(2.5, wAvg * 1.45);
+  ctx.save();
+  _clipFace(ctx, run[0].face);
+  if (run.length === 1) {
+    const s = _screen(run[0].x, run[0].y, run[0].face);
+    ctx.fillStyle = DRIZZLE_COLOR_RIM;
+    ctx.beginPath();
+    ctx.ellipse(s.x, s.y, rimW * 0.5, rimW * 0.5 * tilt, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = DRIZZLE_COLOR_FILL;
+    ctx.beginPath();
+    ctx.ellipse(s.x, s.y, fillW * 0.5, fillW * 0.5 * tilt, 0, 0, Math.PI * 2);
+    ctx.fill();
+  } else {
+    ctx.beginPath();
+    for (let i = 0; i < run.length; i++) {
+      const s = _screen(run[i].x, run[i].y, run[i].face);
+      if (i === 0) ctx.moveTo(s.x, s.y); else ctx.lineTo(s.x, s.y);
+    }
+    ctx.strokeStyle = DRIZZLE_COLOR_RIM;
+    ctx.lineWidth = rimW;
+    ctx.stroke();
+    ctx.strokeStyle = DRIZZLE_COLOR_FILL;
+    ctx.lineWidth = fillW;
+    ctx.stroke();
+  }
   ctx.restore();
 }
 
@@ -161,37 +234,96 @@ function _pt(e) {
 function _widthForSpeed(sp) {
   const pan = typeof PAN_R === "number" ? PAN_R : 80;
   const ref = pan * 1.8;
-  const k = Math.max(0.45, Math.min(2.4, ref / Math.max(sp, pan * 0.15)));
-  return Math.max(pan * 0.042 * k, pan * 0.028);
+  const k = Math.max(0.5, Math.min(2.1, ref / Math.max(sp, pan * 0.15)));
+  return pan * 0.022 * k;
+}
+
+function _hit(p) {
+  if (typeof dish === "undefined" || !dish || !dish.faces) return null;
+  const local = typeof dishLocal === "function" ? dishLocal(p) : p;
+  const shift = typeof pieceShiftLive === "function" ? pieceShiftLive(dish.faces) : null;
+  if (typeof pointInFace !== "function") return null;
+  for (let i = 0; i < dish.faces.length; i++) {
+    const f = dish.faces[i];
+    if (f.kind !== "dough") continue;
+    const o = (shift && shift.get(f)) || { x: 0, y: 0 };
+    if (pointInFace(f.points, local.x - o.x, local.y - o.y))
+      return { i, mx: local.x - o.x, my: local.y - o.y, o };
+  }
+  return null;
+}
+
+function _nearRoti(p) {
+  if (typeof dish === "undefined" || !dish) return false;
+  const local = typeof dishLocal === "function" ? dishLocal(p) : p;
+  if (dish.hull && dish.hull.length && typeof pointInFace === "function" && pointInFace(dish.hull, local.x, local.y))
+    return true;
+  if (typeof pointInFace === "function") {
+    for (const f of dish.faces) {
+      if (f.kind !== "dough") continue;
+      if (pointInFace(f.points, local.x, local.y)) return true;
+    }
+  }
+  return false;
+}
+
+function _fall(x, y, w) {
+  const pan = typeof PAN_R === "number" ? PAN_R : 80;
+  _falls.push({
+    x, y,
+    vy: pan * (0.22 + Math.random() * 0.18),
+    t: 0,
+    life: 0.22 + Math.random() * 0.12,
+    r: Math.max(1.6, w * 0.38),
+    a: 0.95,
+    a0: 0.95
+  });
 }
 
 function _stamp(trail, x, y, sp) {
-  const w = _widthForSpeed(sp);
-  const last = trail.pts[trail.pts.length - 1];
-  if (last) {
-    const dist = Math.hypot(x - last.x, y - last.y);
-    const step = Math.max(w * STEP_FRAC, 0.8);
-    if (dist < step) return;
-    const n = Math.min(8, Math.floor(dist / step));
-    for (let i = 1; i <= n; i++) {
-      const t = i / (n + 1);
-      trail.pts.push({
-        x: last.x + (x - last.x) * t,
-        y: last.y + (y - last.y) * t,
-        w: last.w + (w - last.w) * t
-      });
-    }
+  const prev = trail._lastTable;
+  trail._lastTable = { x, y };
+  if (prev) {
+    const dx = x - prev.x, dy = y - prev.y;
+    const dist = Math.hypot(dx, dy);
+    const pose = typeof dishPose === "function" ? dishPose() : { scale: 80 };
+    const stepPx = Math.max(3, pose.scale * 0.012);
+    const n = Math.min(20, Math.floor(dist / stepPx));
+    for (let i = 1; i <= n; i++)
+      _stampOne(trail, prev.x + dx * i / (n + 1), prev.y + dy * i / (n + 1), sp);
   }
-  trail.pts.push({ x, y, w });
+  _stampOne(trail, x, y, sp);
+}
+
+function _stampOne(trail, x, y, sp) {
+  const w = _widthForSpeed(sp);
+  const hit = _hit({ x, y });
+  if (!hit) {
+    if (_nearRoti({ x, y })) _fall(x, y, w);
+    trail.broken = true;
+    return;
+  }
+  const last = trail.pts[trail.pts.length - 1];
+  if (trail.broken || (last && !last.break && last.face !== hit.i)) {
+    trail.pts.push({ break: true });
+    trail.broken = false;
+  } else if (last && !last.break && last.face === hit.i) {
+    const pose = typeof dishPose === "function" ? dishPose() : { scale: 1 };
+    const dist = Math.hypot(hit.mx - last.x, hit.my - last.y);
+    const step = Math.max(0.003, (w / Math.max(8, pose.scale)) * STEP_FRAC);
+    if (dist < step) return;
+  }
+  trail.broken = false;
+  trail.pts.push({ x: hit.mx, y: hit.my, w, face: hit.i });
   _recalc();
 }
 
-function _bead(x, y, pan) {
-  const r = pan * (0.008 + Math.random() * 0.01);
+function _bead(x, y, pan, face) {
+  const r = pan * (0.006 + Math.random() * 0.008);
   _drops.push({
-    x: x + (Math.random() - 0.5) * r * 4,
-    y: y + (Math.random() - 0.5) * r * 4,
-    r, alpha: 0.62 + Math.random() * 0.25
+    x: x + (Math.random() - 0.5) * r * 3,
+    y: y + (Math.random() - 0.5) * r * 3,
+    r, alpha: 0.55 + Math.random() * 0.25, face
   });
 }
 
@@ -235,7 +367,8 @@ function _onMove(e) {
   _samples.push({ x: p.x, y: p.y, t: now });
   if (_samples.length > 12) _samples.shift();
   _stamp(_currentTrail, p.x, p.y, sp);
-  if (Math.random() < 0.1) _bead(p.x, p.y, typeof PAN_R === "number" ? PAN_R : 80);
+  const hit = _hit(p);
+  if (hit && Math.random() < 0.08) _bead(hit.mx, hit.my, typeof PAN_R === "number" ? PAN_R : 80, hit.i);
   e.stopImmediatePropagation();
 }
 
@@ -253,11 +386,11 @@ function _onUp(e) {
   if (e.pointerId !== _captureId) return;
   _active = false;
   _captureId = null;
-  if (_currentTrail && _currentTrail.pts.length) {
+  if (_currentTrail && _currentTrail.pts.some(q => q && !q.break)) {
     const v = _velocity();
     const pan = typeof PAN_R === "number" ? PAN_R : 80;
-    const last = _currentTrail.pts[_currentTrail.pts.length - 1];
-    if (Math.hypot(v.vx, v.vy) > pan * 0.5) {
+    const last = _samples[_samples.length - 1];
+    if (last && Math.hypot(v.vx, v.vy) > pan * 0.5) {
       _coast = { x: last.x, y: last.y, vx: v.vx, vy: v.vy, t: 0 };
     } else {
       _currentTrail.settling = true;
@@ -272,9 +405,11 @@ function _onUp(e) {
 function _recalc() {
   let total = 0;
   for (const t of _trails) {
-    const pts = t.pts;
-    for (let i = 1; i < pts.length; i++)
+    const pts = t.pts.filter(p => p && !p.break);
+    for (let i = 1; i < pts.length; i++) {
+      if (pts[i].face !== pts[i - 1].face) continue;
       total += Math.hypot(pts[i].x - pts[i - 1].x, pts[i].y - pts[i - 1].y);
+    }
   }
   const ref = (typeof PAN_R !== "undefined" ? PAN_R : 80) * 0.22 * 2;
   _coverage = Math.min(1, total / (ref * 1.8));
