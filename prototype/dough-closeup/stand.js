@@ -699,14 +699,11 @@ function updatePanPress(dt){
   }
 }
 // Палец на тесте — с допуском r: у кромки палец часто чуть за ступенчатым краем листа.
-// ─── Маргарин (спецификация §4; решение 25.08: в v0 бесконечный). Кусок лежит у дальнего борта;
-// ведение пальцем от куска мажет жир по открытой стали — след виден сразу; у кромки листа (0,06)
-// жир затекает под лист, над листом его не видно и он не пишется (ресурс обязан быть видимым,
-// 07.09). Карта жира — на таве, в долях PAN_R (32×32): переживает складку, переворот, отмену;
-// новый лист начинает с чистой тавы. Жир под листом — до +10 % жара сверх базовой плёнки ×1,05
-// (спецификация: +5…15 %, inferred) и хруст «жир × сухость»: чаще треск и строка в карточке.
-// Жест от куска — предложение ассистента (круговой мах спецификации тоже не из источника).
-const FAT_N = 32, FAT_GAIN = 0.10/1.05, FAT_TAU = 25, FAT_BRUSH = .08, FAT_SEEP = .06;
+// ─── Маргарин. Кусок у дальнего борта; жест от куска мажет открытую сталь. На горячей
+// таве это не след-краска: вспышка глянца и шипение, плёнка сходит за секунду
+// (владелица 20.09: жёлтая полоса не должна оставаться и медленно таять).
+// Под листом — короткий +10 % жара, пока плёнка ещё есть.
+const FAT_N = 32, FAT_GAIN = 0.10/1.05, FAT_TAU = 0.55, FAT_BRUSH = .07, FAT_SEEP = .06;
 let fatGesture = null, fatUnder = 0, dishCrisp = 0, smearSoundAt = 0;
 let fatCanvas = null, fatCtx = null, fatDrawnAt = 0, fatDirty = false;
 function butterSpot(){
@@ -760,7 +757,7 @@ function smearAt(q){
     for(let i=Math.max(0,Math.floor((u-rr+1)/cell));i<=Math.min(FAT_N-1,Math.floor((u+rr+1)/cell));i++){
       const cu=-1+(i+.5)*cell, cv2=-1+(j+.5)*cell, d=Math.hypot(cu-u,cv2-v);
       if(d>rr || Math.hypot(cu,cv2)>1) continue;
-      const k=j*FAT_N+i; fatMap[k]=Math.min(1,fatMap[k]+.35*(1-d/rr));
+      const k=j*FAT_N+i; fatMap[k]=Math.min(1,fatMap[k]+.22*(1-d/rr));
     }
   fatDirty=true;
   return true;
@@ -776,7 +773,8 @@ function updateFat(dt){
   if(!fatMap) return;
   let max=0; const k=Math.exp(-dt/FAT_TAU);
   for(let i=0;i<fatMap.length;i++){ fatMap[i]*=k; if(fatMap[i]>max) max=fatMap[i]; }
-  if(max<.01){ fatMap=null; return; }
+  fatDirty=true;
+  if(max<.02){ fatMap=null; fatUnder=0; return; }
   const T=dish.heatTable; if(!T) return;
   let s=0,n=0;
   for(let i=0;i<T.n;i++){ if(!(T.flags[i]&2)) continue; s+=fatAt(T.x[i]*targetR/PAN_R,T.y[i]*targetR/PAN_R); n++; }
@@ -4572,20 +4570,19 @@ function drawStretchTarget(g, sx, sy){
 function drawFatAndButter(g, sx, sy){
   const P=(x,y)=>({x:prX(x,y)*sx,y:prY(x,y)*sy});
   if(fatMap){
-    // Карта жира — маленькая картинка 32×32, растянутая на таву со сглаживанием: мазок сплошной,
-    // а не бусы (проба 17.09). Перерисовывается не чаще 4 раз в секунду.
+    // Мокрый глянец, не жёлтая краска. Тает каждый кадр — иначе след «застывал» на 250 мс.
     if(!fatCanvas){ fatCanvas=document.createElement("canvas"); fatCanvas.width=FAT_N; fatCanvas.height=FAT_N; fatCtx=fatCanvas.getContext("2d"); }
-    const now=performance.now();
-    if(fatDirty || now-fatDrawnAt>250){
+    if(fatDirty){
       fatCtx.clearRect(0,0,FAT_N,FAT_N);
       for(let j=0;j<FAT_N;j++) for(let i=0;i<FAT_N;i++){
-        const f=fatMap[j*FAT_N+i]; if(f<.03) continue;
-        fatCtx.fillStyle=`rgba(236,206,120,${Math.min(.42,.42*f).toFixed(3)})`; fatCtx.fillRect(i,j,1,1);
+        const f=fatMap[j*FAT_N+i]; if(f<.05) continue;
+        fatCtx.fillStyle=`rgba(255,248,220,${Math.min(.16,.16*f).toFixed(3)})`; fatCtx.fillRect(i,j,1,1);
       }
-      fatDrawnAt=now; fatDirty=false;
+      fatDirty=false;
     }
     const c=P(panC.x,panC.y), rx=PAN_R*sx, ry=PAN_R*TILT*sy;
-    g.save(); g.imageSmoothingEnabled=true; g.drawImage(fatCanvas,c.x-rx,c.y-ry,rx*2,ry*2); g.restore();
+    g.save(); g.imageSmoothingEnabled=true; g.globalCompositeOperation="lighter";
+    g.drawImage(fatCanvas,c.x-rx,c.y-ry,rx*2,ry*2); g.restore();
   }
   const b=butterSpot(), tx=-Math.sin(b.a), ty=Math.cos(b.a), nx=Math.cos(b.a), ny=Math.sin(b.a);
   const L=PAN_R*.09, W=PAN_R*.06, H=PAN_R*.035*TILT;
