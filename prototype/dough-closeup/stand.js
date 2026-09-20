@@ -4440,7 +4440,9 @@ function loop(now){
   try{
     step(dt);
     audioFrame();
+    if (typeof drizzleUpdate === "function") drizzleUpdate(dt);
     draw();
+    if (typeof drizzleDraw === "function") drizzleDraw(ctx);
   }catch(err){
     // Раньше единственное исключение в кадре останавливало игру насмерть:
     // requestAnimationFrame больше не вызывался, и экран замирал.

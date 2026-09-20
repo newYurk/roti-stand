@@ -17,9 +17,10 @@
 
 "use strict";
 
-const DRIZZLE_COLOR_FILL = "rgba(245, 226, 168, 0.92)";
-const DRIZZLE_COLOR_WET  = "rgba(255, 244, 210, 0.45)";
-const DRIZZLE_COLOR_DROP = "rgba(236, 208, 138, 0.78)";
+const DRIZZLE_COLOR_FILL = "rgba(255, 248, 226, 0.97)";
+const DRIZZLE_COLOR_RIM  = "rgba(168, 128, 64, 0.55)";
+const DRIZZLE_COLOR_WET  = "rgba(255, 255, 245, 0.55)";
+const DRIZZLE_COLOR_DROP = "rgba(255, 236, 190, 0.9)";
 const STAIN_WET          = 0.82;   // мокрый блеск садится сюда и живёт
 const SETTLE_T           = 0.55;
 const COAST_T            = 0.22;   // выбег после отпускания, с
@@ -93,22 +94,44 @@ function drizzleDraw(ctx) {
   if (!_trails.length && !_drops.length) return;
   const tilt = typeof TILT === "number" ? TILT : 0.56;
   ctx.save();
+  ctx.lineJoin = "round";
+  ctx.lineCap = "round";
   for (const trail of _trails) {
     const pts = trail.pts;
+    if (!pts.length) continue;
+    let wAvg = 0;
+    for (const p of pts) wAvg += p.w;
+    wAvg /= pts.length;
+    const rimW = Math.max(12, wAvg * 2.6);
+    const fillW = Math.max(8, wAvg * 1.9);
+    ctx.globalAlpha = Math.min(1, trail.wet + 0.18);
+    ctx.beginPath();
     for (let i = 0; i < pts.length; i++) {
-      const p = pts[i];
-      const sx = _px(p.x, p.y), sy = _py(p.x, p.y);
-      ctx.globalAlpha = trail.wet;
+      const sx = _px(pts[i].x, pts[i].y), sy = _py(pts[i].x, pts[i].y);
+      if (i === 0) ctx.moveTo(sx, sy); else ctx.lineTo(sx, sy);
+    }
+    if (pts.length === 1) {
+      const sx = _px(pts[0].x, pts[0].y), sy = _py(pts[0].x, pts[0].y);
+      ctx.fillStyle = DRIZZLE_COLOR_RIM;
+      ctx.beginPath();
+      ctx.ellipse(sx, sy, rimW * 0.5, rimW * 0.5 * tilt, 0, 0, Math.PI * 2);
+      ctx.fill();
       ctx.fillStyle = DRIZZLE_COLOR_FILL;
       ctx.beginPath();
-      ctx.ellipse(sx, sy, p.w, p.w * tilt, 0, 0, Math.PI * 2);
+      ctx.ellipse(sx, sy, fillW * 0.5, fillW * 0.5 * tilt, 0, 0, Math.PI * 2);
       ctx.fill();
+    } else {
+      ctx.strokeStyle = DRIZZLE_COLOR_RIM;
+      ctx.lineWidth = rimW;
+      ctx.stroke();
+      ctx.strokeStyle = DRIZZLE_COLOR_FILL;
+      ctx.lineWidth = fillW;
+      ctx.stroke();
       if (trail.wet > 0.88) {
-        ctx.globalAlpha = (trail.wet - 0.88) * 3.2;
-        ctx.fillStyle = DRIZZLE_COLOR_WET;
-        ctx.beginPath();
-        ctx.ellipse(sx - p.w * 0.2, sy - p.w * tilt * 0.25, p.w * 0.38, p.w * tilt * 0.28, 0, 0, Math.PI * 2);
-        ctx.fill();
+        ctx.globalAlpha = (trail.wet - 0.88) * 2.8;
+        ctx.strokeStyle = DRIZZLE_COLOR_WET;
+        ctx.lineWidth = Math.max(3, fillW * 0.35);
+        ctx.stroke();
       }
     }
   }
@@ -117,7 +140,7 @@ function drizzleDraw(ctx) {
     ctx.fillStyle = DRIZZLE_COLOR_DROP;
     const sx = _px(d.x, d.y), sy = _py(d.x, d.y);
     ctx.beginPath();
-    ctx.ellipse(sx, sy, d.r, d.r * tilt, 0, 0, Math.PI * 2);
+    ctx.ellipse(sx, sy, Math.max(d.r, 3), Math.max(d.r, 3) * tilt, 0, 0, Math.PI * 2);
     ctx.fill();
   }
   ctx.globalAlpha = 1;
@@ -139,7 +162,7 @@ function _widthForSpeed(sp) {
   const pan = typeof PAN_R === "number" ? PAN_R : 80;
   const ref = pan * 1.8;
   const k = Math.max(0.45, Math.min(2.4, ref / Math.max(sp, pan * 0.15)));
-  return pan * 0.026 * k;
+  return Math.max(pan * 0.042 * k, pan * 0.028);
 }
 
 function _stamp(trail, x, y, sp) {
@@ -358,38 +381,42 @@ window.setDrizzleMode = _setMode;
   window.addEventListener("pointermove",   _onMove,  { capture: true });
   window.addEventListener("pointerup",     _onUp,    { capture: true });
   window.addEventListener("pointercancel", _onUp,    { capture: true });
-})();
 
-(function hookLoop() {
-  let lastT = 0;
-  const raf = window.requestAnimationFrame;
-  let patched = false;
-  function patchRAF() {
-    if (patched) return;
-    patched = true;
-    window.requestAnimationFrame = function (cb) {
-      return raf.call(window, function (t) {
-        const dt = lastT ? Math.min((t - lastT) / 1000, 0.05) : 0;
-        lastT = t;
-        drizzleUpdate(dt);
-        return cb(t);
-      });
+  // iPhone: stand.js делает preventDefault на touchstart, и pointer-события
+  // часто не приходят. Ловим те же касания, что и рез.
+  function touchFake(e, t, extra) {
+    return {
+      pointerId: "t" + t.identifier,
+      button: 0,
+      clientX: t.clientX,
+      clientY: t.clientY,
+      target: e.target,
+      preventDefault() { e.preventDefault(); },
+      stopImmediatePropagation() { e.stopImmediatePropagation(); },
+      ...extra
     };
   }
-  function tryHook() {
-    if (typeof window.drawFrame !== "function") { setTimeout(tryHook, 200); return; }
-    const orig = window.drawFrame;
-    window.drawFrame = function () {
-      orig.apply(this, arguments);
-      const cv = document.getElementById("cv");
-      const ctx = cv && cv.getContext("2d");
-      if (ctx) drizzleDraw(ctx);
-    };
-    patchRAF();
-  }
-  document.readyState === "loading"
-    ? document.addEventListener("DOMContentLoaded", tryHook)
-    : tryHook();
+  window.addEventListener("touchstart", e => {
+    if (!_inDrizzlePhase() || _ui(e) || _active) return;
+    const t = e.changedTouches[0];
+    if (t) _onDown(touchFake(e, t));
+  }, { capture: true, passive: false });
+  window.addEventListener("touchmove", e => {
+    if (!_active) return;
+    for (const t of e.changedTouches) {
+      if ("t" + t.identifier === _captureId) { _onMove(touchFake(e, t)); break; }
+    }
+  }, { capture: true, passive: false });
+  window.addEventListener("touchend", e => {
+    for (const t of e.changedTouches) {
+      if ("t" + t.identifier === _captureId) { _onUp(touchFake(e, t)); break; }
+    }
+  }, { capture: true, passive: false });
+  window.addEventListener("touchcancel", e => {
+    for (const t of e.changedTouches) {
+      if ("t" + t.identifier === _captureId) { _onUp(touchFake(e, t)); break; }
+    }
+  }, { capture: true, passive: false });
 })();
 
 (function buildBtn() {
