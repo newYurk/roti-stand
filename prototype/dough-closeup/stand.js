@@ -454,8 +454,11 @@ function addBananaSlice(x, y, opts){
   }
   if(!added.length) return false;
   if(!(opts && opts.silent)) rememberDish();
-  for(const f of added) dish.faces.push(f);
-  dish.filling.push({id,x,y,radius:rr});
+  // Новый массив: stackHeights и прочие WeakMap ключуют по ссылке на faces.
+  // push оставлял старый кэш без начинки — ломтики рисовались бледными кружками,
+  // пока складка не подменяла faces (тогда банан «проявлялся»).
+  dish.faces = dish.faces.concat(added);
+  dish.filling = dish.filling.concat([{id,x,y,radius:rr}]);
   rebuildDishContact();
   dish.message=dish.filling.length>=BANANA_MAX
     ? "Банан на месте · заверни края внутрь"
