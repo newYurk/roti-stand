@@ -2851,8 +2851,8 @@ let stepNo = 1;                                // текущий шаг стен
 let targetR = 1, startR = 1, step1R = 1;       // step1R = цель расплющивания (42% мишени)
 let advancedAt = 0;                            // момент авто-перехода на шаг 2 (для баннера)
 let gestureScale = 1;                          // масштаб жеста: фиксирован от экрана, не от роста листа
-let FLAT_RATE = 0.90;                          // скорость расплющивания под пальцем
-const FLAT_FLOW = 0.48;                        // тесто уезжает из-под пальца, доли радиуса/с
+let FLAT_RATE = 2.4;                           // нажим должен быть виден за полсекунды
+const FLAT_FLOW = 1.15;                        // тесто уезжает из-под пальца, доли радиуса/с
 const FLAT_READY = 0.42;                       // выше этого кусок ещё толстый — тянуть рано
 // Мерка листа — меньшая сторона рабочей зоны; от неё доли комка, свежего листа и мишени.
 // В раме тава нарисована и не растягивается: мерка ещё и не больше той, при которой готовый лист
@@ -3167,9 +3167,10 @@ function armAction(pointerId, p){
 // Шаг 1: палец давит тесто. Длины покоя растут ТОЛЬКО под пальцем — края остаются
 // толстыми, пока их не прижмут. Тесто уезжает из-под пальца, в середине ямка.
 function pressFlatten(dt){
-  const fx = action.last.x, fy = action.last.y;
+  const at = flattenAt(action.last);
+  const fx = at.x, fy = at.y;
   const sr = Math.max(R0, sheetRadius());
-  const sigma = sr * 0.40;
+  const sigma = Math.max(sr * 0.55, gestureScale * 0.18);
   const s2 = sigma*sigma || 1;
   for(let k2=0;k2<cons.length;k2++){
     const c2 = cons[k2]; if(c2.broken) continue;
@@ -3208,9 +3209,18 @@ function lumpFollow(p){
   }
   action.last = { x:p.x, y:p.y, t: performance.now() };
 }
+function flattenAt(p){
+  // Кусок маленький, мишень большая: нажим рядом всё равно давит тесто, а не пустой стол.
+  const c = centerOfSheet(), r = Math.max(R0, sheetRadius());
+  const dx=p.x-c.x, dy=p.y-c.y, d=Math.hypot(dx,dy);
+  if(d <= r) return p;
+  if(d > Math.max(r*2.2, step1R*0.85)) return p;
+  const k = r / (d || 1);
+  return { x:c.x + dx*k, y:c.y + dy*k };
+}
 function pointerOnRim(p){
   const c = centerOfSheet(), r = Math.max(R0, sheetRadius());
-  return Math.hypot(p.x-c.x, p.y-c.y) > r * 0.70;
+  return Math.hypot(p.x-c.x, p.y-c.y) > r * 0.78;
 }
 
 function updateGripFromHold(){
@@ -3231,13 +3241,21 @@ function updateActionMove(p){
     return;
   }
   if(action.state !== "ARMED") return;
-  if(stepNo===1){                                      // шаг 1: нажим или кусок прыгает за рукой
+  if(stepNo===1){                                      // шаг 1: нажим; кусок прыгает только от явного рывка
     if(action.kind==="lump"){ lumpFollow(p); return; }
     if(!action.kind){
       const moved = Math.hypot(p.x-action.down.x, p.y-action.down.y);
       const r = Math.max(R0, sheetRadius());
-      if(pointerOnRim(action.down) && moved > r*0.20){ action.kind="lump"; lumpFollow(p); return; }
-      if(moved > r*0.04) action.kind="flat";
+      const outward = (()=>{
+        const c=centerOfSheet();
+        const vx=p.x-action.down.x, vy=p.y-action.down.y;
+        const rx=action.down.x-c.x, ry=action.down.y-c.y, rl=Math.hypot(rx,ry)||1;
+        return (vx*rx + vy*ry)/rl;
+      })();
+      if(pointerOnRim(action.down) && moved > r*0.70 && outward > r*0.45){
+        action.kind="lump"; lumpFollow(p); return;
+      }
+      if(moved > r*0.03) action.kind="flat";
     }
     action.last = { x:p.x, y:p.y, t: performance.now() };
     return;
@@ -3655,6 +3673,7 @@ let evenBuf = null;
 function evenOut(dt){
   // Тесто под руками выравнивается: толстые места отдают тонким. Без этого
   // жёсткий лист рвался у точки захвата на 90% пути, так и не дойдя до цели.
+  if(stepNo===1 && action.state==="ARMED" && action.kind!=="lump") return;
   const k = Math.min(0.5, 3.2*dt);
   if(!evenBuf || evenBuf.length !== cons.length) evenBuf = new Float32Array(cons.length);
   let sum = 0, n = 0;
