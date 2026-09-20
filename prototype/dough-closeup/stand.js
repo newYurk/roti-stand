@@ -1157,6 +1157,7 @@ function rotateDish(angle,pivot=twistPivot()){
     rememberDish(); dish.faces=faces; rebuildDishContact();
   }
   dish.hull=dishHull();
+  if (typeof drizzleRotate === "function") drizzleRotate(angle, pivot);
   const deg=Math.round(angle*180/Math.PI);
   dish.message=`Повёрнуто на ${Math.abs(deg)}° ${deg>0 ? "по часовой" : "против часовой"}`;
   syncDishUI(); return true;

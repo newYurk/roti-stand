@@ -193,7 +193,8 @@ function _strokeRun(ctx, run, tilt) {
   const rimW = Math.max(4, wAvg * 2.05);
   const fillW = Math.max(2.5, wAvg * 1.45);
   ctx.save();
-  _clipFace(ctx, run[0].face);
+  if (!(typeof dishTwist !== "undefined" && dishTwist))
+    _clipFace(ctx, run[0].face);
   if (run.length === 1) {
     const s = _screen(run[0].x, run[0].y, run[0].face);
     ctx.fillStyle = DRIZZLE_COLOR_RIM;
@@ -481,6 +482,26 @@ function _buildButton() {
   gDish.insertBefore(btn, serve || null);
 }
 
+function drizzleRotate(angle, pivot) {
+  if (!angle || !pivot || typeof rotAbout !== "function") return;
+  const cs = Math.cos(angle), sn = Math.sin(angle);
+  const spin = p => rotAbout({ x: p.x, y: p.y }, pivot, cs, sn);
+  for (const t of _trails) {
+    for (const p of t.pts) {
+      if (!p || p.break) continue;
+      const q = spin(p);
+      p.x = q.x;
+      p.y = q.y;
+    }
+  }
+  for (const d of _drops) {
+    const q = spin(d);
+    d.x = q.x;
+    d.y = q.y;
+  }
+}
+
+window.drizzleRotate = drizzleRotate;
 window.setDrizzleMode = _setMode;
 
 (function hookReset() {
