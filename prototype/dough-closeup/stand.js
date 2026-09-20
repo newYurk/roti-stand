@@ -80,7 +80,7 @@ let verdict = "", verdictAt = 0;
 let tornNode = null;               // узлы порванных ячеек — для подсветки рваного края
 let conDeg = null;                 // сколько живых связей держит узел; 0 = осколок
 let runStart = 0, R0 = 1;
-let variant = "A", condition = "both";
+let variant = "C", condition = "both";
 let log = [];
 let latencies = [];
 
@@ -875,7 +875,7 @@ function dishStatus(){
 // Условность отрисовки, не физика: тонкий лист показывает сквозь себя цвет своей
 // нижней стороны с весом (1 − толщина) × SHOW_THROUGH. На таве настоящий лист матовеет,
 // опора на просвечивание есть только у сырого растянутого листа. Доля — на пробу (#21).
-let SHOW_THROUGH = 0.3;
+let SHOW_THROUGH = 0;
 function dishCookColor(f,side,through=true){
   const base=f.turned ? [221,199,152] : [227,213,178];
   const t=dish.thermal && dish.thermal[f.source];
@@ -1762,12 +1762,8 @@ const ROTI_R_MM = 110;   // радиус роти ≈ 11 см (inferred): 1 targ
 // Высоту можно подобрать адресом: ?z=1…8.
 const Z_EXAG_DEFAULT = 2;
 const Z_RELIEF = 5;      // высота, под которую подобраны свет, кромка, тень и корки
-// Высота меняется на ходу — кнопками «высота» в панели (на телефоне адрес не поперебираешь),
-// адресом `?z=1…8` и запоминается между заходами.
-let Z_EXAG = (()=>{
-  try { const z=+new URLSearchParams(location.search).get("z"); if(z>=1 && z<=8) return z; } catch(e) {}
-  try { const z=+localStorage.getItem("rotiZ"); if(z>=1 && z<=8) return z; } catch(e) {}
-  return Z_EXAG_DEFAULT; })();
+// Высота ×2 — решение владелицы 19.09: крупнее ×2 смотрится плохо, крутилку убрали.
+let Z_EXAG = Z_EXAG_DEFAULT;
 let RELIEF_K = Z_RELIEF / Z_EXAG;   // во сколько раз картинка выразительнее геометрии
 function setHeight(z){
   if(!(z>=1 && z<=8) || z===Z_EXAG) return;
@@ -4091,42 +4087,26 @@ document.querySelectorAll("[data-c]").forEach(b=>b.addEventListener("click",()=>
   document.querySelectorAll("[data-c]").forEach(x=>x.classList.toggle("on",x===b));
   resetMeters(); setTools(false);
 }));
-// Доля «низа сквозь лист» — условность отрисовки для пробы; переживает перезагрузку.
-try{ const k=localStorage.getItem("dough_through"); if(k!==null && [0,0.3,0.6].includes(+k)) SHOW_THROUGH=+k; }catch(e){}
+// Доля «низа сквозь лист» — условность отрисовки; кнопки убраны 19.09, остаётся 0
+// (владелица: при нуле лист кажется зажаристее).
+SHOW_THROUGH = 0;
 document.querySelectorAll("[data-k]").forEach(b=>{
   b.classList.toggle("on", +b.dataset.k===SHOW_THROUGH);
-  b.addEventListener("click",()=>{
-    SHOW_THROUGH=+b.dataset.k;
-    try{ localStorage.setItem("dough_through", String(SHOW_THROUGH)); }catch(e){}
-    document.querySelectorAll("[data-k]").forEach(x=>x.classList.toggle("on",x===b));
-    setTools(false);
-  });
 });
-// Сила прижима — прибор для пробы (разбор 16.09: 0,35 из плана против 1 — видно ли пятно).
-try{ const k=localStorage.getItem("dough_press"); if(k!==null && [0.35,1].includes(+k)) PRESS_GAIN=+k; }catch(e){}
+// Сила прижима — прибор для пробы; кнопки убраны 19.09, остаётся 1.
+PRESS_GAIN = 1;
 document.querySelectorAll("[data-p]").forEach(b=>{
   b.classList.toggle("on", +b.dataset.p===PRESS_GAIN);
-  b.addEventListener("click",()=>{
-    PRESS_GAIN=+b.dataset.p;
-    try{ localStorage.setItem("dough_press", String(PRESS_GAIN)); }catch(e){}
-    document.querySelectorAll("[data-p]").forEach(x=>x.classList.toggle("on",x===b));
-    setTools(false);
-  });
 });
-// Скорость жарки — прибор для пробы (владелица 17.09: «хочется подольше»); переживает перезагрузку.
+// Скорость жарки — минута (владелица 19.09: оставить, настроим потом).
 function setFrySeconds(sec){
   if(!FRY_SPEEDS[sec]) return;
   FRY_SECONDS=sec; COOK_RATE=COOK_BASE*FRY_SPEEDS[sec];
   document.querySelectorAll("[data-f]").forEach(x=>x.classList.toggle("on",+x.dataset.f===sec));
 }
-try{ const f=localStorage.getItem("dough_fry"); if(f!==null) setFrySeconds(+f); }catch(e){}
+setFrySeconds(60);
 document.querySelectorAll("[data-f]").forEach(b=>{
   b.classList.toggle("on", +b.dataset.f===FRY_SECONDS);
-  b.addEventListener("click",()=>{
-    setFrySeconds(+b.dataset.f);
-    try{ localStorage.setItem("dough_fry", String(FRY_SECONDS)); }catch(e){}
-    setTools(false);
-  });
 });
 // Принудительное обновление: страница отдаётся с GitHub Pages и залипает в кеше,
 // поэтому правки иначе не доезжают до телефона. Та же схема, что в «Лягушке».

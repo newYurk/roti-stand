@@ -85,6 +85,7 @@ function drizzleUpdate(dt) {
   }
 
   _ensureCardLine();
+  _syncButton();
   if (DRIZZLE_COVERAGE > 0) _updateServe();
 }
 
@@ -274,6 +275,9 @@ function _updateServe() {
 function _syncButton() {
   const b = document.getElementById("drizzleMode");
   if (!b) return;
+  const onTable = typeof dish !== "undefined" && dish && dish.mode === "cut";
+  b.hidden = !onTable;
+  if (!onTable && _modeOn) _modeOn = false;
   b.classList.toggle("on", _modeOn);
   b.textContent = _modeOn ? "сгущёнка ✓" : "сгущёнка";
 }
