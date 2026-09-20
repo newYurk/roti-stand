@@ -4467,7 +4467,14 @@ function cookColor(base, c){
 }
 const rgb = (c)=>`rgb(${Math.round(c[0])},${Math.round(c[1])},${Math.round(c[2])})`;
 function doughLift(i){
-  return (thick[i]||0) * DOUGH_UNIT_MM / ROTI_R_MM * targetR * Z_EXAG;
+  // Отрезанный кусок ~14 мм при радиусе ~21 мм — приземистый диск на столе.
+  // Z_EXAG×2 поднимал верх на целый радиус: тень внизу, тесто в воздухе.
+  return (thick[i]||0) * DOUGH_UNIT_MM / ROTI_R_MM * targetR;
+}
+function doughDome(i){
+  const c=centerOfSheet(), r=Math.max(1e-3, sheetRadius());
+  const q=Math.min(1, Math.hypot(px[i]-c.x, py[i]-c.y)/r);
+  return 1 - 0.30*q*q;
 }
 const palPan = new Map();   // 16 ступеней толщины × 16 ступеней прожарки — для пиксельных вариантов
 function quantOn(t, c){
@@ -4546,17 +4553,37 @@ function draw(){
     }
     const onPan = phase === "PAN";
     const bump = !onPan && !xf;
-    if(bump){
-      const c0 = centerOfSheet(), r0 = sheetRadius(), h0 = flattenStats().mean * DOUGH_UNIT_MM / ROTI_R_MM * targetR * Z_EXAG;
-      g.fillStyle = `rgba(8,4,1,${Math.min(.42, .12 + h0*0.006)})`;
-      g.beginPath();
-      g.ellipse(prX(c0.x,c0.y)*sx+ox, prY(c0.x,c0.y)*sy+oy, r0*1.06*sx, r0*1.06*TILT*sy, 0, 0, Math.PI*2);
-      g.fill();
-    }
     const Pnt=(i)=>({
       x: prX(X[i],Y[i])*sx+ox,
-      y: (prY(X[i],Y[i]) - (bump ? doughLift(i)*VIEW_UP : 0))*sy+oy
+      y: (prY(X[i],Y[i]) - (bump ? doughLift(i)*doughDome(i)*VIEW_UP : 0))*sy+oy
     });
+    const Tab=(i)=>({ x: prX(X[i],Y[i])*sx+ox, y: prY(X[i],Y[i])*sy+oy });
+    let nearWalls=null;
+    const drawWall=(i,j,k)=>{
+      const t=((thick[i]||0)+(thick[j]||0))/2;
+      const col=mix(Math.min(1, t));
+      const lit=0.62 + 0.22*k;
+      g.fillStyle=`rgb(${Math.round(col[0]*lit)},${Math.round(col[1]*lit*0.96)},${Math.round(col[2]*lit*0.88)})`;
+      const A=Tab(i), B=Tab(j), C=Pnt(j), D=Pnt(i);
+      g.beginPath(); g.moveTo(A.x,A.y); g.lineTo(B.x,B.y); g.lineTo(C.x,C.y); g.lineTo(D.x,D.y); g.closePath(); g.fill();
+    };
+    if(bump){
+      const c0 = centerOfSheet(), r0 = sheetRadius();
+      g.fillStyle = "rgba(10,6,2,0.22)";
+      g.beginPath();
+      g.ellipse(prX(c0.x, c0.y + r0*0.06)*sx+ox, prY(c0.x, c0.y + r0*0.06)*sy+oy,
+                r0*1.04*sx, r0*1.04*TILT*sy, 0, 0, Math.PI*2);
+      g.fill();
+      const rim=[];
+      for(const i of edgeNodes){ if(conDeg && conDeg[i]<=0) continue; rim.push(i); }
+      rim.sort((a,b)=>Math.atan2(Y[a]-c0.y, X[a]-c0.x) - Math.atan2(Y[b]-c0.y, X[b]-c0.x));
+      const far=[]; nearWalls=[];
+      for(let k=0;k<rim.length;k++){
+        const i=rim[k], j=rim[(k+1)%rim.length];
+        ((Y[i]+Y[j])/2 < c0.y ? far : nearWalls).push([i,j]);
+      }
+      for(const [i,j] of far) drawWall(i,j,0.55);
+    }
     for(let q=0;q<quads.length;q++){
       const qc = quadCons[q];
       const [a,b2,c,d] = quads[q];
@@ -4595,6 +4622,7 @@ function draw(){
       g.lineTo(Pd.x, Pd.y);
       g.closePath(); g.fill();
     }
+    if(nearWalls) for(const [i,j] of nearWalls) drawWall(i,j,0.95);
     // дуга хвата и палец видны только пока жест взводится: ARMED подсвечивает
     // выбранный край (audit, проход A), тесто при этом не двигается.
     if(action.state==="ARMED" || action.state==="LIFTING"){
