@@ -2851,7 +2851,7 @@ let stepNo = 1;                                // текущий шаг стен
 let targetR = 1, startR = 1, step1R = 1;       // step1R = цель расплющивания (42% мишени)
 let advancedAt = 0;                            // момент авто-перехода на шаг 2 (для баннера)
 let gestureScale = 1;                          // масштаб жеста: фиксирован от экрана, не от роста листа
-let FLAT_RATE = 0.55;                          // толщина сходит не сразу: секунда в пятне ≈ половина
+let FLAT_RATE = 0.90;                          // ямка за секунду, диск — за несколько
 const FLAT_READY = 0.42;                       // выше этого кусок ещё толстый — тянуть рано
 let flatH = null;                              // карта нажима: 1 толстое, меньше — где провели
 // Мерка листа — меньшая сторона рабочей зоны; от неё доли комка, свежего листа и мишени.
@@ -3186,7 +3186,7 @@ function pressFlatten(dt){
   const want = Math.min(step1R, R0 * Math.sqrt(1 / Math.max(0.22, mean)));
   const c = centerOfSheet();
   const r = Math.max(1e-3, sheetRadius());
-  const s = 1 + Math.min(Math.max(0, want/r - 1), 0.16 * dt);
+  const s = 1 + Math.min(Math.max(0, want/r - 1), 0.22 * dt);
   if(s > 1.001){
     for(let i=0;i<N;i++){
       px[i] = c.x + (px[i]-c.x)*s;
@@ -4511,9 +4511,14 @@ function cookColor(base, c){
   return lerp3(DARK, CHAR, Math.min(1, (c-1.2)/0.5));
 }
 const rgb = (c)=>`rgb(${Math.round(c[0])},${Math.round(c[1])},${Math.round(c[2])})`;
+function visDiscLift(h){
+  const raw = (h||0) * DOUGH_UNIT_MM / ROTI_R_MM * targetR;
+  const discMin = targetR * 0.07 * Math.min(1, (h||0) / 0.12);
+  return Math.max(raw, discMin) * VIEW_UP;
+}
 function doughLift(i){
   const h = (flatH && stepNo===1 ? flatH[i] : thick[i]) || 0;
-  return h * DOUGH_UNIT_MM / ROTI_R_MM * targetR;
+  return visDiscLift(h);
 }
 const palPan = new Map();   // 16 ступеней толщины × 16 ступеней прожарки — для пиксельных вариантов
 function quantOn(t, c){
@@ -4591,51 +4596,42 @@ function draw(){
       g.fill();
     }
     const onPan = phase === "PAN";
-    const bump = !onPan && !xf && stepNo===1;
-    const lift = bump ? new Float32Array(N) : null;
+    const Hmap = (stepNo===1 && flatH) ? flatH : thick;
+    const discLike = !onPan && !xf && !tornAt;
+    const lift = discLike ? new Float32Array(N) : null;
+    let hMean = 0;
     if(lift){
-      const k = DOUGH_UNIT_MM / ROTI_R_MM * targetR * VIEW_UP;
-      const H = flatH || thick;
-      for(let i=0;i<N;i++) lift[i] = (H[i]||0) * k;
+      let sH=0, nH=0;
+      for(let i=0;i<N;i++){
+        lift[i] = doughLift(i);
+        const h = Hmap[i]||0;
+        if(!conDeg || conDeg[i]>0){ sH+=h; nH++; }
+      }
+      hMean = nH ? sH/nH : 1;
     }
     const Pnt=(i)=>({
       x: prX(X[i],Y[i])*sx+ox,
       y: (prY(X[i],Y[i]) - (lift ? lift[i] : 0))*sy+oy
     });
-    const Tab=(i)=>({ x: prX(X[i],Y[i])*sx+ox, y: prY(X[i],Y[i])*sy+oy });
-    let nearWalls=null;
-    const drawWall=(i,j,k)=>{
-      const H=flatH||thick;
-      const t=((H[i]||0)+(H[j]||0))/2;
-      const col=mix(Math.min(1, t));
-      const lit=0.62 + 0.22*k;
-      g.fillStyle=`rgb(${Math.round(col[0]*lit)},${Math.round(col[1]*lit*0.96)},${Math.round(col[2]*lit*0.88)})`;
-      const A=Tab(i), B=Tab(j), C=Pnt(j), D=Pnt(i);
-      g.beginPath(); g.moveTo(A.x,A.y); g.lineTo(B.x,B.y); g.lineTo(C.x,C.y); g.lineTo(D.x,D.y); g.closePath(); g.fill();
-    };
-    if(bump){
+    if(discLike){
       const c0 = bodyC, r0 = sheetRadius();
+      const x = prX(c0.x,c0.y)*sx+ox, y = prY(c0.x,c0.y)*sy+oy;
+      const rx = r0*sx, ry = r0*TILT*sy;
+      const hPx = Math.max(3, visDiscLift(hMean) * sy);
       g.fillStyle = "rgba(10,6,2,0.22)";
-      g.beginPath();
-      g.ellipse(prX(c0.x, c0.y + r0*0.06)*sx+ox, prY(c0.x, c0.y + r0*0.06)*sy+oy,
-                r0*1.04*sx, r0*1.04*TILT*sy, 0, 0, Math.PI*2);
-      g.fill();
-      const rim=[];
-      for(const i of edgeNodes){ if(conDeg && conDeg[i]<=0) continue; rim.push(i); }
-      rim.sort((a,b)=>Math.atan2(Y[a]-c0.y, X[a]-c0.x) - Math.atan2(Y[b]-c0.y, X[b]-c0.x));
-      const far=[]; nearWalls=[];
-      for(let k=0;k<rim.length;k++){
-        const i=rim[k], j=rim[(k+1)%rim.length];
-        ((Y[i]+Y[j])/2 < c0.y ? far : nearWalls).push([i,j]);
-      }
-      for(const [i,j] of far) drawWall(i,j,0.55);
+      g.beginPath(); g.ellipse(x, y+ry*0.10, rx*1.05, ry*1.08, 0, 0, Math.PI*2); g.fill();
+      const col = mix(Math.max(0.55, hMean));
+      g.fillStyle = `rgb(${(col[0]*0.70)|0},${(col[1]*0.66)|0},${(col[2]*0.58)|0})`;
+      g.beginPath(); g.ellipse(x, y, rx, ry, 0, 0, Math.PI*2); g.fill();
+      g.fillStyle = `rgb(${col[0]},${col[1]},${col[2]})`;
+      g.beginPath(); g.ellipse(x, y-hPx, rx, ry, 0, 0, Math.PI*2); g.fill();
     }
     for(let q=0;q<quads.length;q++){
       const qc = quadCons[q];
       const [a,b2,c,d] = quads[q];
       const torn = qc[0].broken || (qc[1]&&qc[1].broken) || (qc[2]&&qc[2].broken) || (qc[3]&&qc[3].broken);
-      let t= bump && flatH
-        ? (flatH[a]+flatH[b2]+flatH[c]+flatH[d])/4
+      let t= discLike
+        ? (Hmap[a]+Hmap[b2]+Hmap[c]+Hmap[d])/4
         : (thick[a]+thick[b2]+thick[c]+thick[d])/4;
       if(torn){
         const inside =
@@ -4655,10 +4651,10 @@ function draw(){
           const ck = (cook[a]+cook[b2]+cook[c]+cook[d])/4;
           g.fillStyle = pixelated ? quantOn(t, ck) : shadeOn(t, ck);
         } else {
-          const col = mix(t);
+          const col = mix(discLike ? Math.max(0.48, t) : t);
           const Pa=Pnt(a), Pb=Pnt(b2), Pc=Pnt(c), Pd=Pnt(d);
           const gx=(Pb.x+Pc.x)-(Pa.x+Pd.x), gy=(Pa.y+Pb.y)-(Pc.y+Pd.y);
-          const lit = bump ? Math.max(.70, Math.min(1.22, 1 + gx*0.0012 + gy*0.0020)) : 1;
+          const lit = discLike ? Math.max(.70, Math.min(1.22, 1 + gx*0.0012 + gy*0.0020)) : 1;
           g.fillStyle = `rgb(${Math.round(col[0]*lit)},${Math.round(col[1]*lit)},${Math.round(col[2]*lit)})`;
         }
       }
@@ -4670,7 +4666,6 @@ function draw(){
       g.lineTo(Pd.x, Pd.y);
       g.closePath(); g.fill();
     }
-    if(nearWalls) for(const [i,j] of nearWalls) drawWall(i,j,0.95);
     // дуга хвата и палец видны только пока жест взводится: ARMED подсвечивает
     // выбранный край (audit, проход A), тесто при этом не двигается.
     if(action.state==="ARMED" || action.state==="LIFTING"){
