@@ -884,9 +884,7 @@ function cookDish(dt){
     const thin=Math.max(.25,Math.min(2.5,SHEET_REF_MM/Math.max(.05,doughMM(t.tone))));
     for(let side=0;side<2;side++){
       if(t.dry[side]<1) t.dry[side]=Math.min(1,t.dry[side]+dt*DRY_RATE*D.dryDrive[i][side]*thin);
-      // Пятна начинаются ещё на гибком листе (dry≥0,5), полная скорость — после сушки.
-      const ready=t.dry[side]>=1 ? 1 : t.dry[side]>=.45 ? Math.max(.4, t.dry[side]) : 0;
-      if(ready) t.cook[side]+=dt*COOK_RATE*D.cookDrive[i][side]*ready;
+      else t.cook[side]+=dt*COOK_RATE*D.cookDrive[i][side];
     }
   }
   if(dish.sessions){
@@ -950,12 +948,10 @@ function dishCookColor(f,side,through=true){
   const vis=t.cook[side]*spot;
   const own=cookColor(base, vis);
   if(through===false) return own;
-  // Тонкий лист: жар той стороны, что на стали, просвечивает, пока верх сырой.
-  // Старый ползунок SHOW_THROUGH=0 прятал жарку целиком (владелица 20.09: «держи — видно»).
   const down=f.turned ? 1 : 0;
   const bot=t.cook[down]*spot;
-  if(bot<=vis+0.02) return own;
-  const w=Math.min(0.8, 0.42+bot);
+  if(bot<=vis+0.06) return own;
+  const w=Math.min(0.32, (bot-vis)*0.55);
   return lerp3(own, cookColor(base, bot), w);
 }
 
@@ -4316,7 +4312,7 @@ function quant(t){ return PAL[Math.max(0,Math.min(15, Math.round(t*15)))]; }
 // сырое → золотистое → коричневое → тёмное. Тёмное — не провал (см. docs/frying-mechanics.md).
 const PAN_BG_DEFAULT = [66, 58, 48];
 function panBg(){ return PAN_UNDER || PAN_BG_DEFAULT; }
-const GOLD = [214,132,38], BROWN = [168,86,28], DARK = [118,58,22], CHAR = [58,32,14];
+const GOLD = [224,168,72], BROWN = [176,96,36], DARK = [118,58,22], CHAR = [58,32,14];
 function lerp3(a, b, k){ return [ a[0]+(b[0]-a[0])*k, a[1]+(b[1]-a[1])*k, a[2]+(b[2]-a[2])*k ]; }
 function mixOn(t, bg){
   const k = 0.14 + Math.pow(Math.max(0,Math.min(1,t)), 0.85) * 0.86;
@@ -4324,10 +4320,10 @@ function mixOn(t, bg){
 }
 function cookColor(base, c){
   if(c <= 0) return base;
-  if(c < 0.18) return lerp3(base, GOLD, Math.min(1, Math.sqrt(c/0.10)));
-  if(c < 0.55) return lerp3(GOLD, BROWN, (c-0.18)/0.37);
-  if(c < 1.0) return lerp3(BROWN, DARK, (c-0.55)/0.45);
-  return lerp3(DARK, CHAR, Math.min(1, (c-1.0)/0.5));
+  if(c < 0.4) return lerp3(base, GOLD, c/0.4);
+  if(c < 0.8) return lerp3(GOLD, BROWN, (c-0.4)/0.4);
+  if(c < 1.2) return lerp3(BROWN, DARK, (c-0.8)/0.4);
+  return lerp3(DARK, CHAR, Math.min(1, (c-1.2)/0.5));
 }
 const rgb = (c)=>`rgb(${Math.round(c[0])},${Math.round(c[1])},${Math.round(c[2])})`;
 const palPan = new Map();   // 16 ступеней толщины × 16 ступеней прожарки — для пиксельных вариантов
