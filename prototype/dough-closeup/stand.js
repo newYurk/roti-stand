@@ -11,7 +11,7 @@
 // до 400%+ и лист «рвётся» в середине от любого движения. Замер это обнаружил сразу.
 // Число узлов сохранено (1 060 после обрезки по кругу; прежняя оценка «~1150» была на глаз,
 // пересчитано 07.09.2026), однородность рёбер восстановлена.
-const BUILD = "2026-09-17 · вечерний экран крупнее · 41";
+const BUILD = "2026-09-20 · расплющивание горкой · 42";
 const GRID = 38;                   // 38x38, в круг попадает 1 060 узлов (посчитано, не оценка)
 let SUBSTEPS = 8;                  // T2: 8–10 подшагов, 1 итерация
 let DAMP = 0.986;
@@ -58,7 +58,7 @@ let quadCons = [], quadPrev = null, quadSm = null;
 // параллельно в grabs, DOM и замыканиях — прежний захват означал четыре вещи разом.
 let action = { state:"RESTING", pointerId:null, edgeNode:-1, gripIds:[], gripWeights:[],
   down:{x:0,y:0,t:0}, last:{x:0,y:0,t:0}, velocity:{x:0,y:0},
-  impulse:0, direction:{x:0,y:0}, timer:0, mul:0, heldAtLift:0,
+  impulse:0, direction:{x:0,y:0}, timer:0, mul:0, heldAtLift:0, kind:null,
   // перенос «запятой»: накопленный поворот маха, его хвост и параметры полёта
   sweep:0, lastDir:null, tailDir:{x:1,y:0}, carryFrom:{x:0,y:0}, toss:null };
 let lastDecision = "—";            // как классифицирован последний мах — для строки статистик
@@ -2851,7 +2851,9 @@ let stepNo = 1;                                // текущий шаг стен
 let targetR = 1, startR = 1, step1R = 1;       // step1R = цель расплющивания (42% мишени)
 let advancedAt = 0;                            // момент авто-перехода на шаг 2 (для баннера)
 let gestureScale = 1;                          // масштаб жеста: фиксирован от экрана, не от роста листа
-let FLAT_RATE = 0.55;                          // скорость расплющивания под пальцем
+let FLAT_RATE = 0.90;                          // скорость расплющивания под пальцем
+const FLAT_FLOW = 0.48;                        // тесто уезжает из-под пальца, доли радиуса/с
+const FLAT_READY = 0.42;                       // выше этого кусок ещё толстый — тянуть рано
 // Мерка листа — меньшая сторона рабочей зоны; от неё доли комка, свежего листа и мишени.
 // В раме тава нарисована и не растягивается: мерка ещё и не больше той, при которой готовый лист
 // ложится в таву с тем же запасом, что на своём столе (тава в 1,25 раза шире роти). Иначе на
@@ -3033,9 +3035,9 @@ function step(dt){
     }
   }
   plasticT = Math.max(0, plasticT - dt);
-  if(stepNo===1 && action.state==="ARMED") pressFlatten(dt);
-  if(stepNo===1 && sheetRadius() >= step1R){
-    stepNo = 2; advancedAt = performance.now();          // кусок готов — дальше шлепки, тем же листом
+  if(stepNo===1 && action.state==="ARMED" && action.kind!=="lump") pressFlatten(dt);
+  if(stepNo===1 && sheetReadyToStretch()){
+    stepNo = 2; advancedAt = performance.now();          // весь кусок тонкий — дальше шлепки, тем же листом
     try{ localStorage.setItem("dough_step","2"); }catch(e){}
     syncStepButtons();
   }
@@ -3098,6 +3100,32 @@ function centerOfSheet(){
   n = n || 1;
   return { x:sx/n, y:sy/n };
 }
+function flattenStats(){
+  let mx=0, mn=1, sum=0, n=0, over=0;
+  for(let i=0;i<N;i++){
+    if(conDeg && conDeg[i]<=0) continue;
+    const t=thick[i]; if(t>mx) mx=t; if(t<mn) mn=t; sum+=t; n++;
+    if(t>FLAT_READY) over++;
+  }
+  return {max:mx, min:n?mn:0, mean:n?sum/n:1, over:n?over/n:1, n};
+}
+function sheetReadyToStretch(){
+  const s=flattenStats();
+  return s.n>20 && s.over < 0.06;   // почти каждая живая часть ниже порога
+}
+function flattenLiveWord(){
+  const s=flattenStats();
+  const pct=Math.round((1-Math.min(1,s.max))*100);
+  if(action.kind==="lump") return "кусок толстый — прыгает за рукой, сначала расплющи";
+  if(s.over < 0.06) return "✓ тонкий — можно тянуть край";
+  if(s.mean < 0.55 && s.max > FLAT_READY)
+    return action.state==="ARMED"
+      ? `края ещё толстые · прижми по кругу · ${pct}%`
+      : `края ещё толстые — пройди пальцем по ободу · ${pct}%`;
+  return action.state==="ARMED"
+    ? `расплющиваешь · где ведёшь — тоньше · ${pct}%`
+    : `прижми кусок · где ведёшь — там тоньше · ${pct}%`;
+}
 
 // ─── Жест «поднять и шлёпнуть» — ฟาด как единица действия (audit §5–6) ───
 // Скорости в радиусах листа в секунду, чтобы пороги не зависели от экрана.
@@ -3118,7 +3146,7 @@ function clearAction(){
   action.state = "RESTING"; action.pointerId = null; action.edgeNode = -1;
   action.gripIds = []; action.gripWeights = []; action.impulse = 0;
   action.direction = {x:0,y:0}; action.velocity = {x:0,y:0};
-  action.timer = 0; action.mul = 0; action.heldAtLift = 0;
+  action.timer = 0; action.mul = 0; action.heldAtLift = 0; action.kind = null;
   action.sweep = 0; action.lastDir = null; action.tailDir = {x:1,y:0}; action.toss = null;
 }
 
@@ -3132,25 +3160,57 @@ function armAction(pointerId, p){
   action.state = "ARMED"; action.pointerId = pointerId; action.edgeNode = n;
   action.down = { x:p.x, y:p.y, t: performance.now() };
   action.last = { x:p.x, y:p.y, t: performance.now() };
-  action.velocity = {x:0,y:0}; action.impulse = 0;
+  action.velocity = {x:0,y:0}; action.impulse = 0; action.kind = null;
   if(stepNo!==1) updateGripFromHold();                 // на шаге 1 дуга хвата не нужна
 }
 
-// Шаг 1: прижатый палец расплющивает кусок — длины покоя растут сильнее всего
-// под пальцем, слабее по всему куску. Толщина падает сама (площадь растёт).
+// Шаг 1: палец давит тесто. Длины покоя растут ТОЛЬКО под пальцем — края остаются
+// толстыми, пока их не прижмут. Тесто уезжает из-под пальца, в середине ямка.
 function pressFlatten(dt){
-  const over = sheetRadius() / step1R;
-  if(over >= 1.0) return;
-  const ease = over > 0.92 ? Math.max(0.15, (1.0-over)/0.08 * 0.5 + 0.15) : 1;
   const fx = action.last.x, fy = action.last.y;
-  const sigma = Math.max(R0, sheetRadius()*0.55) * 1.15;
+  const sr = Math.max(R0, sheetRadius());
+  const sigma = sr * 0.40;
+  const s2 = sigma*sigma || 1;
   for(let k2=0;k2<cons.length;k2++){
     const c2 = cons[k2]; if(c2.broken) continue;
     const mx = (px[c2.a]+px[c2.b])/2 - fx, my = (py[c2.a]+py[c2.b])/2 - fy;
-    const d2 = (mx*mx + my*my)/(sigma*sigma);
-    const w = Math.exp(-d2)*0.85 + 0.15;
-    c2.rest *= 1 + FLAT_RATE * w * ease * dt;
+    const w = Math.exp(-(mx*mx + my*my)/s2);
+    if(w < 0.03) continue;
+    const t = ((thick[c2.a]||1)+(thick[c2.b]||1))/2;
+    if(t < 0.12) continue;                     // дальше уже не плющим — иначе дыра от нажима
+    c2.rest *= 1 + FLAT_RATE * w * dt;
   }
+  const flow = FLAT_FLOW * sr * dt;
+  for(let i=0;i<N;i++){
+    if(conDeg && conDeg[i]<=0) continue;
+    const dx = px[i]-fx, dy = py[i]-fy;
+    const d2 = dx*dx + dy*dy;
+    const w = Math.exp(-d2/s2);
+    if(w < 0.04) continue;
+    const d = Math.sqrt(d2);
+    if(d > 1e-3){
+      const push = flow * w;
+      px[i] += dx/d * push; py[i] += dy/d * push;
+      prx[i] = px[i]; pry[i] = py[i];
+    }
+    vx[i] *= 1 - 0.55*w; vy[i] *= 1 - 0.55*w;
+  }
+  measureThickness();
+}
+
+function lumpFollow(p){
+  const k = 0.80;
+  const dx = (p.x - action.last.x)*k, dy = (p.y - action.last.y)*k;
+  for(let i=0;i<N;i++){
+    if(conDeg && conDeg[i]<=0) continue;
+    px[i]+=dx; py[i]+=dy; prx[i]=px[i]; pry[i]=py[i];
+    vx[i]=0; vy[i]=0;
+  }
+  action.last = { x:p.x, y:p.y, t: performance.now() };
+}
+function pointerOnRim(p){
+  const c = centerOfSheet(), r = Math.max(R0, sheetRadius());
+  return Math.hypot(p.x-c.x, p.y-c.y) > r * 0.70;
 }
 
 function updateGripFromHold(){
@@ -3171,7 +3231,14 @@ function updateActionMove(p){
     return;
   }
   if(action.state !== "ARMED") return;
-  if(stepNo===1){                                      // шаг 1: палец только ведёт точку прижима
+  if(stepNo===1){                                      // шаг 1: нажим или кусок прыгает за рукой
+    if(action.kind==="lump"){ lumpFollow(p); return; }
+    if(!action.kind){
+      const moved = Math.hypot(p.x-action.down.x, p.y-action.down.y);
+      const r = Math.max(R0, sheetRadius());
+      if(pointerOnRim(action.down) && moved > r*0.20){ action.kind="lump"; lumpFollow(p); return; }
+      if(moved > r*0.04) action.kind="flat";
+    }
     action.last = { x:p.x, y:p.y, t: performance.now() };
     return;
   }
@@ -3921,6 +3988,16 @@ function median(a){ const b=[...a].sort((x,y)=>x-y); const m=b.length>>1;
 
 // ─────────────────────────── ввод
 function nodeNear(x,y){
+  // На расплющивании берём ближайший живой узел — иначе палец в середине
+  // всё равно хватал край, и ямка не читалась.
+  if(stepNo===1){
+    let best=-1, bd=1e9;
+    for(let i=0;i<N;i++){
+      if(conDeg && conDeg[i]<=0) continue;
+      const d=(px[i]-x)**2+(py[i]-y)**2; if(d<bd){bd=d;best=i;}
+    }
+    return best;
+  }
   // Палец толстый, а комок маленький: требовать попадания в край — значит не дать
   // взять тесто вообще. Любое касание рабочей зоны берёт ближайший край листа.
   let best=-1, bd=1e9;
@@ -4169,7 +4246,11 @@ addEventListener("keydown", e=>{
 // Кнопка «сейчас порвётся» убрана с панели 17.09 (владелица: «ей не пользуюсь, место только занимает»).
 // Предсказание разрыва осталось в модели и на пробеле — им пользуется протокол замера, а не игрок.
 { const b = document.getElementById("tear"); if(b) b.addEventListener("click", pressNow); }
-document.getElementById("reset").addEventListener("click", reset);
+document.getElementById("reset").addEventListener("click", ()=>{
+  stepNo=1;
+  try{ localStorage.setItem("dough_step","1"); }catch(e){}
+  reset();
+});
 // Техническое снятие — тот же перелёт на стол, что и у жеста.
 document.getElementById("cutMode").addEventListener("click", ()=>startRemoval());
 document.getElementById("undoDish").addEventListener("click", undoDish);
@@ -4199,7 +4280,7 @@ document.getElementById("tools").addEventListener("click", e=>{ if(e.target.id==
 // Подсказка сразу на три шага занимала 2–4 строки и закрывала до 62 % поля в ландшафте
 // (замер: низ #hint приходился на 40–62 % высоты #stage). Показываем только текущий шаг.
 const HINTS = {
-  1: "шаг 1: прижимай кусочек — расплющишь до пунктира",
+  1: "прижимай кусок: где ведёшь — там тоньше, край остаётся толстым. Когда весь тонкий — можно тянуть край",
   2: "шаг 2: возьми край, миг подержи, резко махни — шлепок. Порвётся — останется рваный узор, так и пожарим",
   3: "шаг 3: возьми край и круговым махом-«запятой» перекинь на таву — полетит, повернётся, зашипит"
 };
@@ -4217,7 +4298,7 @@ document.querySelectorAll("[data-s]").forEach(b=>b.addEventListener("click", ()=
   // tornAt 163472 → 0). Теперь пересборка только там, где она осмысленна: назад или
   // вперёд на лист, который до этого шага ещё не дорос. Свежий кусочек даёт «заново».
   const ready = to === 1 ? false
-              : to === 2 ? sheetRadius() >= step1R
+              : to === 2 ? sheetReadyToStretch()
               :            sheetRadius() >= targetR;
   const keep = to === stepNo || (to > stepNo && ready && phase === "TABLE");
   stepNo = to;
@@ -4225,7 +4306,8 @@ document.querySelectorAll("[data-s]").forEach(b=>b.addEventListener("click", ()=
   syncStepButtons();
   if(!keep) reset();
 }));
-try{ const st0 = +(localStorage.getItem("dough_step")||1); if(st0===1||st0===2||st0===3) stepNo = st0; }catch(e){}
+try{ localStorage.setItem("dough_step","1"); }catch(e){}
+stepNo = 1;
 syncStepButtons();
 
 // Ощущение теста подбирается рукой, а не прогоном: три ползунка меняют
@@ -4384,6 +4466,9 @@ function cookColor(base, c){
   return lerp3(DARK, CHAR, Math.min(1, (c-1.2)/0.5));
 }
 const rgb = (c)=>`rgb(${Math.round(c[0])},${Math.round(c[1])},${Math.round(c[2])})`;
+function doughLift(i){
+  return (thick[i]||0) * DOUGH_UNIT_MM / ROTI_R_MM * targetR * Z_EXAG;
+}
 const palPan = new Map();   // 16 ступеней толщины × 16 ступеней прожарки — для пиксельных вариантов
 function quantOn(t, c){
   const tq = Math.max(0,Math.min(15, Math.round(t*15))), cq = Math.max(0,Math.min(15, Math.round(c/1.7*15)));
@@ -4460,6 +4545,18 @@ function draw(){
       g.fill();
     }
     const onPan = phase === "PAN";
+    const bump = !onPan && !xf;
+    if(bump){
+      const c0 = centerOfSheet(), r0 = sheetRadius(), h0 = flattenStats().mean * DOUGH_UNIT_MM / ROTI_R_MM * targetR * Z_EXAG;
+      g.fillStyle = `rgba(8,4,1,${Math.min(.42, .12 + h0*0.006)})`;
+      g.beginPath();
+      g.ellipse(prX(c0.x,c0.y)*sx+ox, prY(c0.x,c0.y)*sy+oy, r0*1.06*sx, r0*1.06*TILT*sy, 0, 0, Math.PI*2);
+      g.fill();
+    }
+    const Pnt=(i)=>({
+      x: prX(X[i],Y[i])*sx+ox,
+      y: (prY(X[i],Y[i]) - (bump ? doughLift(i)*VIEW_UP : 0))*sy+oy
+    });
     for(let q=0;q<quads.length;q++){
       const qc = quadCons[q];
       const [a,b2,c,d] = quads[q];
@@ -4482,27 +4579,43 @@ function draw(){
         if(onPan){
           const ck = (cook[a]+cook[b2]+cook[c]+cook[d])/4;
           g.fillStyle = pixelated ? quantOn(t, ck) : shadeOn(t, ck);
-        } else g.fillStyle = pixelated ? quant(t) : shade(t);
+        } else {
+          const col = mix(t);
+          const Pa=Pnt(a), Pb=Pnt(b2), Pc=Pnt(c), Pd=Pnt(d);
+          const gx=(Pb.x+Pc.x)-(Pa.x+Pd.x), gy=(Pa.y+Pb.y)-(Pc.y+Pd.y);
+          const lit = bump ? Math.max(.70, Math.min(1.22, 1 + gx*0.0012 + gy*0.0020)) : 1;
+          g.fillStyle = `rgb(${Math.round(col[0]*lit)},${Math.round(col[1]*lit)},${Math.round(col[2]*lit)})`;
+        }
       }
+      const Pa=Pnt(a), Pb=Pnt(b2), Pc=Pnt(c), Pd=Pnt(d);
       g.beginPath();
-      g.moveTo(prX(X[a],Y[a])*sx+ox, prY(X[a],Y[a])*sy+oy);
-      g.lineTo(prX(X[b2],Y[b2])*sx+ox, prY(X[b2],Y[b2])*sy+oy);
-      g.lineTo(prX(X[c],Y[c])*sx+ox, prY(X[c],Y[c])*sy+oy);
-      g.lineTo(prX(X[d],Y[d])*sx+ox, prY(X[d],Y[d])*sy+oy);
+      g.moveTo(Pa.x, Pa.y);
+      g.lineTo(Pb.x, Pb.y);
+      g.lineTo(Pc.x, Pc.y);
+      g.lineTo(Pd.x, Pd.y);
       g.closePath(); g.fill();
     }
     // дуга хвата и палец видны только пока жест взводится: ARMED подсвечивает
     // выбранный край (audit, проход A), тесто при этом не двигается.
     if(action.state==="ARMED" || action.state==="LIFTING"){
-      g.fillStyle="#d98b3a";
-      const S2 = pixelated ? 2 : 6;
-      for(const n of action.gripIds)
-        g.fillRect(prX(px[n],py[n])*sx-S2/2, prY(px[n],py[n])*sy-S2/2, S2, S2);
-      const rr = pixelated ? 4 : 14;
-      g.beginPath();
-      g.ellipse(prX(action.last.x,action.last.y)*sx, prY(action.last.x,action.last.y)*sy,
-                rr, rr*TILT, 0, 0, Math.PI*2);
-      g.fill();
+      if(stepNo===1){
+        const rr = pixelated ? 6 : 16;
+        g.fillStyle="rgba(28,16,8,0.30)";
+        g.beginPath();
+        g.ellipse(prX(action.last.x,action.last.y)*sx, prY(action.last.x,action.last.y)*sy,
+                  rr, rr*TILT, 0, 0, Math.PI*2);
+        g.fill();
+      } else {
+        g.fillStyle="#d98b3a";
+        const S2 = pixelated ? 2 : 6;
+        for(const n of action.gripIds)
+          g.fillRect(prX(px[n],py[n])*sx-S2/2, prY(px[n],py[n])*sy-S2/2, S2, S2);
+        const rr = pixelated ? 4 : 14;
+        g.beginPath();
+        g.ellipse(prX(action.last.x,action.last.y)*sx, prY(action.last.x,action.last.y)*sy,
+                  rr, rr*TILT, 0, 0, Math.PI*2);
+        g.fill();
+      }
     }
   }
 
@@ -4656,10 +4769,8 @@ function loop(now){
     : action.state==="CARRY" ? "в руке — веди запятую к таве"
     : action.state==="TOSS" ? "летит…"
     : banner ? (stepNo===3 ? "✓ растянуто — теперь круговым махом-«запятой» на таву"
-                           : "✓ расплющено — шаг 2: возьми край и резко махни")
-    : stepNo===1 ? (action.state==="ARMED"
-        ? `расплющиваешь · ${Math.round(sheetRadius()/step1R*100)}%`
-        : `шаг 1 · прижми кусочек и расплющивай · ${Math.round(sheetRadius()/step1R*100)}%`)
+                           : "✓ тонкий — возьми край и резко махни")
+    : stepNo===1 ? flattenLiveWord()
     : action.state==="ARMED" ? `держишь край · хват ${Math.round(action.mul||GRIP_MIN)} · смахни!`
     : (action.state==="LIFTING"||action.state==="FLYING") ? "бросок…"
     : (action.state==="IMPACT"||action.state==="SETTLING") ? `ШЛЕП · лист ${pct}%${ready}${ragged}`
