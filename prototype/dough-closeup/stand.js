@@ -2851,7 +2851,7 @@ let stepNo = 1;                                // текущий шаг стен
 let targetR = 1, startR = 1, step1R = 1;       // step1R = цель расплющивания (42% мишени)
 let advancedAt = 0;                            // момент авто-перехода на шаг 2 (для баннера)
 let gestureScale = 1;                          // масштаб жеста: фиксирован от экрана, не от роста листа
-let FLAT_RATE = 2.8;                           // сколько толщины снимает нажим за секунду
+let FLAT_RATE = 0.55;                          // толщина сходит не сразу: секунда в пятне ≈ половина
 const FLAT_READY = 0.42;                       // выше этого кусок ещё толстый — тянуть рано
 let flatH = null;                              // карта нажима: 1 толстое, меньше — где провели
 // Мерка листа — меньшая сторона рабочей зоны; от неё доли комка, свежего листа и мишени.
@@ -3172,21 +3172,21 @@ function pressFlatten(dt){
   const at = flattenAt(action.last);
   const fx = at.x, fy = at.y;
   const sr = Math.max(R0, sheetRadius());
-  const sigma = Math.max(sr * 0.50, gestureScale * 0.16);
+  const sigma = Math.max(sr * 0.32, gestureScale * 0.12);
   const s2 = sigma*sigma || 1;
-  const drop = FLAT_RATE * dt;
   for(let i=0;i<N;i++){
     if(conDeg && conDeg[i]<=0) continue;
     const dx = px[i]-fx, dy = py[i]-fy;
     const w = Math.exp(-(dx*dx + dy*dy)/s2);
-    if(w < 0.03) continue;
-    flatH[i] = Math.max(0.12, flatH[i] - drop * w);
+    if(w < 0.04) continue;
+    // Чем толще — тем податливее; уже тонкое почти не уходит. Не линейный срез за 0,3 с.
+    flatH[i] = Math.max(0.18, flatH[i] * Math.exp(-FLAT_RATE * w * dt));
   }
   const mean = flattenStats().mean;
-  const want = Math.min(step1R, R0 * Math.sqrt(1 / Math.max(0.18, mean)));
+  const want = Math.min(step1R, R0 * Math.sqrt(1 / Math.max(0.22, mean)));
   const c = centerOfSheet();
   const r = Math.max(1e-3, sheetRadius());
-  const s = 1 + Math.min(Math.max(0, want/r - 1), 0.40 * dt);
+  const s = 1 + Math.min(Math.max(0, want/r - 1), 0.16 * dt);
   if(s > 1.001){
     for(let i=0;i<N;i++){
       px[i] = c.x + (px[i]-c.x)*s;
