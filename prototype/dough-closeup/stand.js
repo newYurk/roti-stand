@@ -11,7 +11,7 @@
 // до 400%+ и лист «рвётся» в середине от любого движения. Замер это обнаружил сразу.
 // Число узлов сохранено (1 060 после обрезки по кругу; прежняя оценка «~1150» была на глаз,
 // пересчитано 07.09.2026), однородность рёбер восстановлена.
-const BUILD = "2026-09-20 · расплющивание горкой · 42";
+const BUILD = "2026-09-20 · расплющивание сверху · 43";
 const GRID = 38;                   // 38x38, в круг попадает 1 060 узлов (посчитано, не оценка)
 let SUBSTEPS = 8;                  // T2: 8–10 подшагов, 1 итерация
 let DAMP = 0.986;
@@ -4511,13 +4511,6 @@ function cookColor(base, c){
   return lerp3(DARK, CHAR, Math.min(1, (c-1.2)/0.5));
 }
 const rgb = (c)=>`rgb(${Math.round(c[0])},${Math.round(c[1])},${Math.round(c[2])})`;
-function visDiscLift(h){
-  return (h||0) * DOUGH_UNIT_MM / ROTI_R_MM * targetR * VIEW_UP;
-}
-function doughLift(i){
-  const h = (flatH && stepNo===1 ? flatH[i] : thick[i]) || 0;
-  return visDiscLift(h);
-}
 const palPan = new Map();   // 16 ступеней толщины × 16 ступеней прожарки — для пиксельных вариантов
 function quantOn(t, c){
   const tq = Math.max(0,Math.min(15, Math.round(t*15))), cq = Math.max(0,Math.min(15, Math.round(c/1.7*15)));
@@ -4595,42 +4588,23 @@ function draw(){
     }
     const onPan = phase === "PAN";
     const Hmap = (stepNo===1 && flatH) ? flatH : thick;
-    const discLike = !onPan && !xf && !tornAt;
-    const lift = discLike ? new Float32Array(N) : null;
-    let hMean = 0;
-    if(lift){
-      let sH=0, nH=0;
-      for(let i=0;i<N;i++){
-        lift[i] = doughLift(i);
-        const h = Hmap[i]||0;
-        if(!conDeg || conDeg[i]>0){ sH+=h; nH++; }
-      }
-      hMean = nH ? sH/nH : 1;
-      const cap = sheetRadius() * TILT * 0.38;
-      for(let i=0;i<N;i++) if(lift[i] > cap) lift[i] = cap;
-    }
     const Pnt=(i)=>({
       x: prX(X[i],Y[i])*sx+ox,
-      y: (prY(X[i],Y[i]) - (lift ? lift[i] : 0))*sy+oy
+      y: prY(X[i],Y[i])*sy+oy
     });
-    if(discLike){
+    if(!onPan && !xf){
       const c0 = bodyC, r0 = sheetRadius();
-      const x = prX(c0.x,c0.y)*sx+ox, y = prY(c0.x,c0.y)*sy+oy;
-      const rx = r0*sx, ry = r0*TILT*sy;
-      const hPx = Math.min(visDiscLift(hMean) * sy, ry * 0.38);
-      g.fillStyle = "rgba(10,6,2,0.26)";
-      g.beginPath(); g.ellipse(x, y + Math.min(hPx*0.18, ry*0.07), rx*1.03, ry*1.04, 0, 0, Math.PI*2); g.fill();
-      const col = mix(Math.max(0.62, hMean));
-      g.fillStyle = `rgb(${(col[0]*0.88)|0},${(col[1]*0.84)|0},${(col[2]*0.78)|0})`;
-      g.beginPath(); g.ellipse(x, y, rx, ry, 0, 0, Math.PI*2); g.fill();
+      g.fillStyle = "rgba(10,6,2,0.20)";
+      g.beginPath();
+      g.ellipse(prX(c0.x,c0.y)*sx+ox, prY(c0.x,c0.y)*sy+oy + r0*TILT*sy*0.05,
+                r0*1.03*sx, r0*1.04*TILT*sy, 0, 0, Math.PI*2);
+      g.fill();
     }
     for(let q=0;q<quads.length;q++){
       const qc = quadCons[q];
       const [a,b2,c,d] = quads[q];
       const torn = qc[0].broken || (qc[1]&&qc[1].broken) || (qc[2]&&qc[2].broken) || (qc[3]&&qc[3].broken);
-      let t= discLike
-        ? (Hmap[a]+Hmap[b2]+Hmap[c]+Hmap[d])/4
-        : (thick[a]+thick[b2]+thick[c]+thick[d])/4;
+      let t= (Hmap[a]+Hmap[b2]+Hmap[c]+Hmap[d])/4;
       if(torn){
         const inside =
           (px[a]-bodyC.x)**2+(py[a]-bodyC.y)**2 < bodyR2 &&
@@ -4649,11 +4623,8 @@ function draw(){
           const ck = (cook[a]+cook[b2]+cook[c]+cook[d])/4;
           g.fillStyle = pixelated ? quantOn(t, ck) : shadeOn(t, ck);
         } else {
-          const col = mix(discLike ? Math.max(0.48, t) : t);
-          const Pa=Pnt(a), Pb=Pnt(b2), Pc=Pnt(c), Pd=Pnt(d);
-          const gx=(Pb.x+Pc.x)-(Pa.x+Pd.x), gy=(Pa.y+Pb.y)-(Pc.y+Pd.y);
-          const lit = discLike ? Math.max(.70, Math.min(1.22, 1 + gx*0.0012 + gy*0.0020)) : 1;
-          g.fillStyle = `rgb(${Math.round(col[0]*lit)},${Math.round(col[1]*lit)},${Math.round(col[2]*lit)})`;
+          const col = mix(t);
+          g.fillStyle = `rgb(${col[0]},${col[1]},${col[2]})`;
         }
       }
       const Pa=Pnt(a), Pb=Pnt(b2), Pc=Pnt(c), Pd=Pnt(d);
