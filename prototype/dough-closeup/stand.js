@@ -11,7 +11,7 @@
 // до 400%+ и лист «рвётся» в середине от любого движения. Замер это обнаружил сразу.
 // Число узлов сохранено (1 060 после обрезки по кругу; прежняя оценка «~1150» была на глаз,
 // пересчитано 07.09.2026), однородность рёбер восстановлена.
-const BUILD = "2026-09-20 · шлепок по стороне · 51";
+const BUILD = "2026-09-20 · диск до шлепка · 52";
 const GRID = 38;                   // 38x38, в круг попадает 1 060 узлов (посчитано, не оценка)
 let SUBSTEPS = 8;                  // T2: 8–10 подшагов, 1 итерация
 let DAMP = 0.986;
@@ -3119,6 +3119,17 @@ function flattenStats(){
 function sheetReadyToStretch(){
   return sheetRadius() >= step1R * 0.92;
 }
+function flattenDidWork(){
+  const s = flattenStats();
+  return sheetRadius() > R0 * 1.08 || s.mean < 0.94;
+}
+function sheetLooksDisc(){
+  if(phase!=="TABLE" || xf) return false;
+  if(stepNo===1) return true;
+  if(stepNo!==2) return false;
+  if(tornAt) return false;
+  return sameSlapN === 0;
+}
 function flattenLiveWord(){
   const s=flattenStats();
   const pct=Math.min(100, Math.round(sheetRadius()/step1R*100));
@@ -4360,7 +4371,12 @@ document.querySelectorAll("[data-s]").forEach(b=>b.addEventListener("click", ()=
   // «растянуть» забирает ТЕКУЩИЙ диск, не новый. Иначе плющение выкидывалось,
   // и шаг 2 всегда начинался одним и тем же кругом.
   if(to === 2 && stepNo === 1 && phase === "TABLE"){
-    bakeFlatten();
+    if(flattenDidWork()) bakeFlatten();
+    else {
+      stepNo = 2;
+      try{ localStorage.setItem("dough_step","2"); }catch(e){}
+      reset();
+    }
     return;
   }
   const ready = to === 1 ? false
@@ -4672,7 +4688,7 @@ function draw(){
       x: prX(X[i],Y[i])*sx+ox,
       y: prY(X[i],Y[i])*sy+oy
     });
-    if(stepNo===1 && !onPan && !xf){
+    if(sheetLooksDisc() && !onPan && !xf){
       const c0 = bodyC, r0 = Math.max(R0, sheetRadius());
       const x = prX(c0.x,c0.y)*sx+ox, y = prY(c0.x,c0.y)*sy+oy;
       const rx = r0*sx, ry = r0*TILT*sy;
@@ -4681,8 +4697,13 @@ function draw(){
       g.save();
       g.beginPath(); g.ellipse(x, y, rx, ry, 0, 0, Math.PI*2);
       g.clip();
-      const st = flattenStats();
-      const col = mix(Math.max(0.28, st.mean));
+      const st = stepNo===1 ? flattenStats() : { mean: 1 };
+      let base = stepNo===1 ? Math.max(0.28, st.mean) : 0.72;
+      if(stepNo===2){
+        let s=0,n=0; for(let i=0;i<N;i++){ if(conDeg && conDeg[i]<=0) continue; s+=Hmap[i]; n++; }
+        if(n) base = Math.max(0.28, s/n);
+      }
+      const col = mix(base);
       g.fillStyle = `rgb(${col[0]},${col[1]},${col[2]})`;
       g.fill();
       for(let q=0;q<quads.length;q++){
@@ -4705,7 +4726,7 @@ function draw(){
                 r0*1.03*sx, r0*1.04*TILT*sy, 0, 0, Math.PI*2);
       g.fill();
     }
-    if(!(stepNo===1 && !onPan && !xf))
+    if(!(sheetLooksDisc() && !onPan && !xf))
     for(let q=0;q<quads.length;q++){
       const qc = quadCons[q];
       const [a,b2,c,d] = quads[q];
