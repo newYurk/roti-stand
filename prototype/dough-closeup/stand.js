@@ -11,7 +11,7 @@
 // до 400%+ и лист «рвётся» в середине от любого движения. Замер это обнаружил сразу.
 // Число узлов сохранено (1 060 после обрезки по кругу; прежняя оценка «~1150» была на глаз,
 // пересчитано 07.09.2026), однородность рёбер восстановлена.
-const BUILD = "2026-09-20 · диск до шлепка · 52";
+const BUILD = "2026-09-20 · лепесток шлепка · 53";
 const GRID = 38;                   // 38x38, в круг попадает 1 060 узлов (посчитано, не оценка)
 let SUBSTEPS = 8;                  // T2: 8–10 подшагов, 1 итерация
 let DAMP = 0.986;
@@ -2936,7 +2936,7 @@ function build(){
   layoutPan();
   phase = "TABLE"; xf = null;
   dish = null; dishGesture = null; dishFlight = null; dishMove = null; dishTwist = null; dishPinch = null; dishSpread = 1; dishTouches.clear(); syncDishUI(); syncStepButtons();
-  lastSlapDir = null; sameSlapN = 0;
+  lastSlapDir = null; sameSlapN = 0; slapStick = null;
   panPress = []; domes = []; fatMap = null; fatGesture = null;
   { const card = document.getElementById("card"); if(card) card.hidden = true; }
   cook = new Float32Array(N); dry = new Float32Array(N);
@@ -3020,7 +3020,7 @@ function step(dt){
              : (action.state==="SETTLING" && plasticT<=0) ? 0.94 : DAMP;
   for(let ss=0; ss<SUBSTEPS; ss++){
     for(let i=0;i<N;i++){
-      if(pinned[i]){ prx[i]=px[i]; pry[i]=py[i]; continue; }
+      if(pinned[i] || (slapStick && slapStick[i])){ prx[i]=px[i]; pry[i]=py[i]; continue; }
       vx[i]*=damp; vy[i]*=damp;
       prx[i]=px[i]+vx[i]*h; pry[i]=py[i]+vy[i]*h;
     }
@@ -3032,7 +3032,8 @@ function step(dt){
       const a=c.a, b=c.b;
       const dx=prx[b]-prx[a], dy=pry[b]-pry[a];
       const d=Math.hypot(dx,dy); if(d<1e-6) continue;
-      const wa = pinned[a]?0:1, wb = pinned[b]?0:1, w = wa+wb;
+      const wa = (pinned[a] || (slapStick && slapStick[a]))?0:1;
+      const wb = (pinned[b] || (slapStick && slapStick[b]))?0:1, w = wa+wb;
       if(w===0) continue;
       const lam=-(d-c.rest)/(w+alpha), nx=dx/d, ny=dy/d;
       prx[a]-=nx*lam*wa; pry[a]-=ny*lam*wa;
@@ -3041,7 +3042,7 @@ function step(dt){
     if(action.state==="LIFTING") liftPull();
 
     for(let i=0;i<N;i++){
-      if(pinned[i]) continue;
+      if(pinned[i] || (slapStick && slapStick[i])) continue;
       vx[i]=(prx[i]-px[i])/h; vy[i]=(pry[i]-py[i])/h;
       px[i]=prx[i]; py[i]=pry[i];
     }
@@ -3165,6 +3166,7 @@ function clearAction(){
   action.direction = {x:0,y:0}; action.velocity = {x:0,y:0};
   action.timer = 0; action.mul = 0; action.heldAtLift = 0; action.kind = null;
   action.sweep = 0; action.lastDir = null; action.tailDir = {x:1,y:0}; action.toss = null;
+  slapStick = null;
 }
 
 function armAction(pointerId, p){
@@ -3549,8 +3551,9 @@ function meanDry(){
   return n ? s/n : 0;
 }
 
-let SLAP_GROW = 0.10;            // пластическое растяжение за удар; растёт сторона, не весь круг
+let SLAP_GROW = 0.15;            // клин удара: один шлепок читается лепестком
 let lastSlapDir = null, sameSlapN = 0;
+let slapStick = null;            // спина прилипла к столу на время удара
 let TEAR_I = 3.4;                // с этой силы шлепок опасен…
 let TEAR_THIN = 0.10;            // …если лист уже истончился ниже этого
 const TEAR_PRESETS = {
@@ -3590,6 +3593,7 @@ function punchHole(direction){
 function impactAction(){
   action.state = "IMPACT";
   const c = centerOfSheet();
+  beginSlapStick(action.direction, c);
   applySlapImpulse(action.impulse * gestureScale, action.direction, c);
   // Сработал стоп-сигнал audit §6.6: скоростной импульс в одиночку не растил площадь —
   // жёсткий решатель гасил растяжение раньше, чем пластичность его захватывала
@@ -3621,37 +3625,57 @@ function slapWeight(x, y, direction, center, sr, t){
   const mx = x - center.x, my = y - center.y;
   const dl = Math.hypot(mx, my) || 1;
   const along = (mx/dl)*direction.x + (my/dl)*direction.y;
-  const sector = 0.08 + 0.92 * Math.max(0, along);     // полукруг удара; спина почти стоит
-  const edgeBias = Math.max(0, Math.min(1, dl/sr));
-  const thinW = Math.max(0.12, Math.min(1, (1.15 - t) / 0.85)); // толстое ~0,12, тонкое ~1
-  return sector * (0.28 + 0.72*thinW) * (0.38 + 0.62*edgeBias);
+  const facing = Math.max(0, along);
+  const sector = facing * facing;                    // спина ноль; на 90° уже ноль
+  const rim = Math.max(0, Math.min(1, dl/sr));
+  const thinW = Math.max(0.08, Math.min(1, (1.15 - t) / 0.85));
+  return sector * (0.12 + 0.88*thinW) * (0.06 + 0.94*rim*rim);
+}
+
+function beginSlapStick(direction, center){
+  slapStick = new Uint8Array(N);
+  for(let i=0;i<N;i++){
+    const mx = px[i]-center.x, my = py[i]-center.y;
+    const dl = Math.hypot(mx,my)||1;
+    const along = (mx/dl)*direction.x + (my/dl)*direction.y;
+    slapStick[i] = along < -0.12 ? 1 : 0;            // спина держит стол
+  }
 }
 
 function plasticStretch(I, direction, center){
   const over = sheetRadius() / targetR;
-  if(over > 1.25) return;                            // предел растяжимости — общий для всех путей роста
+  if(over > 1.25) return;
   const ease = over > 1.0 ? Math.max(0, 1 - (over-1.0)/0.25) : 1;
   const sr = Math.max(1, sheetRadius());
   for(let k2=0;k2<cons.length;k2++){
     const c2 = cons[k2]; if(c2.broken) continue;
+    const ax=px[c2.a]-center.x, ay=py[c2.a]-center.y;
+    const bx=px[c2.b]-center.x, by=py[c2.b]-center.y;
+    const da=Math.hypot(ax,ay)||1, db=Math.hypot(bx,by)||1;
+    const along = Math.max(
+      (ax/da)*direction.x+(ay/da)*direction.y,
+      (bx/db)*direction.x+(by/db)*direction.y
+    );
+    if(along <= 0) continue;                         // спина не растёт вовсе
     const mx = (px[c2.a]+px[c2.b])*0.5, my = (py[c2.a]+py[c2.b])*0.5;
     const t = ((thick[c2.a]||1)+(thick[c2.b]||1))*0.5;
     const w = slapWeight(mx, my, direction, center, sr, t);
+    if(w < 0.02) continue;
     c2.rest *= 1 + SLAP_GROW * I * w * ease;
   }
 }
 
-// audit §6.5 дословно: не симуляция удара, а явная игровая модель —
-// быстрый жест даёт краткое, широкое и наблюдаемое расправление.
 function applySlapImpulse(I, direction, center){
   const sr = Math.max(1, sheetRadius());
   for(let i=0;i<N;i++){
+    if(slapStick && slapStick[i]){ vx[i]=0; vy[i]=0; continue; }
     const loose = conDeg ? Math.min(1, conDeg[i]/3) : 1;
     const w = slapWeight(px[i], py[i], direction, center, sr, thick[i]||1) * loose;
+    if(w < 0.02) continue;
     const ddx = px[i]-center.x, ddy = py[i]-center.y;
     const dl = Math.hypot(ddx,ddy) || 1;
-    vx[i] += (ddx/dl) * I * w;
-    vy[i] += (ddy/dl) * I * w;
+    vx[i] += (direction.x*0.72 + (ddx/dl)*0.28) * I * w;
+    vy[i] += (direction.y*0.72 + (ddy/dl)*0.28) * I * w;
   }
 }
 
@@ -3750,15 +3774,23 @@ function evenOut(dt){
   }
 }
 function creep(dt){
-  if(sheetRadius() > targetR*1.25) return;          // предел растяжимости — общий с раскруткой
-  evenOut(dt);
-  // В окне удара тесто на порядок пластичнее: расправление закрепляется в длинах
-  // покоя; вне окна лист упругий (audit, группа B: creep).
-  const k = Math.min(1, CREEP * (plasticT>0 ? PLASTIC_BOOST : 1) * dt);
+  if(sheetRadius() > targetR*1.25) return;
+  if(!(plasticT>0 || slapStick)) evenOut(dt);
+  const slapBoost = plasticT>0 ? PLASTIC_BOOST : 1;
+  const k = Math.min(1, CREEP * slapBoost * dt);
+  const sr = Math.max(1, sheetRadius());
+  const c0 = lastSlapDir ? centerOfSheet() : null;
   for(let i=0;i<cons.length;i++){
     const c=cons[i]; if(c.broken) continue;
     const d=Math.hypot(px[c.b]-px[c.a], py[c.b]-py[c.a]);
-    if((d-c.rest)/c.rest > CREEP_ON) c.rest += (d-c.rest)*k;
+    if((d-c.rest)/c.rest <= CREEP_ON) continue;
+    let w = 1;
+    if(plasticT>0 && lastSlapDir){
+      const t = ((thick[c.a]||1)+(thick[c.b]||1))*0.5;
+      w = slapWeight((px[c.a]+px[c.b])*0.5, (py[c.a]+py[c.b])*0.5, lastSlapDir, c0, sr, t);
+    }
+    if(w < 0.02) continue;
+    c.rest += (d-c.rest)*k*w;
   }
 }
 function checkBreak(dt){
