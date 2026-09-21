@@ -11,7 +11,7 @@
 // до 400%+ и лист «рвётся» в середине от любого движения. Замер это обнаружил сразу.
 // Число узлов сохранено (1 060 после обрезки по кругу; прежняя оценка «~1150» была на глаз,
 // пересчитано 07.09.2026), однородность рёбер восстановлена.
-const BUILD = "2026-09-20 · упрочнение тонкого · 55";
+const BUILD = "2026-09-20 · лепесток виден · 56";
 const GRID = 38;                   // 38x38, в круг попадает 1 060 узлов (посчитано, не оценка)
 let SUBSTEPS = 8;                  // T2: 8–10 подшагов, 1 итерация
 let DAMP = 0.986;
@@ -3052,7 +3052,7 @@ function step(dt){
   // «на таву» вручную ПЕРЕСОБИРАЛО лист — растянутый своими руками уходил в мусор,
   // и на таву летел свежий. Это спорило с «как порвал, так и пожаришь»: дырки,
   // заработанные при растяжке, до тавы не доезжали (замечание владельца 08.09.2026).
-  if(stepNo===2 && phase==="TABLE" && sheetRadius() >= targetR){
+  if(stepNo===2 && phase==="TABLE" && sheetShortR() >= targetR * 0.88){
     stepNo = 3; advancedAt = performance.now();
     try{ localStorage.setItem("dough_step","3"); }catch(e){}
     syncStepButtons();
@@ -3106,6 +3106,21 @@ function centerOfSheet(){
   n = n || 1;
   return { x:sx/n, y:sy/n };
 }
+let edgeRadBuf = null;
+function sheetShortR(){
+  const c = centerOfSheet();
+  const need = Math.max(64, edgeNodes.length);
+  if(!edgeRadBuf || edgeRadBuf.length < need) edgeRadBuf = new Float32Array(need);
+  let n = 0;
+  for(const i of edgeNodes){
+    if(conDeg && conDeg[i] <= 0) continue;
+    edgeRadBuf[n++] = Math.hypot(px[i]-c.x, py[i]-c.y);
+  }
+  if(!n) return 0;
+  const a = edgeRadBuf.subarray(0, n);
+  Array.prototype.sort.call(a, (x,y)=>x-y);
+  return a[Math.min(n-1, Math.floor(n*0.18))];
+}
 function flattenStats(){
   const h = flatH || thick;
   let mx=0, mn=1, sum=0, n=0, over=0;
@@ -3128,7 +3143,7 @@ function sheetLooksDisc(){
   if(stepNo===1) return true;
   if(stepNo!==2) return false;
   if(tornAt) return false;
-  return sameSlapN === 0;
+  return true;
 }
 function flattenLiveWord(){
   const s=flattenStats();
@@ -3549,7 +3564,7 @@ function meanDry(){
   return n ? s/n : 0;
 }
 
-let SLAP_GROW = 0.085;           // пластичность удара; тонкое упрочняется, не течёт сильнее
+let SLAP_GROW = 0.12;            // сторона маха заметно длиннее; спина чуть растёт
 let lastSlapDir = null, sameSlapN = 0;
 let TEAR_I = 3.4;                // с этой силы шлепок опасен…
 let TEAR_THIN = 0.10;            // …если лист уже истончился ниже этого
@@ -3621,12 +3636,12 @@ function slapWeight(x, y, direction, center, sr, t){
   const mx = x - center.x, my = y - center.y;
   const dl = Math.hypot(mx, my) || 1;
   const along = (mx/dl)*direction.x + (my/dl)*direction.y;
-  // Пол вдоль маха. Спина живая (0,28): ноль на спине давал полосу сдвига.
-  const axis = 0.28 + 0.72 * Math.max(0, along);
+  const facing = Math.max(0, along);
+  // Лепесток ~120°, не полукруг и не клин. Пол 0,10 — спина живая, без полосы сдвига.
+  const axis = 0.10 + 0.90 * Math.pow(facing, 1.25);
   const edge = Math.max(0, Math.min(1, dl/sr));
-  // Strain hardening: тонкое твердеет, толстое ещё течёт. Раньше было наоборот.
   const harden = 0.32 + 0.68 * Math.max(0, Math.min(1, t));
-  return axis * (0.38 + 0.62*edge) * harden;
+  return axis * (0.28 + 0.72*edge*edge) * harden;
 }
 
 function plasticStretch(I, direction, center){
@@ -3734,9 +3749,8 @@ const CREEP_ON = 0.06;             // порог растяжения, с кот
 // и «прозрачного листа» из v3 не давала в принципе.
 let evenBuf = null;
 function evenOut(dt){
-  // Тесто под руками выравнивается: толстые места отдают тонким. Без этого
-  // жёсткий лист рвался у точки захвата на 90% пути, так и не дойдя до цели.
-  const k = Math.min(0.5, 3.2*dt);
+  // В окне удара почти не сглаживаем: иначе лепесток за кадр становится кругом.
+  const k = Math.min(0.5, 3.2*dt) * (plasticT>0 ? 0.18 : 1);
   if(!evenBuf || evenBuf.length !== cons.length) evenBuf = new Float32Array(cons.length);
   let sum = 0, n = 0;
   for(let i=0;i<cons.length;i++){ const c=cons[i]; if(c.broken) continue;
@@ -3745,7 +3759,6 @@ function evenOut(dt){
   if(!n) return;
   const mean = sum/n;
   for(let i=0;i<cons.length;i++){ const c=cons[i]; if(c.broken) continue;
-    // перетянутые связи слегка удлиняют покой, недотянутые — укорачивают
     c.rest *= 1 + (evenBuf[i] - mean)/Math.max(0.2, mean) * 0.02 * k;
   }
 }
@@ -4356,7 +4369,7 @@ document.getElementById("tools").addEventListener("click", e=>{ if(e.target.id==
 // (замер: низ #hint приходился на 40–62 % высоты #stage). Показываем только текущий шаг.
 const HINTS = {
   1: "прижимай кусок: где ведёшь — там тоньше, край остаётся толстым. Когда весь тонкий — можно тянуть край",
-  2: "шаг 2: край, миг, мах. Растёт сторона маха; где уже тонко — твердеет. Обходи круг",
+  2: "шаг 2: край, миг, мах. Один удар — лепесток. Чтобы кругом, обойди",
   3: "шаг 3: возьми край и круговым махом-«запятой» перекинь на таву — полетит, повернётся, зашипит"
 };
 function syncStepButtons(){
@@ -4630,6 +4643,32 @@ function viewX(){
 }
 function viewY(){ return vyBuf; }
 
+function pathSheetOutline(g, sx, ox, sy, oy, extraY){
+  const c = centerOfSheet();
+  const bins = 28;
+  const xs = new Float32Array(bins), ys = new Float32Array(bins), cn = new Uint8Array(bins);
+  for(const i of edgeNodes){
+    if(conDeg && conDeg[i]<=0) continue;
+    let b = Math.floor((Math.atan2(py[i]-c.y, px[i]-c.x)+Math.PI)/(2*Math.PI)*bins);
+    if(b<0) b=0; else if(b>=bins) b=bins-1;
+    xs[b]+=prX(px[i],py[i])*sx+ox;
+    ys[b]+=prY(px[i],py[i])*sy+oy+(extraY||0);
+    cn[b]++;
+  }
+  const P=[];
+  for(let b=0;b<bins;b++) if(cn[b]) P.push({x:xs[b]/cn[b], y:ys[b]/cn[b]});
+  if(P.length<8) return false;
+  g.beginPath();
+  const last=P[P.length-1];
+  g.moveTo((P[0].x+last.x)*0.5, (P[0].y+last.y)*0.5);
+  for(let i=0;i<P.length;i++){
+    const n=P[(i+1)%P.length];
+    g.quadraticCurveTo(P[i].x, P[i].y, (P[i].x+n.x)*0.5, (P[i].y+n.y)*0.5);
+  }
+  g.closePath();
+  return true;
+}
+
 function draw(){
   const pixelated = variant!=="C";
   const LOGW = variant==="A" ? 80 : 224;
@@ -4690,10 +4729,17 @@ function draw(){
       const c0 = bodyC, r0 = Math.max(R0, sheetRadius());
       const x = prX(c0.x,c0.y)*sx+ox, y = prY(c0.x,c0.y)*sy+oy;
       const rx = r0*sx, ry = r0*TILT*sy;
+      const useHull = stepNo===2 && sameSlapN>0;
       g.fillStyle = "rgba(10,6,2,0.22)";
-      g.beginPath(); g.ellipse(x, y+ry*0.07, rx*1.06, ry*1.08, 0, 0, Math.PI*2); g.fill();
+      if(useHull && pathSheetOutline(g, sx, ox, sy, oy, r0*TILT*sy*0.07)){
+        g.fill();
+      } else {
+        g.beginPath(); g.ellipse(x, y+ry*0.07, rx*1.06, ry*1.08, 0, 0, Math.PI*2); g.fill();
+      }
       g.save();
-      g.beginPath(); g.ellipse(x, y, rx, ry, 0, 0, Math.PI*2);
+      if(!(useHull && pathSheetOutline(g, sx, ox, sy, oy, 0))){
+        g.beginPath(); g.ellipse(x, y, rx, ry, 0, 0, Math.PI*2);
+      }
       g.clip();
       const st = stepNo===1 ? flattenStats() : { mean: 1 };
       let base = stepNo===1 ? Math.max(0.28, st.mean) : 0.72;
@@ -4920,9 +4966,9 @@ function loop(now){
   acc+=real; frameCount++;
   if(acc>0.5){ fps=frameCount/acc; acc=0; frameCount=0; }
   const liveEl = document.getElementById("live");
-  const pct = Math.round(sheetRadius()/targetR*100);
+  const pct = Math.round((sheetShortR()*0.4 + sheetRadius()*0.6)/targetR*100);
   const ragged = tornAt ? " · рваный узор" : "";
-  const ready = sheetRadius()>=targetR ? " ✓ готов · запятой на таву →" : "";
+  const ready = sheetShortR()>=targetR*0.88 ? " ✓ готов · запятой на таву →" : "";
   const banner = advancedAt && performance.now()-advancedAt < 2600;
   const mc = meanCook(), md = meanDry();
   const verdictAge = verdictAt ? performance.now() - verdictAt : Infinity;
