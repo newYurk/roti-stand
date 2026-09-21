@@ -913,7 +913,6 @@ function cookDish(dt){
       if(live) live.textContent=h;
     }
   }
-  }
 }
 function fryHint(){
   const st=rotiStage(), mc=dishSideMean("cook","contactWeights"), md=dishSideMean("dry","contactWeights");
