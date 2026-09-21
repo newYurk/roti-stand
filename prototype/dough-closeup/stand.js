@@ -11,7 +11,7 @@
 // до 400%+ и лист «рвётся» в середине от любого движения. Замер это обнаружил сразу.
 // Число узлов сохранено (1 060 после обрезки по кругу; прежняя оценка «~1150» была на глаз,
 // пересчитано 07.09.2026), однородность рёбер восстановлена.
-const BUILD = "2026-09-20 · экран у моря · 47";
+const BUILD = "2026-09-20 · лог с заново · 48";
 const GRID = 38;                   // 38x38, в круг попадает 1 060 узлов (посчитано, не оценка)
 let SUBSTEPS = 8;                  // T2: 8–10 подшагов, 1 итерация
 let DAMP = 0.986;
@@ -4308,16 +4308,12 @@ addEventListener("blur", ()=>{
 
 addEventListener("keydown", e=>{
   if(e.code==="Space"){ e.preventDefault(); pressNow(); }
-  if(e.code==="KeyR"){ reset(); }
+  if(e.code==="KeyR"){ restartRun(); }
 });
 // Кнопка «сейчас порвётся» убрана с панели 17.09 (владелица: «ей не пользуюсь, место только занимает»).
 // Предсказание разрыва осталось в модели и на пробеле — им пользуется протокол замера, а не игрок.
 { const b = document.getElementById("tear"); if(b) b.addEventListener("click", pressNow); }
-document.getElementById("reset").addEventListener("click", ()=>{
-  stepNo=1;
-  try{ localStorage.setItem("dough_step","1"); }catch(e){}
-  reset();
-});
+document.getElementById("reset").addEventListener("click", restartRun);
 // Техническое снятие — тот же перелёт на стол, что и у жеста.
 document.getElementById("cutMode").addEventListener("click", ()=>startRemoval());
 document.getElementById("undoDish").addEventListener("click", undoDish);
@@ -4485,14 +4481,67 @@ document.getElementById("hardReload").addEventListener("click", ()=>{
   }catch(e){ done(); }
 });
 
-document.getElementById("dump").addEventListener("click", async ()=>{
-  // Старым записям не приписываем сегодняшние настройки. Их отсутствие означает
-  // неизвестный контекст; новые записи несут собственный снимок build/tune.
-  const txt = JSON.stringify({ formatVersion:2, exportedAt:new Date().toISOString(),
+function clearPlayLog(){
+  log = [];
+  gestures = [];
+  recorded = false;
+  try{ localStorage.removeItem("dough_log"); }catch(e){}
+  try{ localStorage.removeItem("dough_gestures"); }catch(e){}
+}
+function restartRun(){
+  stepNo=1;
+  try{ localStorage.setItem("dough_step","1"); }catch(e){}
+  clearPlayLog();
+  reset();
+}
+
+function playLogText(){
+  return JSON.stringify({ formatVersion:2, exportedAt:new Date().toISOString(),
     current:measurementContext(), tears:log, gestures }, null, 2);
+}
+function fallbackCopy(txt){
+  const ta = document.createElement("textarea");
+  ta.value = txt;
+  ta.setAttribute("readonly","");
+  ta.style.cssText = "position:fixed;top:0;left:0;width:1px;height:1px;opacity:0";
+  document.body.appendChild(ta);
+  ta.focus();
+  ta.select();
+  ta.setSelectionRange(0, ta.value.length);
+  let ok = false;
+  try{ ok = document.execCommand("copy"); }catch(e){}
+  document.body.removeChild(ta);
+  return ok;
+}
+async function copyPlayLog(){
+  const txt = playLogText();
+  const n = log.length + gestures.length;
+  try{
+    if(navigator.clipboard && navigator.clipboard.writeText){
+      await navigator.clipboard.writeText(txt);
+      return { ok:true, n };
+    }
+  }catch(e){}
+  if(fallbackCopy(txt)) return { ok:true, n };
+  try{
+    const blob = new Blob([txt], { type:"application/json" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = "roti-log.json";
+    a.click();
+    setTimeout(()=>URL.revokeObjectURL(a.href), 2000);
+    return { ok:true, n, file:true };
+  }catch(e){}
+  console.log(txt);
+  return { ok:false, n };
+}
+
+document.getElementById("dump").addEventListener("click", async ()=>{
   const btn = document.getElementById("dump");
-  try{ await navigator.clipboard.writeText(txt); btn.textContent = `скопировано (${log.length}+${gestures.length})`; }
-  catch(e){ console.log(txt); btn.textContent = "лог в консоли"; }
+  const r = await copyPlayLog();
+  btn.textContent = r.ok
+    ? (r.file ? `лог в файле (${r.n})` : `скопировано (${r.n})`)
+    : "не скопировалось";
   setTimeout(()=>btn.textContent = "скопировать лог", 1800);
 });
 
