@@ -11,7 +11,7 @@
 // до 400%+ и лист «рвётся» в середине от любого движения. Замер это обнаружил сразу.
 // Число узлов сохранено (1 060 после обрезки по кругу; прежняя оценка «~1150» была на глаз,
 // пересчитано 07.09.2026), однородность рёбер восстановлена.
-const BUILD = "2026-09-20 · канал вернули · 49";
+const BUILD = "2026-09-20 · плющение в растяжку · 50";
 const GRID = 38;                   // 38x38, в круг попадает 1 060 узлов (посчитано, не оценка)
 let SUBSTEPS = 8;                  // T2: 8–10 подшагов, 1 итерация
 let DAMP = 0.986;
@@ -3199,24 +3199,16 @@ function pressFlatten(dt){
   }
 }
 function bakeFlatten(){
-  const c = centerOfSheet();
-  const r = Math.max(1e-3, sheetRadius());
-  const s = step1R / r;
-  if(Math.abs(s-1) > 0.02){
-    for(let i=0;i<N;i++){
-      px[i] = c.x + (px[i]-c.x)*s;
-      py[i] = c.y + (py[i]-c.y)*s;
-      prx[i]=px[i]; pry[i]=py[i];
-    }
-  }
+  if(stepNo!==1) return;
   for(let i=0;i<N;i++){ vx[i]=0; vy[i]=0; }
   for(const cc of cons) if(!cc.broken) cc.rest = Math.hypot(px[cc.a]-px[cc.b], py[cc.a]-py[cc.b]);
   if(!quadRest || quadRest.length!==quads.length) quadRest = new Float32Array(quads.length);
   for(let q=0;q<quads.length;q++){
     const qq=quads[q], a=area(qq)||1e-6;
-    // Плющение решало, можно ли тянуть. Покой шага 2 — свежий диск: толщина 1.
-    // Иначе (a·flatH ≈ 0,18) первый сильный шлепок сразу рвал — лог 21.09.
-    quadRest[q] = a;
+    const h = ((flatH[qq[0]]||1)+(flatH[qq[1]]||1)+(flatH[qq[2]]||1)+(flatH[qq[3]]||1))/4;
+    // Плющение переходит как есть: размер диска и где жали. Не подгоняем к канону шага 2.
+    // 0,50+0,50·h: вмятина видна, лист не стартует уже в зоне дыр.
+    quadRest[q] = a * (0.50 + 0.50 * Math.max(0.18, h));
   }
   measureThickness();
   stepNo = 2; advancedAt = performance.now();
@@ -4355,14 +4347,14 @@ function syncStepButtons(){
 }
 document.querySelectorAll("[data-s]").forEach(b=>b.addEventListener("click", ()=>{
   const to = +b.dataset.s;
-  // Кнопка шага значила «дай новый кусочек на этом шаге» и пересобирала лист ВСЕГДА —
-  // даже когда её жали на уже горящем шаге. После автоперехода «на таву» загорается сама,
-  // привычка нажать осталась с тех пор, когда другого пути туда не было, — и растянутый
-  // лист с дырками улетал в мусор (замер 08.09: 25 % экрана перерисовывалось разом,
-  // tornAt 163472 → 0). Теперь пересборка только там, где она осмысленна: назад или
-  // вперёд на лист, который до этого шага ещё не дорос. Свежий кусочек даёт «заново».
+  // «растянуть» забирает ТЕКУЩИЙ диск, не новый. Иначе плющение выкидывалось,
+  // и шаг 2 всегда начинался одним и тем же кругом.
+  if(to === 2 && stepNo === 1 && phase === "TABLE"){
+    bakeFlatten();
+    return;
+  }
   const ready = to === 1 ? false
-              : to === 2 ? sheetReadyToStretch()
+              : to === 2 ? true
               :            sheetRadius() >= targetR;
   const keep = to === stepNo || (to > stepNo && ready && phase === "TABLE");
   stepNo = to;
