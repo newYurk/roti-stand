@@ -11,7 +11,7 @@
 // до 400%+ и лист «рвётся» в середине от любого движения. Замер это обнаружил сразу.
 // Число узлов сохранено (1 060 после обрезки по кругу; прежняя оценка «~1150» была на глаз,
 // пересчитано 07.09.2026), однородность рёбер восстановлена.
-const BUILD = "2026-09-20 · расплющивание сверху · 43";
+const BUILD = "2026-09-20 · ладонь плющит диск · 44";
 const GRID = 38;                   // 38x38, в круг попадает 1 060 узлов (посчитано, не оценка)
 let SUBSTEPS = 8;                  // T2: 8–10 подшагов, 1 итерация
 let DAMP = 0.986;
@@ -246,6 +246,9 @@ function zone(name){
     // «чтобы место для готовки осталось, тоже нужно»). 4 % — та середина, где тава
     // встаёт в 20 px от края, а лист остаётся крупнее, чем был в альбоме.
     const inset = work ? cv.width * 0.04 : 0;
+    let fWork = WORK_FRAC;
+    if(stepNo===1 && !frameOn) fWork = 0.70;   // плющение: тесто — герой, тава ждёт сверху
+    const f = work ? fWork : 1 - fWork;
     const h = (bot - top) * f, y = work ? bot - h : top;
     return { x:inset, y, w:cv.width - inset*2, h, cx:cv.width*0.5, cy:y + h*0.5 };
   }
@@ -2846,12 +2849,12 @@ function drawDish(g,sx,sy){
 // Подготовка теста разбита на шаги (решение владельца 22.08.2026):
 // шаг 1 — отрезанный от «колбаски» кусочек расплющивается пальцем до ~42% мишени
 // (ровно та точка, где раньше стенд начинался); шаг 2 — растягивание шлепками.
-const FLAT_START_FRAC = 0.075, START_FRAC = 0.17, TARGET_FRAC = 0.40;
+const FLAT_START_FRAC = 0.11, START_FRAC = 0.17, TARGET_FRAC = 0.40;
 let stepNo = 1;                                // текущий шаг стенда (step занят функцией физики)
 let targetR = 1, startR = 1, step1R = 1;       // step1R = цель расплющивания (42% мишени)
 let advancedAt = 0;                            // момент авто-перехода на шаг 2 (для баннера)
 let gestureScale = 1;                          // масштаб жеста: фиксирован от экрана, не от роста листа
-let FLAT_RATE = 0.90;                          // ямка за секунду, диск — за несколько
+let FLAT_RATE = 1.15;                          // ладонь за секунду заметно плющит пятно
 const FLAT_READY = 0.42;                       // выше этого кусок ещё толстый — тянуть рано
 let flatH = null;                              // карта нажима: 1 толстое, меньше — где провели
 // Мерка листа — меньшая сторона рабочей зоны; от неё доли комка, свежего листа и мишени.
@@ -3172,21 +3175,20 @@ function pressFlatten(dt){
   const at = flattenAt(action.last);
   const fx = at.x, fy = at.y;
   const sr = Math.max(R0, sheetRadius());
-  const sigma = Math.max(sr * 0.32, gestureScale * 0.12);
+  const sigma = Math.max(sr * 0.62, gestureScale * 0.22);
   const s2 = sigma*sigma || 1;
   for(let i=0;i<N;i++){
     if(conDeg && conDeg[i]<=0) continue;
     const dx = px[i]-fx, dy = py[i]-fy;
     const w = Math.exp(-(dx*dx + dy*dy)/s2);
-    if(w < 0.04) continue;
-    // Чем толще — тем податливее; уже тонкое почти не уходит. Не линейный срез за 0,3 с.
+    if(w < 0.03) continue;
     flatH[i] = Math.max(0.18, flatH[i] * Math.exp(-FLAT_RATE * w * dt));
   }
   const mean = flattenStats().mean;
   const want = Math.min(step1R, R0 * Math.sqrt(1 / Math.max(0.22, mean)));
   const c = centerOfSheet();
   const r = Math.max(1e-3, sheetRadius());
-  const s = 1 + Math.min(Math.max(0, want/r - 1), 0.22 * dt);
+  const s = 1 + Math.min(Math.max(0, want/r - 1), 0.38 * dt);
   if(s > 1.001){
     for(let i=0;i<N;i++){
       px[i] = c.x + (px[i]-c.x)*s;
@@ -3218,6 +3220,12 @@ function bakeFlatten(){
   stepNo = 2; advancedAt = performance.now();
   try{ localStorage.setItem("dough_step","2"); }catch(e){}
   syncStepButtons();
+  const z = zone("work"), c2 = centerOfSheet();
+  const dx = z.cx - c2.x, dy = z.cy - c2.y;
+  if(Math.hypot(dx,dy) > 1){
+    for(let i=0;i<N;i++){ px[i]+=dx; py[i]+=dy; prx[i]=px[i]; pry[i]=py[i]; }
+  }
+  layoutPan();
   clearAction();
 }
 
@@ -4592,7 +4600,23 @@ function draw(){
       x: prX(X[i],Y[i])*sx+ox,
       y: prY(X[i],Y[i])*sy+oy
     });
-    if(!onPan && !xf){
+    if(stepNo===1 && !onPan && !xf){
+      const c0 = bodyC, r0 = Math.max(R0, sheetRadius());
+      const x = prX(c0.x,c0.y)*sx+ox, y = prY(c0.x,c0.y)*sy+oy;
+      const rx = r0*sx, ry = r0*TILT*sy;
+      g.fillStyle = "rgba(10,6,2,0.22)";
+      g.beginPath(); g.ellipse(x, y+ry*0.07, rx*1.06, ry*1.08, 0, 0, Math.PI*2); g.fill();
+      const st = flattenStats();
+      const col = mix(Math.max(0.28, st.mean));
+      g.fillStyle = `rgb(${col[0]},${col[1]},${col[2]})`;
+      g.beginPath(); g.ellipse(x, y, rx, ry, 0, 0, Math.PI*2); g.fill();
+      if(st.min < 0.92){
+        const thin = mix(st.min);
+        const k = 0.32 + 0.40 * (1 - st.mean);
+        g.fillStyle = `rgb(${thin[0]},${thin[1]},${thin[2]})`;
+        g.beginPath(); g.ellipse(x, y, rx*k, ry*k, 0, 0, Math.PI*2); g.fill();
+      }
+    } else if(!onPan && !xf){
       const c0 = bodyC, r0 = sheetRadius();
       g.fillStyle = "rgba(10,6,2,0.20)";
       g.beginPath();
@@ -4600,6 +4624,7 @@ function draw(){
                 r0*1.03*sx, r0*1.04*TILT*sy, 0, 0, Math.PI*2);
       g.fill();
     }
+    if(!(stepNo===1 && !onPan && !xf))
     for(let q=0;q<quads.length;q++){
       const qc = quadCons[q];
       const [a,b2,c,d] = quads[q];
