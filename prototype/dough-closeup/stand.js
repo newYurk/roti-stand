@@ -11,7 +11,7 @@
 // до 400%+ и лист «рвётся» в середине от любого движения. Замер это обнаружил сразу.
 // Число узлов сохранено (1 060 после обрезки по кругу; прежняя оценка «~1150» была на глаз,
 // пересчитано 07.09.2026), однородность рёбер восстановлена.
-const BUILD = "2026-09-20 · плющение в растяжку · 50";
+const BUILD = "2026-09-20 · шлепок по стороне · 51";
 const GRID = 38;                   // 38x38, в круг попадает 1 060 узлов (посчитано, не оценка)
 let SUBSTEPS = 8;                  // T2: 8–10 подшагов, 1 итерация
 let DAMP = 0.986;
@@ -2936,6 +2936,7 @@ function build(){
   layoutPan();
   phase = "TABLE"; xf = null;
   dish = null; dishGesture = null; dishFlight = null; dishMove = null; dishTwist = null; dishPinch = null; dishSpread = 1; dishTouches.clear(); syncDishUI(); syncStepButtons();
+  lastSlapDir = null; sameSlapN = 0;
   panPress = []; domes = []; fatMap = null; fatGesture = null;
   { const card = document.getElementById("card"); if(card) card.hidden = true; }
   cook = new Float32Array(N); dry = new Float32Array(N);
@@ -3537,7 +3538,8 @@ function meanDry(){
   return n ? s/n : 0;
 }
 
-let SLAP_GROW = 0.075;           // пластическое растяжение за удар на единицу силы
+let SLAP_GROW = 0.10;            // пластическое растяжение за удар; растёт сторона, не весь круг
+let lastSlapDir = null, sameSlapN = 0;
 let TEAR_I = 3.4;                // с этой силы шлепок опасен…
 let TEAR_THIN = 0.10;            // …если лист уже истончился ниже этого
 const TEAR_PRESETS = {
@@ -3584,6 +3586,11 @@ function impactAction(){
   // аудита: удар даёт одноразовое пластическое растяжение длин покоя с той же
   // пространственной формулой весов, что у импульса. Скорости остаются как рывок и звук.
   plasticStretch(action.impulse, action.direction, c);
+  {
+    const d = lastSlapDir ? lastSlapDir.x*action.direction.x + lastSlapDir.y*action.direction.y : 0;
+    sameSlapN = d > 0.55 ? sameSlapN+1 : 1;
+    lastSlapDir = { x:action.direction.x, y:action.direction.y };
+  }
   // Дырка рождается из перестарательности: сильный шлепок по уже тонкому листу
   // рвёт дальнюю сторону. Глобальный порог толщины стили не разводит — средний и
   // жёсткий стили приходят к одинаковой толщине (замер: 0.108 против 0.083),
@@ -3599,6 +3606,16 @@ function impactAction(){
   action.state = "SETTLING";
 }
 
+function slapWeight(x, y, direction, center, sr, t){
+  const mx = x - center.x, my = y - center.y;
+  const dl = Math.hypot(mx, my) || 1;
+  const along = (mx/dl)*direction.x + (my/dl)*direction.y;
+  const sector = 0.08 + 0.92 * Math.max(0, along);     // полукруг удара; спина почти стоит
+  const edgeBias = Math.max(0, Math.min(1, dl/sr));
+  const thinW = Math.max(0.12, Math.min(1, (1.15 - t) / 0.85)); // толстое ~0,12, тонкое ~1
+  return sector * (0.28 + 0.72*thinW) * (0.38 + 0.62*edgeBias);
+}
+
 function plasticStretch(I, direction, center){
   const over = sheetRadius() / targetR;
   if(over > 1.25) return;                            // предел растяжимости — общий для всех путей роста
@@ -3606,11 +3623,9 @@ function plasticStretch(I, direction, center){
   const sr = Math.max(1, sheetRadius());
   for(let k2=0;k2<cons.length;k2++){
     const c2 = cons[k2]; if(c2.broken) continue;
-    const mx = (px[c2.a]+px[c2.b])/2 - center.x, my = (py[c2.a]+py[c2.b])/2 - center.y;
-    const dl = Math.hypot(mx,my) || 1;
-    const radial = Math.max(0, (mx/dl)*direction.x + (my/dl)*direction.y);
-    const edgeBias = Math.max(0, Math.min(1, dl/sr));
-    const w = 0.35 + 0.45*edgeBias + 0.20*radial;
+    const mx = (px[c2.a]+px[c2.b])*0.5, my = (py[c2.a]+py[c2.b])*0.5;
+    const t = ((thick[c2.a]||1)+(thick[c2.b]||1))*0.5;
+    const w = slapWeight(mx, my, direction, center, sr, t);
     c2.rest *= 1 + SLAP_GROW * I * w * ease;
   }
 }
@@ -3620,17 +3635,12 @@ function plasticStretch(I, direction, center){
 function applySlapImpulse(I, direction, center){
   const sr = Math.max(1, sheetRadius());
   for(let i=0;i<N;i++){
+    const loose = conDeg ? Math.min(1, conDeg[i]/3) : 1;
+    const w = slapWeight(px[i], py[i], direction, center, sr, thick[i]||1) * loose;
     const ddx = px[i]-center.x, ddy = py[i]-center.y;
     const dl = Math.hypot(ddx,ddy) || 1;
-    const dx = ddx/dl, dy = ddy/dl;
-    const radial = Math.max(0, dx*direction.x + dy*direction.y);
-    const edgeBias = Math.max(0, Math.min(1, dl/sr));
-    // Рыхлый край (мало живых связей) не хлещет наружу: бахрома у дырок получала
-    // полный импульс и улетала, задирая радиус.
-    const loose = conDeg ? Math.min(1, conDeg[i]/3) : 1;
-    const w = (0.35 + 0.45*edgeBias + 0.20*radial) * loose;
-    vx[i] += dx * I * w;
-    vy[i] += dy * I * w;
+    vx[i] += (ddx/dl) * I * w;
+    vy[i] += (ddy/dl) * I * w;
   }
 }
 
@@ -4337,7 +4347,7 @@ document.getElementById("tools").addEventListener("click", e=>{ if(e.target.id==
 // (замер: низ #hint приходился на 40–62 % высоты #stage). Показываем только текущий шаг.
 const HINTS = {
   1: "прижимай кусок: где ведёшь — там тоньше, край остаётся толстым. Когда весь тонкий — можно тянуть край",
-  2: "шаг 2: край, миг, мах — шлепок. Сильный удар по тонкому рвёт (дыры — узор). Нежнее — целый лист",
+  2: "шаг 2: край, миг, мах. Тянется сторона удара — обходи круг, толстое почти стоит",
   3: "шаг 3: возьми край и круговым махом-«запятой» перекинь на таву — полетит, повернётся, зашипит"
 };
 function syncStepButtons(){
@@ -4910,6 +4920,8 @@ function loop(now){
     : action.state==="ARMED" ? `держишь край · хват ${Math.round(action.mul||GRIP_MIN)} · смахни!`
     : (action.state==="LIFTING"||action.state==="FLYING") ? "бросок…"
     : (action.state==="IMPACT"||action.state==="SETTLING") ? `ШЛЕП · лист ${pct}%${ready}${ragged}`
+    : (stepNo===2 && sameSlapN>=2)
+      ? `тот же край ${sameSlapN}× — обойди, иначе лепесток · лист ${pct}%${ready}${ragged}`
     : `коснись края · лист ${pct}%${ready}${ragged}`;
   // Ответ на предсказание отличается цветом, иначе он теряется среди обычных подсказок.
   liveEl.style.color = verdictAge < 3500 ? (verdict.startsWith("угадала") ? "#8fbf6a" : "#f0c674")
