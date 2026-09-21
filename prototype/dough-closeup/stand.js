@@ -11,7 +11,7 @@
 // до 400%+ и лист «рвётся» в середине от любого движения. Замер это обнаружил сразу.
 // Число узлов сохранено (1 060 после обрезки по кругу; прежняя оценка «~1150» была на глаз,
 // пересчитано 07.09.2026), однородность рёбер восстановлена.
-const BUILD = "2026-09-20 · ладонь плющит диск · 44";
+const BUILD = "2026-09-20 · ямка под пальцем · 45";
 const GRID = 38;                   // 38x38, в круг попадает 1 060 узлов (посчитано, не оценка)
 let SUBSTEPS = 8;                  // T2: 8–10 подшагов, 1 итерация
 let DAMP = 0.986;
@@ -4606,16 +4606,25 @@ function draw(){
       const rx = r0*sx, ry = r0*TILT*sy;
       g.fillStyle = "rgba(10,6,2,0.22)";
       g.beginPath(); g.ellipse(x, y+ry*0.07, rx*1.06, ry*1.08, 0, 0, Math.PI*2); g.fill();
+      g.save();
+      g.beginPath(); g.ellipse(x, y, rx, ry, 0, 0, Math.PI*2);
+      g.clip();
       const st = flattenStats();
       const col = mix(Math.max(0.28, st.mean));
       g.fillStyle = `rgb(${col[0]},${col[1]},${col[2]})`;
-      g.beginPath(); g.ellipse(x, y, rx, ry, 0, 0, Math.PI*2); g.fill();
-      if(st.min < 0.92){
-        const thin = mix(st.min);
-        const k = 0.32 + 0.40 * (1 - st.mean);
-        g.fillStyle = `rgb(${thin[0]},${thin[1]},${thin[2]})`;
-        g.beginPath(); g.ellipse(x, y, rx*k, ry*k, 0, 0, Math.PI*2); g.fill();
+      g.fill();
+      for(let q=0;q<quads.length;q++){
+        const [a,b2,c,d] = quads[q];
+        const t = (Hmap[a]+Hmap[b2]+Hmap[c]+Hmap[d])/4;
+        if(t > 0.96) continue;
+        const c2 = mix(t);
+        g.fillStyle = `rgb(${c2[0]},${c2[1]},${c2[2]})`;
+        const Pa=Pnt(a), Pb=Pnt(b2), Pc=Pnt(c), Pd=Pnt(d);
+        g.beginPath();
+        g.moveTo(Pa.x,Pa.y); g.lineTo(Pb.x,Pb.y); g.lineTo(Pc.x,Pc.y); g.lineTo(Pd.x,Pd.y);
+        g.closePath(); g.fill();
       }
+      g.restore();
     } else if(!onPan && !xf){
       const c0 = bodyC, r0 = sheetRadius();
       g.fillStyle = "rgba(10,6,2,0.20)";
