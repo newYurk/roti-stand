@@ -11,7 +11,7 @@
 // до 400%+ и лист «рвётся» в середине от любого движения. Замер это обнаружил сразу.
 // Число узлов сохранено (1 060 после обрезки по кругу; прежняя оценка «~1150» была на глаз,
 // пересчитано 07.09.2026), однородность рёбер восстановлена.
-const BUILD = "2026-09-20 · шлепок мягче · 54";
+const BUILD = "2026-09-20 · упрочнение тонкого · 55";
 const GRID = 38;                   // 38x38, в круг попадает 1 060 узлов (посчитано, не оценка)
 let SUBSTEPS = 8;                  // T2: 8–10 подшагов, 1 итерация
 let DAMP = 0.986;
@@ -3549,7 +3549,7 @@ function meanDry(){
   return n ? s/n : 0;
 }
 
-let SLAP_GROW = 0.08;            // пластическое растяжение за удар
+let SLAP_GROW = 0.085;           // пластичность удара; тонкое упрочняется, не течёт сильнее
 let lastSlapDir = null, sameSlapN = 0;
 let TEAR_I = 3.4;                // с этой силы шлепок опасен…
 let TEAR_THIN = 0.10;            // …если лист уже истончился ниже этого
@@ -3620,10 +3620,13 @@ function impactAction(){
 function slapWeight(x, y, direction, center, sr, t){
   const mx = x - center.x, my = y - center.y;
   const dl = Math.hypot(mx, my) || 1;
-  const along = Math.max(0, (mx/dl)*direction.x + (my/dl)*direction.y);
+  const along = (mx/dl)*direction.x + (my/dl)*direction.y;
+  // Пол вдоль маха. Спина живая (0,28): ноль на спине давал полосу сдвига.
+  const axis = 0.28 + 0.72 * Math.max(0, along);
   const edge = Math.max(0, Math.min(1, dl/sr));
-  const thinW = 0.55 + 0.45 * Math.max(0, Math.min(1, (1.05 - t) / 0.7));
-  return (0.22 + 0.40*edge + 0.38*along) * thinW;
+  // Strain hardening: тонкое твердеет, толстое ещё течёт. Раньше было наоборот.
+  const harden = 0.32 + 0.68 * Math.max(0, Math.min(1, t));
+  return axis * (0.38 + 0.62*edge) * harden;
 }
 
 function plasticStretch(I, direction, center){
@@ -3647,8 +3650,8 @@ function applySlapImpulse(I, direction, center){
     const w = slapWeight(px[i], py[i], direction, center, sr, thick[i]||1) * loose;
     const ddx = px[i]-center.x, ddy = py[i]-center.y;
     const dl = Math.hypot(ddx,ddy) || 1;
-    vx[i] += (ddx/dl) * I * w;
-    vy[i] += (ddy/dl) * I * w;
+    vx[i] += (ddx/dl*0.78 + direction.x*0.22) * I * w;
+    vy[i] += (ddy/dl*0.78 + direction.y*0.22) * I * w;
   }
 }
 
@@ -4353,7 +4356,7 @@ document.getElementById("tools").addEventListener("click", e=>{ if(e.target.id==
 // (замер: низ #hint приходился на 40–62 % высоты #stage). Показываем только текущий шаг.
 const HINTS = {
   1: "прижимай кусок: где ведёшь — там тоньше, край остаётся толстым. Когда весь тонкий — можно тянуть край",
-  2: "шаг 2: край, миг, мах. Тянется сторона удара — обходи круг, толстое почти стоит",
+  2: "шаг 2: край, миг, мах. Растёт сторона маха; где уже тонко — твердеет. Обходи круг",
   3: "шаг 3: возьми край и круговым махом-«запятой» перекинь на таву — полетит, повернётся, зашипит"
 };
 function syncStepButtons(){
