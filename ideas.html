@@ -1,0 +1,320 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Ротишница · идеи</title>
+<style>
+  :root {
+    --bg: #14100c; --ink: #e8ddcc; --dim: #8b7f6e;
+    --line: #2a231b; --hot: #d98b3a; --accent: #4f8a7a;
+    --surface: #1c1710; --surface2: #221e17;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { background: var(--bg); color: var(--ink);
+    font: 14px/1.6 ui-monospace, SFMono-Regular, Menlo, monospace;
+    min-height: 100%; }
+  body { max-width: 820px; margin: 0 auto; padding: 32px 20px 80px; }
+
+  h1 { font-size: 22px; font-weight: 400; color: var(--hot);
+    letter-spacing: .04em; margin-bottom: 6px; }
+  .meta { color: var(--dim); font-size: 12px; margin-bottom: 40px; }
+  .meta a { color: var(--dim); }
+
+  h2 { font-size: 13px; font-weight: 600; color: var(--hot);
+    text-transform: uppercase; letter-spacing: .1em;
+    margin: 48px 0 16px; padding-bottom: 6px;
+    border-bottom: 1px solid var(--line); }
+
+  /* карточка идеи */
+  .card { background: var(--surface); border: 1px solid var(--line);
+    border-radius: 4px; padding: 16px 18px; margin-bottom: 12px;
+    position: relative; }
+  .card.new { border-color: var(--accent); }
+  .card-title { font-weight: 600; margin-bottom: 6px; color: var(--ink); }
+  .card-body { color: var(--dim); font-size: 13px; line-height: 1.55; }
+  .card-body p { margin-bottom: 8px; }
+  .card-body p:last-child { margin-bottom: 0; }
+  .tag { display: inline-block; font-size: 10px; padding: 1px 6px;
+    border-radius: 2px; margin-right: 4px; margin-bottom: 8px;
+    background: var(--surface2); color: var(--dim);
+    border: 1px solid var(--line); text-transform: uppercase;
+    letter-spacing: .06em; }
+  .tag.open   { border-color: var(--hot);    color: var(--hot); }
+  .tag.done   { border-color: var(--accent); color: var(--accent); }
+  .tag.question { border-color: #7a6aaa; color: #9a8aca; }
+
+  /* форма добавления */
+  .add-form { background: var(--surface); border: 1px dashed var(--line);
+    border-radius: 4px; padding: 16px 18px; margin-top: 24px; }
+  .add-form label { display: block; font-size: 12px; color: var(--dim);
+    margin-bottom: 4px; margin-top: 12px; }
+  .add-form label:first-child { margin-top: 0; }
+  .add-form input, .add-form textarea, .add-form select {
+    width: 100%; background: var(--bg); border: 1px solid var(--line);
+    color: var(--ink); font: inherit; padding: 6px 8px;
+    border-radius: 3px; outline: none; }
+  .add-form input:focus, .add-form textarea:focus {
+    border-color: var(--accent); }
+  .add-form textarea { resize: vertical; min-height: 72px; }
+  .add-form button { margin-top: 14px; background: var(--accent);
+    color: #0e1c19; border: none; padding: 7px 18px; cursor: pointer;
+    font: inherit; font-weight: 600; border-radius: 3px; }
+  .add-form button:hover { opacity: .85; }
+
+  /* markdown-лайт: жирный */
+  b { color: var(--ink); font-weight: 600; }
+  em { color: var(--hot); font-style: normal; }
+
+  hr { border: none; border-top: 1px solid var(--line); margin: 40px 0; }
+
+  #saved-note { color: var(--accent); font-size: 12px;
+    margin-top: 8px; display: none; }
+
+  .toc { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 32px; }
+  .toc a { color: var(--dim); font-size: 12px; text-decoration: none;
+    border: 1px solid var(--line); padding: 3px 8px; border-radius: 3px; }
+  .toc a:hover { border-color: var(--dim); color: var(--ink); }
+</style>
+</head>
+<body>
+
+<h1>Ротишница · идеи</h1>
+<p class="meta">
+  Живая доска — сюда пишем всё, что обсуждаем: дизайн, механику, открытые вопросы.<br>
+  Ветка <a href="https://github.com/newYurk/roti-stand/tree/codex/roti-continuation" target="_blank">codex/roti-continuation</a> ·
+  <a href="https://github.com/newYurk/roti-stand/blob/codex/roti-continuation/STATE.md" target="_blank">STATE.md</a> ·
+  <a href="https://github.com/newYurk/roti-stand/blob/codex/roti-continuation/DECISION.md" target="_blank">DECISION.md</a>
+</p>
+
+<nav class="toc">
+  <a href="#mechanic">Механика</a>
+  <a href="#design">Дизайн</a>
+  <a href="#gestures">Жесты</a>
+  <a href="#story">История / мир</a>
+  <a href="#open">Открытые вопросы</a>
+  <a href="#add">+ добавить</a>
+</nav>
+
+<!-- ═══════════════════════════════════════════════════ МЕХАНИКА -->
+<h2 id="mechanic">Механика</h2>
+
+<div class="card done">
+  <div class="card-title">Тесто → лист → тава → нарезка → подача</div>
+  <span class="tag done">реализовано</span>
+  <div class="card-body">
+    <p>Полная цепочка одного роти реализована в стенде. Жесты: прижать, растянуть, перебросить на таву, перевернуть, нарезать конвертом, налить сгущёнку, подать.</p>
+  </div>
+</div>
+
+<div class="card new">
+  <div class="card-title">Сгущёнка как отдельный режим</div>
+  <span class="tag open">в работе</span>
+  <div class="card-body">
+    <p>Кнопка «сгущёнка» в панели переключает режим: обычный жест режет тесто, в режиме сгущёнки — рисует кремовую полосу с каплями. <b>Открытый вопрос:</b> нужна ли она вообще как обязательный шаг или только декоративная?</p>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-title">Петля дня: тесто как предел</div>
+  <span class="tag">obsidian</span>
+  <div class="card-body">
+    <p>Из «Тесто — предел дня»: количество теста задаёт длину дня. Когда тесто кончается — день заканчивается. Игрок сам решает, тратить ли тесто на роти гостям или на пробы.</p>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-title">Тележка — музей отношений</div>
+  <span class="tag">obsidian</span>
+  <div class="card-body">
+    <p>Тележка хранит предметы, которые оставили гости. Каждый предмет — след встречи. Можно передать обратно, можно оставить. Не инвентарь, а летопись.</p>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-title">Встреча без слов</div>
+  <span class="tag done">принято</span>
+  <div class="card-body">
+    <p>Общение с гостями — без диалогов. Жесты, предметы, пауза. Принято как направление в Obsidian («Бессловесные встречи»).</p>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════ ДИЗАЙН -->
+<h2 id="design">Дизайн</h2>
+
+<div class="card done">
+  <div class="card-title">Цветовая палитра стенда</div>
+  <span class="tag done">реализовано</span>
+  <div class="card-body">
+    <p><em>#14100c</em> фон · <em>#e8ddcc</em> текст · <em>#d98b3a</em> акцент (горячее) · <em>#8b7f6e</em> приглушённое. Тёмный, тёплый, как угли под тавой.</p>
+  </div>
+</div>
+
+<div class="card new">
+  <div class="card-title">Экран «у реки» и «у канала»</div>
+  <span class="tag open">в работе</span>
+  <span class="tag">scene.html</span>
+  <div class="card-body">
+    <p>Стенд внутри экрана — бабушка у реки (riverside-grandmother). Уже реализован в scene.html в этой ветке. Вопрос: как меняется атмосфера между двумя фонами?</p>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-title">Предметы на стойке (counter-item)</div>
+  <span class="tag done">реализовано</span>
+  <div class="card-body">
+    <p>Предметы появляются по событию гостя, тап — в лоток. Подключён <code>counter-item.js</code>.</p>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════ ЖЕСТЫ -->
+<h2 id="gestures">Жесты</h2>
+
+<div class="card done">
+  <div class="card-title">Жесты теста</div>
+  <span class="tag done">реализовано</span>
+  <div class="card-body">
+    <p>Прижать → расплющить · Растянуть (запятая-бросок) · Перебросить на таву · Перевернуть · Нарезать конвертом (провести через тесто) · Сгущёнка (режим) · Подать.</p>
+  </div>
+</div>
+
+<div class="card new">
+  <div class="card-title">Проблема: мышь режет вместо сгущёнки</div>
+  <span class="tag open">решено кнопкой</span>
+  <div class="card-body">
+    <p>На десктопе pointer-события перехватывались одновременно нарезкой и drizzle.js. Решение: явная кнопка-переключатель режима в панели. Пока кнопка не нажата — всё работает как обычно.</p>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-title">Идея: жест «подуть»</div>
+  <span class="tag question">вопрос</span>
+  <div class="card-body">
+    <p>Быстрое горизонтальное движение двумя пальцами / мышью — сдуть лишнее тесто или муку со стола? Или это слишком театрально для медитативного тона?</p>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════ ИСТОРИЯ -->
+<h2 id="story">История / мир</h2>
+
+<div class="card">
+  <div class="card-title">Карта историй</div>
+  <span class="tag">obsidian</span>
+  <div class="card-body">
+    <p>В Obsidian есть Canvas-доски: «Мир», «Игровая петля», «Зависимости», «Решения и риски». Люди, места и предметы описаны в папках <code>01 Люди</code>, <code>02 Мир</code>, <code>03 Тайны</code>.</p>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-title">Личный мир — право передумать</div>
+  <span class="tag question">обсуждается</span>
+  <div class="card-body">
+    <p>Идея из Obsidian: у игрока есть «свой мир» с вариантами и возможностью переходов. Что это значит в геймплее — ещё открытый вопрос.</p>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════ ОТКРЫТЫЕ ВОПРОСЫ -->
+<h2 id="open">Открытые вопросы</h2>
+
+<div class="card">
+  <div class="card-title">Что такое «подать хорошо»?</div>
+  <span class="tag question">вопрос</span>
+  <div class="card-body">
+    <p>Есть ли критерий качества роти, который игрок замечает? Пережарен, недожарен, рваный — это видно. Но что значит «хорошо нарезан» или «правильно полит сгущёнкой»?</p>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-title">Переход от стенда к игре</div>
+  <span class="tag question">вопрос</span>
+  <div class="card-body">
+    <p>Стенд сейчас — измерительный прибор с игровыми элементами. Когда и как он становится игрой? Какой момент отмечает этот переход?</p>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-title">Звук</div>
+  <span class="tag question">вопрос</span>
+  <div class="card-body">
+    <p>Шипение тавы, шлепок теста, шелест нарезки. Нужен ли звук на этом этапе? Или молчание — часть тона?</p>
+  </div>
+</div>
+
+<hr>
+
+<!-- ═══════════════════════════════════════════════════ ФОРМА -->
+<h2 id="add">Добавить идею</h2>
+<p style="color:var(--dim);font-size:12px;margin-bottom:16px;">
+  Идеи сохраняются в браузере до следующего обновления страницы.<br>
+  Чтобы зафиксировать — скажи мне, и я добавлю карточку в файл.
+</p>
+
+<div class="add-form">
+  <label>Название</label>
+  <input type="text" id="f-title" placeholder="Коротко, о чём идея">
+
+  <label>Описание</label>
+  <textarea id="f-body" placeholder="Что именно? Почему важно? Открытые вопросы?"></textarea>
+
+  <label>Раздел</label>
+  <select id="f-section">
+    <option value="mechanic">Механика</option>
+    <option value="design">Дизайн</option>
+    <option value="gestures">Жесты</option>
+    <option value="story">История / мир</option>
+    <option value="open">Открытый вопрос</option>
+  </select>
+
+  <label>Статус</label>
+  <select id="f-tag">
+    <option value="question">? вопрос</option>
+    <option value="open">→ в работе</option>
+    <option value="done">✓ принято / реализовано</option>
+  </select>
+
+  <button onclick="addCard()">Добавить</button>
+  <div id="saved-note">✓ добавлено (до перезагрузки)</div>
+</div>
+
+<script>
+function addCard() {
+  const title   = document.getElementById('f-title').value.trim();
+  const body    = document.getElementById('f-body').value.trim();
+  const section = document.getElementById('f-section').value;
+  const tagVal  = document.getElementById('f-tag').value;
+  const tagText = { question: '? вопрос', open: '→ в работе', done: '✓ принято' }[tagVal];
+
+  if (!title) { document.getElementById('f-title').focus(); return; }
+
+  const card = document.createElement('div');
+  card.className = 'card new';
+  card.innerHTML =
+    `<div class="card-title">${esc(title)}</div>` +
+    `<span class="tag ${tagVal}">${tagText}</span>` +
+    (body ? `<div class="card-body"><p>${esc(body)}</p></div>` : '');
+
+  const target = document.getElementById(section);
+  // вставить после заголовка секции, перед первой карточкой
+  const h2 = target;
+  let next = h2.nextElementSibling;
+  while (next && next.tagName !== 'H2') {
+    next = next.nextElementSibling;
+  }
+  h2.parentNode.insertBefore(card, next || h2.nextElementSibling);
+
+  document.getElementById('f-title').value = '';
+  document.getElementById('f-body').value  = '';
+  const note = document.getElementById('saved-note');
+  note.style.display = 'block';
+  setTimeout(() => { note.style.display = 'none'; }, 2500);
+
+  target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+function esc(s) {
+  return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+</script>
+
+</body>
+</html>
