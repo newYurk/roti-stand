@@ -11,7 +11,7 @@
 // до 400%+ и лист «рвётся» в середине от любого движения. Замер это обнаружил сразу.
 // Число узлов сохранено (1 060 после обрезки по кругу; прежняя оценка «~1150» была на глаз,
 // пересчитано 07.09.2026), однородность рёбер восстановлена.
-const BUILD = "2026-09-21 · на таву только дотянув · 57";
+const BUILD = "2026-09-21 · три ступени жарки · 58";
 const GRID = 38;                   // 38x38, в круг попадает 1 060 узлов (посчитано, не оценка)
 let SUBSTEPS = 8;                  // T2: 8–10 подшагов, 1 итерация
 let DAMP = 0.986;
@@ -411,6 +411,7 @@ function startDish(){
     tone:ids.reduce((s,i)=>s+thick[i],0)/4,contact:ids.reduce((s,i)=>s+contactF[i],0)/4
   });
   dish.flips=0; dish.panTime=0; dish.sessions=[{flip:0,start:0,gold:null}];
+  fryStageNow = 1; fryJumpAt = 0;
   dish.holes=quadCons.filter(cs=>cs.some(c=>c.broken)).length;   // рваные ячейки листа при посадке
   rebuildDishContact(); dish.hull=dishHull(); syncDishUI();
 }
@@ -649,7 +650,7 @@ function panModsActive(){ return FORCE_HEAT_TABLE || panPress.length>0 || domes.
 function sampleMultiplier(T,i){
   for(const d of domes) if(Math.hypot(T.x[i]-d.x,T.y[i]-d.y)<d.r) return 0;   // под куполом стали нет
   let m=1;
-  if(fatMap) m*=1+FAT_GAIN*fatAt(T.x[i]*targetR/PAN_R,T.y[i]*targetR/PAN_R);
+  if(fatMap) m*=oilMul(fatAt(T.x[i]*targetR/PAN_R,T.y[i]*targetR/PAN_R));
   // Прижимы в одном месте не складываются: берётся самый сильный (ревью 17.09 — частые тапы
   // перемножались до ×7 при заявленных ×(1 + сила)).
   let press=0;
@@ -738,6 +739,11 @@ function onButter(p,client){
     const P=butterPolys(); hit=near(P.base)||near(P.top)||near([P.base[0],P.base[1],P.top[1],P.top[0]])||near([P.base[3],P.base[2],P.top[2],P.top[3]]);
   } else { const b=butterSpot(); hit=Math.hypot(p.x-b.x,p.y-b.y)<=PAN_R*.11; }
   return hit && !(dish && dish.mode==="fold" && onMaterial(dishLocal(p)));
+}
+function oilMul(f){
+  if(!(f>0)) return 0.90;                         // сухая сталь
+  if(f < 0.50) return 1.00 + 0.18*f;              // плёнка +5…9 %
+  return 1.09 - 0.40*(f-0.50);                    // лужа теплоизолирует
 }
 function fatAt(u,v){
   if(!fatMap) return 0;
@@ -887,7 +893,7 @@ function cookDish(dt){
     const thin=Math.max(.25,Math.min(2.5,SHEET_REF_MM/Math.max(.05,doughMM(t.tone))));
     for(let side=0;side<2;side++){
       if(t.dry[side]<1) t.dry[side]=Math.min(1,t.dry[side]+dt*DRY_RATE*D.dryDrive[i][side]*thin);
-      else t.cook[side]+=dt*COOK_RATE*D.cookDrive[i][side];
+      else t.cook[side]=Math.min(COOK_CAP, t.cook[side]+dt*COOK_RATE*D.cookDrive[i][side]);
     }
   }
   if(dish.sessions){
@@ -895,26 +901,27 @@ function cookDish(dt){
     const cur=dish.sessions[dish.sessions.length-1];
     if(cur.gold===null && dishSideMean("cook","contactWeights")>=0.4) cur.gold=dish.panTime-cur.start;
   }
-  if(!(typeof bananaModeOn!=="undefined" && bananaModeOn) && !(typeof eggModeOn!=="undefined" && eggModeOn)){
-    if(dish.folds || dish.flips || (dish.filling&&dish.filling.length)){
-      const h=fryHint();
-      if(h && dish.message!==h){
-        dish.message=h;
-        const live=document.getElementById("live");
-        if(live) live.textContent=h;
-      }
+  tickFryStage();
+  if(performance.now()-fryJumpAt < 2400){
+    const h="→ "+FRY_STAGE_NAME[fryStageNow];
+    if(dish.message!==h){ dish.message=h; const live=document.getElementById("live"); if(live) live.textContent=h; }
+  } else if(!(typeof bananaModeOn!=="undefined" && bananaModeOn) && !(typeof eggModeOn!=="undefined" && eggModeOn)){
+    const h=fryHint();
+    if(h && dish.message!==h){
+      dish.message=h;
+      const live=document.getElementById("live");
+      if(live) live.textContent=h;
     }
+  }
   }
 }
 function fryHint(){
-  const mc=dishSideMean("cook","contactWeights"), md=dishSideMean("dry","contactWeights");
+  const st=rotiStage(), mc=dishSideMean("cook","contactWeights"), md=dishSideMean("dry","contactWeights");
   const up=dishSideMean("cook","topWeights");
-  if(up>=0.18 && mc<0.25) return "золотой верх · низ дожаривается";
-  if(md<0.4) return "шипит · схватывается";
-  if(mc<0.1) return "низ подсыхает · держи на таве";
-  if(mc<0.35) return "золото снизу · переверни";
-  if(up<0.2) return "низ золотой · переверни — увидишь";
-  return "жарится · ещё сторона или к нарезке";
+  if(performance.now()-fryJumpAt < 2400) return FRY_STAGE_NAME[st] ? "→ "+FRY_STAGE_NAME[st] : "";
+  if(st===1) return md<0.35 ? "сырое · шипит, можно начинку" : "сырое · подсыхает";
+  if(st===2) return up<0.18 ? "приготовленное · золотые пятна, можно перевернуть" : "приготовленное";
+  return "зажаренное · дальше темнеть не будет";
 }
 // Среднее по сторонам с весами: contactWeights — то, что лежит на стали (звук и «низ»),
 // topWeights — то, что открыто сверху и видно игроку («верх»).
@@ -1002,7 +1009,7 @@ function foldDish(anchor,end){
 let servedCount = 0, inputQuietUntil = 0;
 try{ servedCount = Math.max(0, +(localStorage.getItem("dough_served")||0)) || 0; }catch(e){}
 function cookWord(c){
-  return c<.05 ? "сырое" : c<.25 ? "бледное" : c<.6 ? "золотистое" : c<1 ? "румяное" : c<1.3 ? "тёмное" : "до угля";
+  return c<.08 ? "сырое" : c<.28 ? "бледное" : c<.55 ? "приготовленное" : "зажаренное";
 }
 function dishCard(){
   const bottom=+dishSideMean("cook","contactWeights").toFixed(2), top=+dishSideMean("cook","topWeights").toFixed(2);
@@ -3527,10 +3534,13 @@ function bakeTransform(ox, oy, th){
 // фазу — переворот садил на сталь уже сухую сторону. Цвет ×6 (сборка 14, роти ~40 с) владелице
 // показался слишком быстрым (17.09); по умолчанию ×3,5 — первая сторона ~30 с, роти ~55–59 с.
 // Прибор «жарка» переключает цвет: ×6 / ×3,5 / ×2 ≈ роти 40 / 60 / 85 с.
-const COOK_BASE = 0.008, FRY_SPEEDS = {40:6, 60:3.5, 85:2};
-let FRY_SECONDS = 60;
+const COOK_BASE = 0.0075, FRY_RATES = {40:0.028, 60:0.015, 180:0.0075};
+let FRY_SECONDS = 180;
 let DRY_RATE = 0.1625;                         // 1/с: лист 0,5 мм схватывается за 2–3 с и сохнет за ~7 с
-let COOK_RATE = COOK_BASE*FRY_SPEEDS[60];      // 1/с после сушки: золото первой стороны пробы к ~30 с
+let COOK_RATE = FRY_RATES[180];                // золото ~1 мин, зажаренное ~2 мин, потолок 3 мин
+const COOK_CAP = 0.92;                         // зажаренное; угля нет
+const FRY_STAGE_NAME = ["", "сырое", "приготовленное", "зажаренное"];
+let fryStageNow = 1, fryJumpAt = 0;
 function panHeat(r){
   if(r < 0.45) return 0.90 + 0.10*(r/0.45);                     // центр внутри кольца пламени — чуть слабее
   if(r < 0.70) return 1.00 - 0.25*((r-0.45)/0.25);              // горб на среднем радиусе
@@ -3544,14 +3554,30 @@ function cookStep(dt){
     // она гасила весь профиль panHeat: разница между центром и горбом на среднем радиусе
     // падала с 11 % до 0,3 %, то есть кольцевая горелка переставала быть видна, и лист
     // румянился ровно — против собственного фактчека строкой выше.
-    const heat = panHeat(r) * 1.05 * contactF[i];
+    const heat = panHeat(r) * oilMul(fatAt((px[i]-panC.x)/PAN_R, (py[i]-panC.y)/PAN_R)) * contactF[i];
     if(dry[i] < 1){
       const thin = Math.max(0.2, Math.min(2.0, 0.10/Math.max(0.05, thick[i])));
       dry[i] = Math.min(1, dry[i] + dt * DRY_RATE * heat * thin);
     } else {
-      cook[i] += dt * COOK_RATE * heat;
+      cook[i] = Math.min(COOK_CAP, cook[i] + dt * COOK_RATE * heat);
     }
   }
+  tickFryStage();
+}
+function rotiStage(){
+  const mc = meanCook(), md = meanDry();
+  const t = dish && dish.panTime ? dish.panTime : 0;
+  if(t >= 180 || mc >= 0.70) return 3;
+  if(mc >= 0.28 || (md > 0.92 && mc >= 0.15)) return 2;
+  return 1;
+}
+function tickFryStage(){
+  const next = rotiStage();
+  if(next === fryStageNow) return;
+  fryStageNow = next;
+  fryJumpAt = performance.now();
+  const word = FRY_STAGE_NAME[next];
+  if(dish) dish.message = "→ "+word;
 }
 function meanCook(){
   if(dish) return dishSideMean("cook","contactWeights");   // цвет того, что сейчас жарится
@@ -4489,11 +4515,11 @@ document.querySelectorAll("[data-p]").forEach(b=>{
 });
 // Скорость жарки — минута (владелица 19.09: оставить, настроим потом).
 function setFrySeconds(sec){
-  if(!FRY_SPEEDS[sec]) return;
-  FRY_SECONDS=sec; COOK_RATE=COOK_BASE*FRY_SPEEDS[sec];
+  if(!FRY_RATES[sec]) return;
+  FRY_SECONDS=sec; COOK_RATE=FRY_RATES[sec];
   document.querySelectorAll("[data-f]").forEach(x=>x.classList.toggle("on",+x.dataset.f===sec));
 }
-setFrySeconds(60);
+setFrySeconds(180);
 document.querySelectorAll("[data-f]").forEach(b=>{
   b.addEventListener("click", ()=>setFrySeconds(+b.dataset.f));
 });
@@ -4622,11 +4648,11 @@ function mixOn(t, bg){
   return lerp3(bg, DOUGH, k);
 }
 function cookColor(base, c){
-  if(c <= 0) return base;
-  if(c < 0.4) return lerp3(base, GOLD, c/0.4);
-  if(c < 0.8) return lerp3(GOLD, BROWN, (c-0.4)/0.4);
-  if(c < 1.2) return lerp3(BROWN, DARK, (c-0.8)/0.4);
-  return lerp3(DARK, CHAR, Math.min(1, (c-1.2)/0.5));
+  const x = Math.min(c, COOK_CAP);
+  if(x <= 0) return base;
+  if(x < 0.35) return lerp3(base, GOLD, x/0.35);
+  if(x < 0.70) return lerp3(GOLD, BROWN, (x-0.35)/0.35);
+  return lerp3(BROWN, DARK, (x-0.70)/0.22);
 }
 const rgb = (c)=>`rgb(${Math.round(c[0])},${Math.round(c[1])},${Math.round(c[2])})`;
 const palPan = new Map();   // 16 ступеней толщины × 16 ступеней прожарки — для пиксельных вариантов
@@ -4985,10 +5011,11 @@ function loop(now){
   const verdictAge = verdictAt ? performance.now() - verdictAt : Infinity;
   liveEl.textContent = dish ? dish.message : verdictAge < 3500 ? verdict :
     (performance.now()-panRefuseAt < 2400) ? `ещё короткий край · ${Math.round(sheetShortR()/targetR*100)}% — растяни, потом запятая`
-    : phase==="PAN" ? (md < 0.35 ? "на таве · шипит — слушай, цвета ещё нет"
-                     : md < 0.9 ? "на таве · подсыхает, звук уходит выше"
-                     : mc < 0.12 ? "на таве · суше и звонче — вот-вот пойдут пятна"
-                     : "на таве · пятна цвета (жесты жарки — следующий этап, «заново» — новый кусочек)")
+    : phase==="PAN" ? (performance.now()-fryJumpAt<2400 ? "→ "+FRY_STAGE_NAME[fryStageNow]
+                     : fryStageNow===1 ? (md < 0.35 ? "на таве · сырое · шипит"
+                     : "на таве · сырое · подсыхает")
+                     : fryStageNow===2 ? "на таве · приготовленное"
+                     : "на таве · зажаренное · дальше темнеть не будет")
     : action.state==="CARRY" ? "в руке — веди запятую к таве"
     : action.state==="TOSS" ? "летит…"
     : banner ? (stepNo===3 ? "✓ растянуто — теперь круговым махом-«запятой» на таву"
