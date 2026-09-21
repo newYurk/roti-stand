@@ -11,7 +11,7 @@
 // до 400%+ и лист «рвётся» в середине от любого движения. Замер это обнаружил сразу.
 // Число узлов сохранено (1 060 после обрезки по кругу; прежняя оценка «~1150» была на глаз,
 // пересчитано 07.09.2026), однородность рёбер восстановлена.
-const BUILD = "2026-09-21 · три ступени жарки · 58";
+const BUILD = "2026-09-21 · банан съезжает со складки · 59";
 const GRID = 38;                   // 38x38, в круг попадает 1 060 узлов (посчитано, не оценка)
 let SUBSTEPS = 8;                  // T2: 8–10 подшагов, 1 итерация
 let DAMP = 0.986;
@@ -519,6 +519,92 @@ function addEgg(x, y, opts){
 }
 window.addEgg = addEgg;
 window.canPlaceEgg = canPlaceEgg;
+function fillingRing(t){
+  const n=t.kind==="egg"?14:12, ring=[];
+  for(let j=0;j<n;j++){
+    const a=j*2*Math.PI/n;
+    const wob=t.kind==="egg" ? (0.76+0.24*(0.5+0.5*Math.sin(j*1.7+t.id*0.9))) : 1;
+    ring.push({x:t.x+Math.cos(a)*t.radius*wob, y:t.y+Math.sin(a)*t.radius*wob});
+  }
+  return ring;
+}
+function stampTokenOnFaces(faces, token){
+  const ring=fillingRing(token), added=[];
+  const ph=token.kind==="egg"?EGG_MM:FILL_MM;
+  const fill=token.kind==="egg"?"egg":"banana";
+  for(const face of faces){
+    if(face.kind!=="dough") continue;
+    let p=face.points;
+    for(let j=0;j<ring.length && p.length;j++){
+      const a=ring[j], z=ring[(j+1)%ring.length], nx=-(z.y-a.y), ny=z.x-a.x;
+      p=clipPoly(p,nx,ny,a.x*nx+a.y*ny);
+    }
+    if(p.length) added.push({points:p,kind:"filling",fill,source:token.id,tone:fill==="egg"?0:token.id%3,turned:false,
+      pc:{x:token.x,y:token.y},pr:token.radius,ph});
+  }
+  return added;
+}
+function fillingDiskFace(t){
+  const fill=t.kind==="egg"?"egg":"banana";
+  return {points:fillingRing(t),kind:"filling",fill,source:t.id,tone:fill==="egg"?0:t.id%3,turned:false,
+    pc:{x:t.x,y:t.y},pr:t.radius,ph:fill==="egg"?EGG_MM:FILL_MM};
+}
+function restampFillings(faces, tokens){
+  const dough=faces.filter(f=>f.kind==="dough");
+  if(!tokens.length) return dough;
+  const extra=[];
+  for(const t of tokens) extra.push(...stampTokenOnFaces(dough, t));
+  return dough.concat(extra);
+}
+function onDoughFaces(faces, p){
+  return faces.some(f=>f.kind==="dough" && pointInFace(f.points,p.x,p.y));
+}
+function separateFillings(tokens){
+  for(let k=0;k<3;k++){
+    for(let i=0;i<tokens.length;i++) for(let j=i+1;j<tokens.length;j++){
+      const a=tokens[i], b=tokens[j];
+      const dx=b.x-a.x, dy=b.y-a.y, d=Math.hypot(dx,dy), min=(a.radius+b.radius)*0.92;
+      if(d>=min || d<1e-6) continue;
+      const p=(min-d)*0.5, ux=dx/d, uy=dy/d;
+      a.x-=ux*p; a.y-=uy*p; b.x+=ux*p; b.y+=uy*p;
+    }
+  }
+}
+function clampFillings(tokens, faces){
+  const c=dishCentroid(faces);
+  for(const f of tokens){
+    if(onDoughFaces(faces, f)) continue;
+    for(let i=0;i<8;i++){
+      f.x+=(c.x-f.x)*0.4; f.y+=(c.y-f.y)*0.4;
+      if(onDoughFaces(faces, f)) break;
+    }
+  }
+}
+// Начинка — кусок НА листе, не наклейка. Складка теста его не режет: с stay-стороны лежит,
+// с клапана съезжает на основание; резкий дёргань — дальше к середине. Кружки чуть расталкиваются.
+function scootFillings(tokens, nx, ny, offset, yank){
+  const out=tokens.map(t=>({...t}));
+  if(!out.length) return out;
+  const y=Math.max(0,Math.min(1,yank||0));
+  for(const f of out){
+    const d=f.x*nx+f.y*ny-offset;
+    if(d<=-f.radius*0.2) continue;                 // целиком на основании
+    const need=d+f.radius*0.85;
+    const extra=y>0.55 ? (0.10+0.16*y) : (0.02+0.05*y);
+    f.x-=nx*(need+extra); f.y-=ny*(need+extra);
+    if(y>0.35){
+      const s=(f.id%2?1:-1)*0.02*y;
+      f.x+=-ny*s; f.y+=nx*s;
+    }
+  }
+  separateFillings(out);
+  return out;
+}
+function foldYank(g){
+  if(!g) return 0.3;
+  const v=velocityOf(g, performance.now());
+  return Math.max(0, Math.min(1, (((v&&v.speed)||0)-180)/900));
+}
 const DOUGH_HEAT_MM = 1.05;   // тепло сквозь слой теста exp(−мм/1,05): лист 0,5 мм пропускает 0,62, как раньше
 const FILL_HEAT_MM = 5;       // сквозь начинку exp(−мм/5), и ещё её тень: порция 4 мм пропускает 0,45 × 0,2
 const COVER_MM = 1;           // тень начинки на слоях под ней 1/(1+мм/1): 4 мм дают ×0,2 (спецификация §1: ×0,15…0,25)
@@ -973,19 +1059,21 @@ function foldGeometry(anchor,end){
   // следующие копии они не попадают (не перечисляемые).
   const tag=(o,src,lifted)=>Object.defineProperties(o,{__src:{value:src},__lifted:{value:lifted}});
   dish.faces.forEach((f,src)=>{
+    if(f.kind==="filling") return;   // начинка — кусок на листе, едет отдельно (scootFillings)
     const stay=clipPoly(f.points,nx,ny,offset,false), lift=clipPoly(f.points,nx,ny,offset);
     if(stay.length){ fixed.push(tag({...f,points:stay},src,false)); if(f.kind==="dough") aFixed+=polyArea(stay); }
     if(lift.length){
       if(f.kind==="dough") aMoving+=polyArea(lift);
       const refl=p=>{const d=p.x*nx+p.y*ny-offset;return{x:p.x-2*d*nx,y:p.y-2*d*ny};};
-      moving.push(tag({...f,turned:!f.turned,points:lift.map(refl),...(f.pc?{pc:refl(f.pc)}:{})},src,true));
+      moving.push(tag({...f,turned:!f.turned,points:lift.map(refl)},src,true));
     }
   });
   if(aMoving<.025*(aFixed+aMoving)||aFixed<.18*(aFixed+aMoving)) return null;
   return {faces:fixed.concat(moving.reverse()),crease:{nx,ny,offset}};
 }
 function rememberDish(){
-  pushHistory({faces:dish.faces,folds:dish.folds,cuts:dish.cuts,flips:dish.flips||0});
+  pushHistory({faces:dish.faces,folds:dish.folds,cuts:dish.cuts,flips:dish.flips||0,
+    filling:(dish.filling||[]).map(f=>({...f}))});
 }
 // До 20 шагов назад; шаг «вернуть на таву» (toPan) не выпадает никогда — иначе после 20 действий
 // на столе конверт нельзя было вернуть (проверка 17.09).
@@ -995,10 +1083,15 @@ function pushHistory(entry){
     if(dish.history[0].toPan) dish.history.splice(1,1); else dish.history.shift();
   }
 }
-function foldDish(anchor,end){
+function foldDish(anchor,end,yank){
   const next=foldGeometry(anchor,end); if(!next) return false;
   panPress=[]; popAllDomes();
-  rememberDish(); dish.faces=next.faces; dish.folds++; dish.hull=dishHull(); rebuildDishContact();
+  rememberDish();
+  const tokens=scootFillings(dish.filling||[], next.crease.nx, next.crease.ny, next.crease.offset, yank);
+  clampFillings(tokens, next.faces);
+  dish.faces=restampFillings(next.faces, tokens);
+  dish.filling=tokens;
+  dish.folds++; dish.hull=dishHull(); rebuildDishContact();
   dish.message=`Складок: ${dish.folds} · можно сложить ещё`;
   syncDishUI(); return true;
 }
@@ -1046,7 +1139,8 @@ function startCutting(){
   const b=dishBounds(); dish.cutBounds=b; dish.cutCenter={x:(b.left+b.right)/2,y:(b.top+b.bottom)/2};
   // Первая отмена на столе возвращает лист на таву вместе с историей складок: случайное
   // снятие обратимо (находка проверки 16.09).
-  dish.history=[{faces:dish.faces,folds:dish.folds,cuts:dish.cuts,flips:dish.flips||0,toPan:{history:dish.history}}];
+  dish.history=[{faces:dish.faces,folds:dish.folds,cuts:dish.cuts,flips:dish.flips||0,
+    filling:(dish.filling||[]).map(f=>({...f})),toPan:{history:dish.history}}];
   dish.mode="cut"; phase="CUT";
   dish.message="Проведи через конверт · длину и направление выбираешь сама";
   syncDishUI();
@@ -1108,8 +1202,8 @@ function undoDish(){
 // площади теста, перпендикулярной направлению маха, плюс сдвиг посадки. Центроид при
 // отражении стоит на месте, поэтому два переворота на месте возвращают лист точно.
 // Порядок слоёв разворачивается, у каждой грани меняется сторона, материал и его
-// тепловая история не трогаются: стороны принадлежат тесту. dish.filling — раскладка
-// на момент посадки, её не отражаем (складка её тоже не трогает).
+// тепловая история не трогаются: стороны принадлежат тесту. Начинка внутри конверта
+// едет зеркалом вместе с пакетом (куски, не наклейка).
 function dishCentroid(faces=dish.faces){
   // Складка отражает клапан, не меняя порядка вершин, поэтому у граней разная ориентация.
   // Площадь и момент каждой грани берутся со знаком её собственной площади — иначе клапан
@@ -1144,9 +1238,11 @@ function flipGeometry(dir,landing={x:0,y:0}){
   const faces=[];
   for(let i=dish.faces.length-1;i>=0;i--){
     const f=dish.faces[i];
-    faces.push({...f,turned:!f.turned,points:f.points.map(mirror),...(f.pc?{pc:mirror(f.pc)}:{})});
+    if(f.kind==="filling") continue;
+    faces.push({...f,turned:!f.turned,points:f.points.map(mirror)});
   }
-  return {faces,axis:{nx,ny,c},from:c,to:{x:tx,y:ty}};
+  const filling=(dish.filling||[]).map(t=>{ const q=mirror({x:t.x,y:t.y}); return {...t,x:q.x,y:q.y}; });
+  return {faces:restampFillings(faces, filling),filling,axis:{nx,ny,c},from:c,to:{x:tx,y:ty}};
 }
 function startPanSession(){
   // Если на сталь легла уже золотая сторона, «0 с» засоряло бы замер бюджета: пишем «уже».
@@ -1155,7 +1251,7 @@ function startPanSession(){
 }
 function commitFlip(next){
   panPress=[];                                   // лист перевернулся: пятна прижима остались на прежнем месте
-  rememberDish(); dish.faces=next.faces; dish.flips=(dish.flips||0)+1;
+  rememberDish(); dish.faces=next.faces; if(next.filling) dish.filling=next.filling; dish.flips=(dish.flips||0)+1;
   dish.hull=dishHull(); rebuildDishContact(); startPanSession();
   dish.message=`Перевёрнуто: ${dish.flips} · жарится другая сторона`;
   syncDishUI();
@@ -1418,6 +1514,11 @@ function moveDishGesture(p,client,time){
     const fresh=client && g.stroke && g.stroke.start!==null && t-g.stroke.start<FOLD_PREVIEW_DELAY_MS;
     const fast=fresh && velocityOf(g,t).speed>=FLICK_MIN_CSS;
     g.preview=!fast && inwardFold(g) ? foldGeometry(g.anchor,g.target) : null;
+    if(g.preview && dish.filling && dish.filling.length){
+      const tok=scootFillings(dish.filling, g.preview.crease.nx, g.preview.crease.ny, g.preview.crease.offset, foldYank(g));
+      clampFillings(tok, g.preview.faces);
+      g.preview.faces=g.preview.faces.filter(f=>f.kind==="dough").concat(tok.map(fillingDiskFace));
+    }
     // Ведение НАРУЖУ — снятие (решение владелицы 16.09): лист едет за лопаткой. Пока быстрый
     // штрих свеж, лист не двигаем: это может быть мах, и лист прыгнул бы назад перед полётом.
     if(!fast && !g.preview && outwardSlide(g)){
@@ -1552,7 +1653,7 @@ function endDishGesture(time){
     logPanGesture(startRemoval(g.slide) ? "remove" : "slide-refused",f,{...extra,...at});
     return;
   }
-  const ok=g.target&&inwardFold(g)&&foldDish(g.anchor,g.target);
+  const ok=g.target&&inwardFold(g)&&foldDish(g.anchor,g.target,foldYank(g));
   logPanGesture(ok ? "fold" : "none",f,extra);
 }
 // Section geometry belongs to a material snapshot, not to its screen size or heat.
