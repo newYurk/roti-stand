@@ -11,7 +11,7 @@
 // до 400%+ и лист «рвётся» в середине от любого движения. Замер это обнаружил сразу.
 // Число узлов сохранено (1 060 после обрезки по кругу; прежняя оценка «~1150» была на глаз,
 // пересчитано 07.09.2026), однородность рёбер восстановлена.
-const BUILD = "2026-09-20 · ямка под пальцем · 45";
+const BUILD = "2026-09-20 · дыры от шлепка · 46";
 const GRID = 38;                   // 38x38, в круг попадает 1 060 узлов (посчитано, не оценка)
 let SUBSTEPS = 8;                  // T2: 8–10 подшагов, 1 итерация
 let DAMP = 0.986;
@@ -40,7 +40,8 @@ function measurementContext(){
     runTuneAtBuild:runTuneAtBuild ? { ...runTuneAtBuild } : null, mixedTune,
     fry:typeof FRY_SECONDS==="undefined" ? null : FRY_SECONDS,
     pressGain:typeof PRESS_GAIN==="undefined" ? null : PRESS_GAIN,
-    domes:typeof DOMES==="undefined" ? null : DOMES };
+    domes:typeof DOMES==="undefined" ? null : DOMES,
+    tearFeel:typeof tearFeel==="undefined" ? null : tearFeel };
 }
 function currentMeasurement(entry){
   return entry.build===BUILD && entry.mixedTune===false &&
@@ -3213,8 +3214,9 @@ function bakeFlatten(){
   if(!quadRest || quadRest.length!==quads.length) quadRest = new Float32Array(quads.length);
   for(let q=0;q<quads.length;q++){
     const qq=quads[q], a=area(qq)||1e-6;
-    const h = ((flatH[qq[0]]||1)+(flatH[qq[1]]||1)+(flatH[qq[2]]||1)+(flatH[qq[3]]||1))/4;
-    quadRest[q] = a * h;
+    // Плющение решало, можно ли тянуть. Покой шага 2 — свежий диск: толщина 1.
+    // Иначе (a·flatH ≈ 0,18) первый сильный шлепок сразу рвал — лог 21.09.
+    quadRest[q] = a;
   }
   measureThickness();
   stepNo = 2; advancedAt = performance.now();
@@ -3544,8 +3546,21 @@ function meanDry(){
 }
 
 let SLAP_GROW = 0.075;           // пластическое растяжение за удар на единицу силы
-let TEAR_I = 2.9;                // с этой силы шлепок опасен…
-let TEAR_THIN = 0.20;            // …если лист уже истончился ниже этого
+let TEAR_I = 3.4;                // с этой силы шлепок опасен…
+let TEAR_THIN = 0.10;            // …если лист уже истончился ниже этого
+const TEAR_PRESETS = {
+  easy: { i:2.3, thin:0.26 },    // дыры почти сразу — проба узора
+  mid:  { i:3.4, thin:0.10 },    // сильный мах по уже тонкому
+  hard: { i:4.2, thin:0.05 }     // рвёт редко, только жёсткий удар
+};
+let tearFeel = "mid";
+function applyTearFeel(){
+  const p = TEAR_PRESETS[tearFeel] || TEAR_PRESETS.mid;
+  TEAR_I = p.i; TEAR_THIN = p.thin;
+  try{ localStorage.setItem("dough_tear", tearFeel); }catch(e){}
+  if(typeof document!=="undefined")
+    document.querySelectorAll("[data-tear]").forEach(b=>b.classList.toggle("on", b.dataset.tear===tearFeel));
+}
 
 // Рваная дырка на дальней стороне по направлению маха: рвём связи небольшого
 // пятна с неровным краем. Дырка остаётся навсегда — это узор, не наказание.
@@ -4334,7 +4349,7 @@ document.getElementById("tools").addEventListener("click", e=>{ if(e.target.id==
 // (замер: низ #hint приходился на 40–62 % высоты #stage). Показываем только текущий шаг.
 const HINTS = {
   1: "прижимай кусок: где ведёшь — там тоньше, край остаётся толстым. Когда весь тонкий — можно тянуть край",
-  2: "шаг 2: возьми край, миг подержи, резко махни — шлепок. Порвётся — останется рваный узор, так и пожарим",
+  2: "шаг 2: край, миг, мах — шлепок. Сильный удар по тонкому рвёт (дыры — узор). Нежнее — целый лист",
   3: "шаг 3: возьми край и круговым махом-«запятой» перекинь на таву — полетит, повернётся, зашипит"
 };
 function syncStepButtons(){
@@ -4444,8 +4459,14 @@ function setFrySeconds(sec){
 }
 setFrySeconds(60);
 document.querySelectorAll("[data-f]").forEach(b=>{
-  b.classList.toggle("on", +b.dataset.f===FRY_SECONDS);
+  b.addEventListener("click", ()=>setFrySeconds(+b.dataset.f));
 });
+try{ tearFeel = localStorage.getItem("dough_tear") || "mid"; }catch(e){}
+if(!TEAR_PRESETS[tearFeel]) tearFeel = "mid";
+document.querySelectorAll("[data-tear]").forEach(b=>{
+  b.addEventListener("click", ()=>{ tearFeel = b.dataset.tear; applyTearFeel(); });
+});
+applyTearFeel();
 // Принудительное обновление: страница отдаётся с GitHub Pages и залипает в кеше,
 // поэтому правки иначе не доезжают до телефона. Та же схема, что в «Лягушке».
 document.getElementById("hardReload").addEventListener("click", ()=>{
