@@ -8,3 +8,6 @@ review/shots-*/
 
 # оригиналы экранов: 3 МБ каждый, в git не идут (см. Home/CLAUDE.md)
 mockups/originals/
+
+# mood-борды и разговорные артефакты — локально, не в git
+runs/pitch-mood/
