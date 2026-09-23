@@ -1,0 +1,17 @@
+{
+  "name": "Roti Stand",
+  "install": "echo 'Roti Stand is a static HTML/CSS/JS site with no build step or dependencies; nothing to install.'",
+  "terminals": [
+    {
+      "name": "static-server",
+      "command": "python3 -m http.server 8000 --bind 0.0.0.0",
+      "description": "Serves the static site over HTTP on port 8000. Landing page: http://localhost:8000/ , dough prototype: http://localhost:8000/prototype/dough-closeup/"
+    }
+  ],
+  "ports": [
+    {
+      "name": "web server",
+      "port": 8000
+    }
+  ]
+}
