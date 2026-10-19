@@ -11,7 +11,7 @@
 // до 400%+ и лист «рвётся» в середине от любого движения. Замер это обнаружил сразу.
 // Число узлов сохранено (1 060 после обрезки по кругу; прежняя оценка «~1150» была на глаз,
 // пересчитано 07.09.2026), однородность рёбер восстановлена.
-const BUILD = "2026-10-19 · на таву и недотянутый · 64";
+const BUILD = "2026-10-19 · кромка без пилы · 65";
 const GRID = 38;                   // 38x38, в круг попадает 1 060 узлов (посчитано, не оценка)
 let SUBSTEPS = 8;                  // T2: 8–10 подшагов, 1 итерация
 let DAMP = 0.986;
@@ -74,6 +74,7 @@ let startArea = 1;                 // площадь листа при рожд�
 let gestures = [];                 // журнал шлепков (audit §6.6)
 let cons = null;                             // {a,b,rest,broken}
 let edgeNodes = [];                          // граничные узлы — за них берут лист
+let rimRing = [];                            // те же узлы по кругу, соседи по кромке (для оплывания)
 // Разрыв — не провал и не перезапуск (решение владельца 22.08.2026): дырка остаётся
 // в листе рваным узором, симуляция не останавливается, тесто не переделывается.
 let tornAt = 0, lastSnap = 0, breakTime = 0, pressTime = 0, pressed = false;
@@ -3081,6 +3082,7 @@ function build(){
   for(const cc of cons){ deg[cc.a]++; deg[cc.b]++; }
   edgeNodes = [];
   for(let i=0;i<N;i++) if(deg[i] < 8) edgeNodes.push(i);   // граница круга
+  { const ang = i => Math.atan2(py[i]-z.cy, px[i]-z.cx); rimRing = edgeNodes.slice().sort((a,b)=>ang(a)-ang(b)); }
 
   layoutPan();
   phase = "TABLE"; xf = null;
@@ -3208,8 +3210,38 @@ function step(dt){
   }
   updateAction(dt);
   creep(dt);
+  if(action.state === "SETTLING") relaxRim(dt);
   measureThickness();
   checkBreak(dt);
+}
+// Кромка оплывает после удара (19.10.2026). Круг, вырезанный из квадратной сетки, — лесенка:
+// у выпуклых углов 3–4 связи, у вогнутых 7. Шлепок растит длины покоя сильнее к краю (край²),
+// выпуклые углы стоят дальше и растут сильнее — лесенка с каждым шлепком раздувалась в пилу
+// (Chrome 390×844 без рамы, сборка 64, 60 прогонов: средний зубец кромки на шаге 3 — 0,024–0,031
+// мишени, медиана 0,027, против 0,017 у пробы — кнопка «шаг 3» со свежего комка). Пока лист
+// успокаивается, каждый узел кромки сдвигается к середине между соседями по кругу (RIM_RELAX
+// в секунду), и связи у сдвинутых узлов принимают новую длину — иначе решатель вернул бы зубец.
+// Сглаживаются только соседние узлы: лепесток и вытянутые стороны остаются. Это условность
+// против лесенки сетки, а не физическая величина (inferred: так оплывает тонкий край теста).
+const RIM_RELAX = 6;
+let rimMoved = null;
+function relaxRim(dt){
+  const ring = rimRing.filter(i => !conDeg || conDeg[i] > 0), n = ring.length;
+  if(n < 12) return;
+  const k = Math.min(1, RIM_RELAX*dt);
+  if(!rimMoved || rimMoved.length !== N) rimMoved = new Uint8Array(N);
+  rimMoved.fill(0);
+  const nx = new Float32Array(n), ny = new Float32Array(n);
+  for(let j=0;j<n;j++){
+    const a = ring[(j-1+n)%n], b = ring[(j+1)%n], i = ring[j];
+    nx[j] = px[i] + ((px[a]+px[b])*0.5 - px[i])*k;
+    ny[j] = py[i] + ((py[a]+py[b])*0.5 - py[i])*k;
+  }
+  for(let j=0;j<n;j++){ const i = ring[j]; px[i] = nx[j]; py[i] = ny[j]; prx[i] = px[i]; pry[i] = py[i]; rimMoved[i] = 1; }
+  for(const c of cons){
+    if(c.broken || !(rimMoved[c.a] || rimMoved[c.b])) continue;
+    c.rest += (Math.hypot(px[c.b]-px[c.a], py[c.b]-py[c.a]) - c.rest)*k;
+  }
 }
 
 // Краткая тяга дуги хвата — ТОЛЬКО в LIFTING (≤80 мс). Постоянной буксировки
