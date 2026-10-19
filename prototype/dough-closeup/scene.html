@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+<title>Роти · у реки</title>
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body {
+    width: 100%; height: 100%;
+    background: #14100c;
+    overflow: hidden;
+    touch-action: none;
+    -webkit-user-select: none; user-select: none;
+  }
+
+  /* ── Фон: макет локации ───────────────────────────────────── */
+  #bg {
+    position: absolute;
+    inset: 0;
+    background:
+      url('../../mockups/locations/riverside-grandmother.jpg')
+      center center / cover no-repeat;
+  }
+
+  /* ── Живой слой готовки (iframe стенда) ──────────────────── */
+  /*
+     Зона рабочего стола на макете 1024×576:
+       по горизонтали: ~10 % – ~90 % ширины
+       по вертикали:   ~52 % – ~100 % высоты
+     Iframe накрывает ровно эту область.
+     На телефоне в портрете iframe растягивается по ширине,
+     высота — 55 vw (немного больше квадрата), чтобы тава и
+     рабочая поверхность были видны одновременно.
+  */
+  #stand {
+    position: absolute;
+    left: 10%;  right: 10%;
+    bottom: 0;  height: 48%;
+    border: none;
+    background: transparent;
+    /* Скругляем верхние углы, чтобы не было резкой прямоугольной врезки */
+    border-radius: 6px 6px 0 0;
+    overflow: hidden;
+    /* Тонкая тень снизу макета — отделяет от фона, не режет */
+    box-shadow: 0 -2px 18px rgba(0,0,0,.45);
+  }
+
+  @media (orientation: portrait) and (max-width: 600px) {
+    #stand {
+      left: 0; right: 0;
+      height: 55vw;
+      border-radius: 0;
+      box-shadow: none;
+    }
+  }
+
+  /* ── Верхний HUD: название сцены и кнопка «без рамы» ──────── */
+  #hud {
+    position: absolute;
+    top: 10px; left: 12px; right: 12px;
+    display: flex; align-items: flex-start; justify-content: space-between;
+    pointer-events: none;
+  }
+  #hud-title {
+    font: 11px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace;
+    color: rgba(232,221,204,.55);
+    letter-spacing: .04em;
+    text-shadow: 0 1px 4px rgba(0,0,0,.7);
+  }
+  #hud-bare {
+    font: 11px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace;
+    color: rgba(232,221,204,.45);
+    background: rgba(20,16,12,.55);
+    border: 1px solid rgba(232,221,204,.15);
+    padding: 3px 8px;
+    cursor: pointer;
+    pointer-events: all;
+    border-radius: 3px;
+  }
+  #hud-bare:active { background: rgba(217,139,58,.25); }
+</style>
+</head>
+<body>
+
+<div id="bg"></div>
+
+<!--
+  iframe загружает index.html в режиме «рама»:
+  параметр ?frame=riverside активирует body.framed через stand.js,
+  что скрывает приборную панель (уже реализовано в CSS index.html).
+-->
+<iframe
+  id="stand"
+  src="index.html?frame=riverside"
+  allow="autoplay"
+  sandbox="allow-scripts allow-same-origin"
+  title="Стенд готовки"
+></iframe>
+
+<div id="hud">
+  <div id="hud-title">у реки · бабушка</div>
+  <button id="hud-bare" title="Скрыть фон, перейти к стенду">без рамы</button>
+</div>
+
+<script>
+  // «Без рамы» — открываем голый стенд
+  document.getElementById('hud-bare').addEventListener('click', () => {
+    window.location.href = 'index.html';
+  });
+</script>
+</body>
+</html>
