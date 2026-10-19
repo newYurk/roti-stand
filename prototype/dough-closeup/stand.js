@@ -11,7 +11,7 @@
 // до 400%+ и лист «рвётся» в середине от любого движения. Замер это обнаружил сразу.
 // Число узлов сохранено (1 060 после обрезки по кругу; прежняя оценка «~1150» была на глаз,
 // пересчитано 07.09.2026), однородность рёбер восстановлена.
-const BUILD = "2026-10-19 · начинка под клапаном · 60";
+const BUILD = "2026-10-19 · поворот везёт начинку · 61";
 const GRID = 38;                   // 38x38, в круг попадает 1 060 узлов (посчитано, не оценка)
 let SUBSTEPS = 8;                  // T2: 8–10 подшагов, 1 итерация
 let DAMP = 0.986;
@@ -1328,9 +1328,13 @@ function rotateDish(angle,pivot=twistPivot()){
   const cs=Math.cos(angle), sn=Math.sin(angle), R=p=>rotAbout(p,pivot,cs,sn);
   const moved=new Map(), rot=p=>{ let q=moved.get(p); if(!q){ q=R(p); moved.set(p,q); } return q; };
   const faces=dish.faces.map(f=>({...f,points:f.points.map(rot),...(f.pc?{pc:R(f.pc)}:{})}));
+  // Куски начинки поворачиваются вместе с блюдом: иначе следующая складка или переворот
+  // штамповали бы их на прежнем, неповёрнутом месте.
+  const filling=(dish.filling||[]).map(t=>{ const q=R(t); return {...t,x:q.x,y:q.y}; });
   if(dish.mode==="cut"){
     // Отмена поворота на столе возвращает и рамку масштаба.
-    pushHistory({faces:dish.faces,folds:dish.folds,cuts:dish.cuts,flips:dish.flips||0,cutBounds:dish.cutBounds,cutCenter:dish.cutCenter});
+    pushHistory({faces:dish.faces,folds:dish.folds,cuts:dish.cuts,flips:dish.flips||0,cutBounds:dish.cutBounds,cutCenter:dish.cutCenter,
+      filling:(dish.filling||[]).map(f=>({...f}))});
     dish.faces=faces; dish.cuts=dish.cuts.map(c=>({...c,a:R(c.a),b:R(c.b)}));
     // Середина раскладки — середина повёрнутых границ: так же, как в предпросмотре (иначе
     // повёрнутое блюдо съезжало и могло лечь на борт тавы).
@@ -1339,6 +1343,7 @@ function rotateDish(angle,pivot=twistPivot()){
     panPress=[]; popAllDomes();
     rememberDish(); dish.faces=faces; rebuildDishContact();
   }
+  dish.filling=filling;
   dish.hull=dishHull();
   if (typeof drizzleRotate === "function") drizzleRotate(angle, pivot);
   const deg=Math.round(angle*180/Math.PI);
