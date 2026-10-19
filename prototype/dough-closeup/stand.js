@@ -11,7 +11,7 @@
 // до 400%+ и лист «рвётся» в середине от любого движения. Замер это обнаружил сразу.
 // Число узлов сохранено (1 060 после обрезки по кругу; прежняя оценка «~1150» была на глаз,
 // пересчитано 07.09.2026), однородность рёбер восстановлена.
-const BUILD = "2026-10-19 · растяжка без комка · 63";
+const BUILD = "2026-10-19 · на таву и недотянутый · 64";
 const GRID = 38;                   // 38x38, в круг попадает 1 060 узлов (посчитано, не оценка)
 let SUBSTEPS = 8;                  // T2: 8–10 подшагов, 1 итерация
 let DAMP = 0.986;
@@ -64,7 +64,6 @@ let action = { state:"RESTING", pointerId:null, edgeNode:-1, gripIds:[], gripWei
   sweep:0, lastDir:null, tailDir:{x:1,y:0}, carryFrom:{x:0,y:0}, toss:null,
   liftC:null, liftR:0 };            // центр и радиус листа в момент подъёма — предел тяги хвата
 let lastDecision = "—";            // как классифицирован последний мах — для строки статистик
-let panRefuseAt = 0;
 // Сколько махов на шаге 3 стенд засчитал переносом. Нужен потому, что гейт 15°
 // решается частотой событий, а не рукой (#91): на живом пальце долю попаданий
 // приходится считать вручную, а руками из двадцати попыток не сосчитаешь.
@@ -3529,7 +3528,7 @@ function updateAction(dt){
     if(action.timer <= 0){
       // Прямой мах бьёт через 80 мс, не дожидаясь отпускания (аудит). Если за эти
       // 80 мс палец уже заметно повернул — это запятая: лист поднимается в руку.
-      if(commaLike() && action.pointerId !== null && sheetReadyToPan()) enterCarry(); else toFlying();
+      if(commaLike() && action.pointerId !== null) enterCarry(); else toFlying();
     }
   } else if(action.state === "CARRY"){
     action.timer -= dt;
@@ -3591,15 +3590,14 @@ function endCarry(){
   const tpx = panC.x - hx, tpy = panC.y - hy, tl = Math.hypot(tpx,tpy) || 1;
   const cosA = (dir.x*tpx + dir.y*tpy)/tl;
   const sweepDeg = Math.round(action.sweep*180/Math.PI);
-  const transfer = phase==="TABLE" && sheetReadyToPan() && Math.abs(action.sweep) >= COMMA_SWEEP && cosA >= Math.cos(COMMA_CONE);
+  const transfer = phase==="TABLE" && Math.abs(action.sweep) >= COMMA_SWEEP && cosA >= Math.cos(COMMA_CONE);
   if(transfer){
+    // Размер листа в самом решении: закинуть недотянутый лист МОЖНО (⚑ владелица 08.09.2026,
+    // decisions-log), но тогда это должно читаться как выбор, а не как случайность.
+    // Отказ «ещё короткий край» (21.09, сборка 57) снят 19.10.2026: он спорил с этим решением.
     const pctNow = Math.round(sheetRadius()/targetR*100);
     lastDecision = `запятая ${sweepDeg}° → тава · лист ${pctNow}%`;
     startToss(hx, hy, dir, tl); return;
-  }
-  if(phase==="TABLE" && Math.abs(action.sweep) >= COMMA_SWEEP && cosA >= Math.cos(COMMA_CONE) && !sheetReadyToPan()){
-    lastDecision = `ещё короткий край · ${Math.round(sheetShortR()/targetR*100)}% — шлепок`;
-    panRefuseAt = performance.now();
   }
   // Не к таве: это шлепок с дугой — лист опускается там, где его отпустили, и бьётся.
   lastDecision = `дуга ${sweepDeg}° → шлепок`;
@@ -4563,7 +4561,7 @@ document.getElementById("tools").addEventListener("click", e=>{ if(e.target.id==
 const HINTS = {
   1: "прижимай кусок: где ведёшь — там тоньше, край остаётся толстым. Когда весь тонкий — можно тянуть край",
   2: "шаг 2: край, миг, мах. Один удар — лепесток. Чтобы кругом, обойди",
-  3: "шаг 3: лист дотянут. Круговым махом-«запятой» на таву. Раньше — не полетит",
+  3: "шаг 3: возьми край и круговым махом-«запятой» перекинь на таву — полетит, повернётся, зашипит",
 };
 function syncStepButtons(){
   document.querySelectorAll("[data-s]").forEach(b=>b.classList.toggle("on", +b.dataset.s === stepNo));
@@ -4583,14 +4581,11 @@ document.querySelectorAll("[data-s]").forEach(b=>b.addEventListener("click", ()=
     }
     return;
   }
-  if(to === 3 && !sheetReadyToPan()){
-    lastDecision = `ещё короткий край · ${Math.round(sheetShortR()/targetR*100)}%`;
-    panRefuseAt = performance.now();
-    return;
-  }
+  // «на таву» с шага 2 берёт ТЕКУЩИЙ лист любого размера (⚑ 08.09: недотянутый тоже несут),
+  // а не отказывает и не пересобирает его.
   const ready = to === 1 ? false
               : to === 2 ? true
-              :            sheetReadyToPan();
+              :            stepNo === 2 || sheetReadyToPan();
   const keep = to === stepNo || (to > stepNo && ready && phase === "TABLE");
   stepNo = to;
   try{ localStorage.setItem("dough_step", String(stepNo)); }catch(e){}
@@ -5171,8 +5166,7 @@ function loop(now){
   const mc = meanCook(), md = meanDry();
   const verdictAge = verdictAt ? performance.now() - verdictAt : Infinity;
   liveEl.textContent = dish ? dish.message : verdictAge < 3500 ? verdict :
-    (performance.now()-panRefuseAt < 2400) ? `ещё короткий край · ${Math.round(sheetShortR()/targetR*100)}% — растяни, потом запятая`
-    : phase==="PAN" ? (performance.now()-fryJumpAt<2400 ? "→ "+FRY_STAGE_NAME[fryStageNow]
+    phase==="PAN" ? (performance.now()-fryJumpAt<2400 ? "→ "+FRY_STAGE_NAME[fryStageNow]
                      : fryStageNow===1 ? (md < 0.35 ? "на таве · сырое · шипит"
                      : "на таве · сырое · подсыхает")
                      : fryStageNow===2 ? "на таве · приготовленное"
