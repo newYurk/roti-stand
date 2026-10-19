@@ -11,7 +11,7 @@
 // до 400%+ и лист «рвётся» в середине от любого движения. Замер это обнаружил сразу.
 // Число узлов сохранено (1 060 после обрезки по кругу; прежняя оценка «~1150» была на глаз,
 // пересчитано 07.09.2026), однородность рёбер восстановлена.
-const BUILD = "2026-10-19 · начинка не выпадает из стопки · 62";
+const BUILD = "2026-10-19 · растяжка без комка · 63";
 const GRID = 38;                   // 38x38, в круг попадает 1 060 узлов (посчитано, не оценка)
 let SUBSTEPS = 8;                  // T2: 8–10 подшагов, 1 итерация
 let DAMP = 0.986;
@@ -61,7 +61,8 @@ let action = { state:"RESTING", pointerId:null, edgeNode:-1, gripIds:[], gripWei
   down:{x:0,y:0,t:0}, last:{x:0,y:0,t:0}, velocity:{x:0,y:0},
   impulse:0, direction:{x:0,y:0}, timer:0, mul:0, heldAtLift:0, kind:null,
   // перенос «запятой»: накопленный поворот маха, его хвост и параметры полёта
-  sweep:0, lastDir:null, tailDir:{x:1,y:0}, carryFrom:{x:0,y:0}, toss:null };
+  sweep:0, lastDir:null, tailDir:{x:1,y:0}, carryFrom:{x:0,y:0}, toss:null,
+  liftC:null, liftR:0 };            // центр и радиус листа в момент подъёма — предел тяги хвата
 let lastDecision = "—";            // как классифицирован последний мах — для строки статистик
 let panRefuseAt = 0;
 // Сколько махов на шаге 3 стенд засчитал переносом. Нужен потому, что гейт 15°
@@ -3215,9 +3216,22 @@ function step(dt){
 // Краткая тяга дуги хвата — ТОЛЬКО в LIFTING (≤80 мс). Постоянной буксировки
 // больше нет: она и была источником «липкости» из живого теста. Палец по-прежнему
 // тянет пружиной, а не телепортом, и дугу, а не точку.
+// Цель тяги — не дальше LIFT_REACH радиусов листа от его центра (19.10.2026). Подъём
+// начинается с первого движения после 80 мс, и при настоящем махе палец к этому
+// времени уже за краем и уходит ещё на радиус: без предела дуга вытягивалась языком,
+// на отпускании язык отскакивал за центр, и лист складывался сам на себя — «комок»
+// из лога владелицы (сборка 61, 100/100/100). Замер Node, её четыре маха с диска шага 2:
+// без предела 280–506 вывернутых ячеек из ~1000, с пределом 0.
 const GRAB_K = 0.30;
+const LIFT_REACH = 1.15;
 function liftPull(){
-  const dx = action.last.x - prx[action.edgeNode], dy = action.last.y - pry[action.edgeNode];
+  let tx = action.last.x, ty = action.last.y;
+  const c = action.liftC, lim = action.liftR * LIFT_REACH;
+  if(c && lim > 0){
+    const ox = tx - c.x, oy = ty - c.y, d = Math.hypot(ox, oy);
+    if(d > lim){ tx = c.x + ox/d*lim; ty = c.y + oy/d*lim; }
+  }
+  const dx = tx - prx[action.edgeNode], dy = ty - pry[action.edgeNode];
   for(let m=0;m<action.gripIds.length;m++){
     const n = action.gripIds[m], w = action.gripWeights[m];
     prx[n] += dx * GRAB_K * w;
@@ -3332,6 +3346,7 @@ function clearAction(){
   action.direction = {x:0,y:0}; action.velocity = {x:0,y:0};
   action.timer = 0; action.mul = 0; action.heldAtLift = 0; action.kind = null;
   action.sweep = 0; action.lastDir = null; action.tailDir = {x:1,y:0}; action.toss = null;
+  action.liftC = null; action.liftR = 0;
 }
 
 function armAction(pointerId, p){
@@ -3486,6 +3501,7 @@ function updateActionMove(p){
     action.direction = { x:action.velocity.x/sl, y:action.velocity.y/sl };
     action.impulse = Math.min(IMPULSE_MAX, IMPULSE_K * drive);   // в R0-единицах
     action.sweep = 0; action.lastDir = { ...action.direction }; action.tailDir = { ...action.direction };
+    action.liftC = c; action.liftR = sheetRadius();
   }
 }
 
@@ -3737,7 +3753,7 @@ function meanDry(){
   return n ? s/n : 0;
 }
 
-let SLAP_GROW = 0.12;            // сторона маха заметно длиннее; спина чуть растёт
+let SLAP_GROW = 0.24;            // сторона маха длиннее, но растёт весь лист (19.10.2026: было 0.12)
 let lastSlapDir = null, sameSlapN = 0;
 let TEAR_I = 3.4;                // с этой силы шлепок опасен…
 let TEAR_THIN = 0.10;            // …если лист уже истончился ниже этого
@@ -3809,9 +3825,13 @@ function slapWeight(x, y, direction, center, sr, t){
   const mx = x - center.x, my = y - center.y;
   const dl = Math.hypot(mx, my) || 1;
   const along = (mx/dl)*direction.x + (my/dl)*direction.y;
-  const facing = Math.max(0, along);
-  // Лепесток ~120°, не полукруг и не клин. Пол 0,10 — спина живая, без полосы сдвига.
-  const axis = 0.10 + 0.90 * Math.pow(facing, 1.25);
+  // Лепесток мягкий: сторона маха растёт примерно вдвое сильнее спины, спина тоже растёт.
+  // С 21.09 (сборки 51–56) росла почти одна сторона удара (спина 0,10, бока ~0,1):
+  // лист шёл к мишени 12–15 шлепков вместо 5–6 и, смятый, больше не расправлялся.
+  // 19.10.2026: пол 0,45 и гладкий профиль без излома на боках — при изломе бока
+  // от сдвига выворачивались (Node: 13–16 ячеек против 5–7). Сила SLAP_GROW подобрана
+  // под сборки 2–41: её четыре маха дают ~0,85 мишени, готов за 5 шлепков.
+  const axis = 0.45 + 0.55 * Math.pow((1 + along) * 0.5, 1.5);
   const edge = Math.max(0, Math.min(1, dl/sr));
   const harden = 0.32 + 0.68 * Math.max(0, Math.min(1, t));
   return axis * (0.28 + 0.72*edge*edge) * harden;
