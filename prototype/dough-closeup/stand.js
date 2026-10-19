@@ -11,7 +11,7 @@
 // до 400%+ и лист «рвётся» в середине от любого движения. Замер это обнаружил сразу.
 // Число узлов сохранено (1 060 после обрезки по кругу; прежняя оценка «~1150» была на глаз,
 // пересчитано 07.09.2026), однородность рёбер восстановлена.
-const BUILD = "2026-10-19 · поворот везёт начинку · 61";
+const BUILD = "2026-10-19 · начинка не выпадает из стопки · 62";
 const GRID = 38;                   // 38x38, в круг попадает 1 060 узлов (посчитано, не оценка)
 let SUBSTEPS = 8;                  // T2: 8–10 подшагов, 1 итерация
 let DAMP = 0.986;
@@ -434,8 +434,20 @@ const DOUGH_UNIT_MM = 14;     // толщина 1 (кусочек) ≈ 14 мм �
 const SHEET_REF_MM = 0.5;     // при такой толщине сушка идёт с базовой скоростью
 const FILL_MM = 3;            // толщина ломтика банана (с 17.09 порция — один ломтик; было 4 мм на горку)
 const BANANA_MAX = 18;        // однослойное пятно, как уличное (~16 кружков)
+// Начинка — один слой по одну сторону листа: у стопки одно место для неё (slot в складке и
+// перевороте). Открытый лист, перевёрнутый с начинкой, держит её под собой, и новые куски легли бы
+// сверху, на другую сторону, а следующая складка или переворот свалили бы их к старым, под лист
+// (ревью сборки 61). Поэтому доложить можно, только пока начинки нет или она сверху: переверни
+// лист обратно — и клади дальше.
+function fillingUnderSheet(){
+  if(!dish || !(dish.filling && dish.filling.length)) return false;
+  const F=dish.faces; let top=F.length-1;
+  while(top>=0 && F[top].kind!=="dough") top--;
+  for(let i=0;i<top;i++) if(F[i].kind==="filling") return true;
+  return false;
+}
 function canPlaceBanana(){
-  return !!dish && dish.mode==="fold" && dish.folds===0 && !dishFlight && !dishMove;
+  return !!dish && dish.mode==="fold" && dish.folds===0 && !dishFlight && !dishMove && !fillingUnderSheet();
 }
 function _fillingOf(kind){
   return (dish.filling||[]).filter(f => (f.kind||"banana")===kind);
@@ -478,7 +490,7 @@ window.canPlaceBanana = canPlaceBanana;
 const EGG_MM = 1.6;
 const EGG_MAX = 24;
 function canPlaceEgg(){
-  return !!dish && dish.mode==="fold" && dish.folds===0 && !dishFlight && !dishMove;
+  return !!dish && dish.mode==="fold" && dish.folds===0 && !dishFlight && !dishMove && !fillingUnderSheet();
 }
 function addEgg(x, y, opts){
   if(!canPlaceEgg()) return false;
@@ -1418,7 +1430,8 @@ function syncDishUI(){
   if(dish) hintEl.textContent=dish.mode==="fold"
     ? (dish.folds ? "край: внутрь — складка · мах — переворот · на стол — снять · держи — прижим · "+TWIST_HINT
        : (dish.filling && dish.filling.length
-         ? "начинка на листе · край внутрь — складка"
+         ? (fillingUnderSheet() ? "начинка под листом · мах — перевернуть обратно · край внутрь — складка"
+           : "начинка на листе · край внутрь — складка")
          : "положи банан и яйцо на середину, потом заверни края"))
     : dish.mode==="served" ? "Подано · «следующий роти» — новый кусочек"
     : "Нарезка: проведи через конверт · "+TWIST_HINT;
@@ -2530,7 +2543,7 @@ const SLAB_MM = 5, SLAB_GAIN = 1.4;
 const slabTop = (H,p) => Math.min(SLAB_MM, Math.max(0, H.atBase ? H.atBase(p) : H.at(p))*SLAB_GAIN);
 const CUT_RIM = 0.014;                 // ширина полоски начинки у разреза, доли роти (≈4 CSS px)
 const SHADOW_DX = .45, SHADOW_DY = .12; // тень на столе: сдвиг на единицу высоты
-const TABLE_K = 8;                     // сколько слоёв помнит пиксель (при переполнении выпадают средние)
+const TABLE_K = 8;                     // сколько слоёв помнит пиксель (при переполнении выпадает нижний слой теста над низом, не начинка)
 const TABLE_RELIEF = 0.25;             // доля мелкого рельефа верха (остальное — крупно сглажено)
 let tableCanvas = null;
 // Всё, что не зависит от вида, считается один раз на снимок материала: высоты вершин (мм),
@@ -2561,12 +2574,12 @@ function tableFaceData(faces,H){
     });
     return {base,lift,cs};
   });
-  const layer=new Int32Array(faces.length);
-  { const m=new Map(); faces.forEach((f,i)=>{ const k=f.kind+":"+f.source+":"+f.turned; if(!m.has(k)) m.set(k,m.size); layer[i]=m.get(k); }); }
+  const layer=new Int32Array(faces.length), isFill=new Uint8Array(faces.length);
+  { const m=new Map(); faces.forEach((f,i)=>{ const k=f.kind+":"+f.source+":"+f.turned; if(!m.has(k)) m.set(k,m.size); layer[i]=m.get(k); isFill[i]=f.kind==="filling" ? 1 : 0; }); }
   const boxes=faces.map(f=>{ let x0=Infinity,x1=-Infinity,y0=Infinity,y1=-Infinity;
     for(const p of f.points){ if(p.x<x0)x0=p.x; if(p.x>x1)x1=p.x; if(p.y<y0)y0=p.y; if(p.y>y1)y1=p.y; }
     return {cx:(x0+x1)/2,cy:(y0+y1)/2,r:Math.hypot(x1-x0,y1-y0)/2}; });
-  const out={key,V,layer,boxes,cutFace:new Map()};
+  const out={key,V,layer,isFill,boxes,cutFace:new Map()};
   cache.set(faces,out); return out;
 }
 // Грани далеко от резов попиксельно не проверяются; радиус зависит от размера пикселя (вид A/B).
@@ -2639,7 +2652,7 @@ function renderDishTable(faces,screen,H,zk,W,Hc,s,opts={}){
   const maxUp=Math.ceil((SLAB_MM+FILL_MM*FILL_VIS*SLAB_GAIN)*zk)+2;
   const N=bw*bh, K=TABLE_K, padX=Math.ceil(SHADOW_DX*maxUp*RELIEF_K)+4, padY=Math.ceil(SHADOW_DY*maxUp*RELIEF_K)+4;
   const OW=bw+padX, OH=bh+maxUp+padY, NO=OW*OH;
-  const A=tableArrays(N,NO), {tf,th,tl,tu,tv,col,pf,pn,pd}=A, layer=D.layer;
+  const A=tableArrays(N,NO), {tf,th,tl,tu,tv,col,pf,pn,pd}=A, layer=D.layer, isFill=D.isFill;
   // Грани идут снизу вверх: последняя накрывшая пиксель — его верх.
   for(let i=0;i<n;i++){
     const q=P[i], ps=faces[i].points, {base,lift,cs}=D.V[i], dough=faces[i].kind==="dough";
@@ -2672,8 +2685,16 @@ function renderDishTable(faces,screen,H,zk,W,Hc,s,opts={}){
           let cnt=pn[c], dup=false;
           for(let k=0;k<cnt;k++) if(layer[pf[c*K+k]]===layer[i]){ dup=true; break; }
           if(!dup){
-            // при переполнении выпадают средние слои: нижний нужен для поджаристой полосы стенки
-            if(cnt<K){ pf[c*K+cnt]=i; pn[c]=cnt+1; } else { pf.copyWithin(c*K+1,c*K+2,c*K+K); pf[c*K+K-1]=i; }
+            // При переполнении выпадает средний слой: нижний нужен для поджаристой полосы стенки.
+            // Выпадает нижний слой ТЕСТА над низом, начинка — никогда: с сборки 60 она лежит прямо
+            // над листом, во втором слоте, и от пяти складок первой пропадала из стенки разреза
+            // (ревью сборки 61). Начинку пропускаем; если выше одна начинка — уходит верхний слот.
+            if(cnt<K){ pf[c*K+cnt]=i; pn[c]=cnt+1; }
+            else {
+              const e=c*K+K-1; let d=c*K+1;
+              while(d<e && isFill[pf[d]]) d++;
+              pf.copyWithin(d,d+1,e+1); pf[e]=i;
+            }
             if(dough && pd[c]<255) pd[c]++;
           }
           tf[c]=i;
