@@ -11,7 +11,7 @@
 // до 400%+ и лист «рвётся» в середине от любого движения. Замер это обнаружил сразу.
 // Число узлов сохранено (1 060 после обрезки по кругу; прежняя оценка «~1150» была на глаз,
 // пересчитано 07.09.2026), однородность рёбер восстановлена.
-const BUILD = "2026-10-19 · кромка без пилы · 65";
+const BUILD = "2026-10-19 · ресайз без пересборки · 66";
 const GRID = 38;                   // 38x38, в круг попадает 1 060 узлов (посчитано, не оценка)
 let SUBSTEPS = 8;                  // T2: 8–10 подшагов, 1 итерация
 let DAMP = 0.986;
@@ -5276,17 +5276,45 @@ function resize(force){
   if(!force && w===cv.width && h===cv.height) return;
   if(!force && gestureLive()){ pendingResize = true; return; }   // доиграем жест, потом пересоберём
   pendingResize = false;
-  const oldPan={...panC},oldR=targetR;
+  const oldPan={...panC},oldR=targetR,oldZ=zone("work");
   cv.width = w; cv.height = h;
   if(dish && !force){
     const z=zone("work"); targetR=sheetSpan(z)*TARGET_FRAC; layoutPan();
     const scale=targetR/oldR;
     for(let i=0;i<N;i++){px[i]=panC.x+(px[i]-oldPan.x)*scale;py[i]=panC.y+(py[i]-oldPan.y)*scale;prx[i]=px[i];pry[i]=py[i];}
-    startR*=scale;step1R*=scale;gestureScale*=scale;R0*=scale;
+    scaleSheetLengths(scale);
     rebuildDishContact();
     return; // dish и история в локальных координатах: ни одной пересборки материала
   }
+  if(!force && N > 0 && cons){ rescaleSheet(oldZ, oldPan, oldR); return; }
   build();
+}
+// Лист на столе при ресайзе не пересобирается (19.10.2026). Раньше поворот телефона или панель
+// Safari в альбоме на шагах 1–3 звали build(): расплющенное пятно, растянутый лист и готовый
+// к таве шаг 3 заменялись свежей заготовкой (замер 390×844 → 844×390: лист 0,82 мишени стал 0,41,
+// карта нажима шага 1 — снова 1). Теперь меняется только масштаб: координаты стола выводятся из
+// холста, поэтому узлы переносятся от центра старой рабочей зоны к центру новой с множителем
+// s = новая мишень / старая; длины покоя — в s раз, площади покоя — в s², радиусы и мерка жеста —
+// в s. Толщина, карта нажима, сушка и цвет безразмерны и не трогаются. Лист на таве без блюда
+// (посадка не дала ни одной ячейки) переносится так же от старого центра тавы к новому.
+function rescaleSheet(oldZ, oldPan, oldR){
+  const z = zone("work");
+  targetR = sheetSpan(z)*TARGET_FRAC; layoutPan();
+  const s = targetR/oldR, onPan = phase === "PAN";
+  const o0 = onPan ? oldPan : { x:oldZ.cx, y:oldZ.cy }, o1 = onPan ? panC : { x:z.cx, y:z.cy };
+  for(let i=0;i<N;i++){
+    px[i] = o1.x + (px[i]-o0.x)*s; py[i] = o1.y + (py[i]-o0.y)*s; prx[i] = px[i]; pry[i] = py[i];
+    vx[i] *= s; vy[i] *= s;
+  }
+  scaleSheetLengths(s);
+}
+// Всё, что у листа измеряется в единицах стола, кроме самих узлов (их переносят вызывающие).
+// На блюде длины покоя физике уже не нужны, но масштабируются так же — лист остаётся согласованным.
+function scaleSheetLengths(s){
+  for(const c of cons) c.rest *= s;
+  if(quadRest) for(let q=0;q<quadRest.length;q++) quadRest[q] *= s*s;
+  startArea *= s*s;
+  R0 *= s; startR *= s; step1R *= s; gestureScale *= s;
 }
 // Отложенный ресайз применяется, как только рука отпустила и лист вернулся в покой.
 function flushResize(){ if(pendingResize && !gestureLive()) resize(); }
