@@ -1,3 +1,34 @@
 {
-  "enabledMcpjsonServers": ["github"]
+  "enabledMcpjsonServers": [
+    "github"
+  ],
+  "enabledPlugins": {
+    "adobe-for-creativity@synced": false,
+    "bio-research@synced": false,
+    "canva@synced": false,
+    "customer-support@synced": false,
+    "data@synced": false,
+    "design@synced": false,
+    "engineering@synced": false,
+    "enterprise-search@synced": false,
+    "figma@synced": false,
+    "finance@synced": false,
+    "human-resources@synced": false,
+    "legal@synced": false,
+    "marketing@synced": false,
+    "operations@synced": false,
+    "pdf-viewer@synced": false,
+    "product-management@synced": false,
+    "productivity@synced": false,
+    "sales@synced": false,
+    "slack-by-salesforce@synced": false,
+    "small-business@synced": false
+  },
+  "disabledMcpjsonServers": [
+    "figma",
+    "github"
+  ],
+  "env": {
+    "ENABLE_CLAUDEAI_MCP_SERVERS": "false"
+  }
 }
