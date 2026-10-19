@@ -11,7 +11,7 @@
 // до 400%+ и лист «рвётся» в середине от любого движения. Замер это обнаружил сразу.
 // Число узлов сохранено (1 060 после обрезки по кругу; прежняя оценка «~1150» была на глаз,
 // пересчитано 07.09.2026), однородность рёбер восстановлена.
-const BUILD = "2026-09-21 · банан съезжает со складки · 59";
+const BUILD = "2026-10-19 · начинка под клапаном · 60";
 const GRID = 38;                   // 38x38, в круг попадает 1 060 узлов (посчитано, не оценка)
 let SUBSTEPS = 8;                  // T2: 8–10 подшагов, 1 итерация
 let DAMP = 0.986;
@@ -549,12 +549,22 @@ function fillingDiskFace(t){
   return {points:fillingRing(t),kind:"filling",fill,source:t.id,tone:fill==="egg"?0:t.id%3,turned:false,
     pc:{x:t.x,y:t.y},pr:t.radius,ph:fill==="egg"?EGG_MM:FILL_MM};
 }
-function restampFillings(faces, tokens){
+// Лист, на который клали начинку, — грани, которые ни одна складка не поднимала (поднятым
+// foldGeometry ставит flap). Начинка — один слой на листе, а не копия на каждом клапане.
+function sheetFaces(faces){
+  const dough=faces.filter(f=>f.kind==="dough"), sheet=dough.filter(f=>!f.flap);
+  return sheet.length ? sheet : dough;
+}
+// slot — сколько граней теста лежит в стопке под начинкой: над листом и под клапанами, которые
+// легли на неё позже (после переворота — наоборот). Без slot начинка ляжет поверх всего —
+// так было в сборке 59, и конверт её не прятал.
+function restampFillings(faces, tokens, slot){
   const dough=faces.filter(f=>f.kind==="dough");
   if(!tokens.length) return dough;
-  const extra=[];
-  for(const t of tokens) extra.push(...stampTokenOnFaces(dough, t));
-  return dough.concat(extra);
+  const sheet=sheetFaces(dough), extra=[];
+  for(const t of tokens) extra.push(...stampTokenOnFaces(sheet, t));
+  const at=slot===undefined ? dough.length : Math.max(0,Math.min(dough.length,slot));
+  return dough.slice(0,at).concat(extra,dough.slice(at));
 }
 function onDoughFaces(faces, p){
   return faces.some(f=>f.kind==="dough" && pointInFace(f.points,p.x,p.y));
@@ -571,12 +581,12 @@ function separateFillings(tokens){
   }
 }
 function clampFillings(tokens, faces){
-  const c=dishCentroid(faces);
+  const sheet=sheetFaces(faces), c=dishCentroid(sheet);   // кусок едет по листу, не по клапану
   for(const f of tokens){
-    if(onDoughFaces(faces, f)) continue;
+    if(onDoughFaces(sheet, f)) continue;
     for(let i=0;i<8;i++){
       f.x+=(c.x-f.x)*0.4; f.y+=(c.y-f.y)*0.4;
-      if(onDoughFaces(faces, f)) break;
+      if(onDoughFaces(sheet, f)) break;
     }
   }
 }
@@ -1054,22 +1064,24 @@ function foldGeometry(anchor,end){
   const dx=anchor.x-end.x, dy=anchor.y-end.y, length=Math.hypot(dx,dy);
   if(length<.12) return null;
   const nx=dx/length, ny=dy/length, offset=((anchor.x+end.x)*nx+(anchor.y+end.y)*ny)/2;
-  const fixed=[], moving=[]; let aFixed=0,aMoving=0;
+  const fixed=[], moving=[]; let aFixed=0,aMoving=0,slot=-1;
   // Скрытые ссылки на исходную грань нужны быстрым высотам предпросмотра; в JSON и в
   // следующие копии они не попадают (не перечисляемые).
   const tag=(o,src,lifted)=>Object.defineProperties(o,{__src:{value:src},__lifted:{value:lifted}});
   dish.faces.forEach((f,src)=>{
-    if(f.kind==="filling") return;   // начинка — кусок на листе, едет отдельно (scootFillings)
+    // Начинка — кусок на листе, едет отдельно (scootFillings), но место в стопке помнит:
+    // всё, что было под ней и осталось, — под ней; клапан этой складки ложится сверху.
+    if(f.kind==="filling"){ if(slot<0) slot=fixed.length; return; }
     const stay=clipPoly(f.points,nx,ny,offset,false), lift=clipPoly(f.points,nx,ny,offset);
     if(stay.length){ fixed.push(tag({...f,points:stay},src,false)); if(f.kind==="dough") aFixed+=polyArea(stay); }
     if(lift.length){
       if(f.kind==="dough") aMoving+=polyArea(lift);
       const refl=p=>{const d=p.x*nx+p.y*ny-offset;return{x:p.x-2*d*nx,y:p.y-2*d*ny};};
-      moving.push(tag({...f,turned:!f.turned,points:lift.map(refl)},src,true));
+      moving.push(tag({...f,turned:!f.turned,flap:true,points:lift.map(refl)},src,true));
     }
   });
   if(aMoving<.025*(aFixed+aMoving)||aFixed<.18*(aFixed+aMoving)) return null;
-  return {faces:fixed.concat(moving.reverse()),crease:{nx,ny,offset}};
+  return {faces:fixed.concat(moving.reverse()),crease:{nx,ny,offset},slot:slot<0 ? fixed.length : slot};
 }
 function rememberDish(){
   pushHistory({faces:dish.faces,folds:dish.folds,cuts:dish.cuts,flips:dish.flips||0,
@@ -1089,7 +1101,7 @@ function foldDish(anchor,end,yank){
   rememberDish();
   const tokens=scootFillings(dish.filling||[], next.crease.nx, next.crease.ny, next.crease.offset, yank);
   clampFillings(tokens, next.faces);
-  dish.faces=restampFillings(next.faces, tokens);
+  dish.faces=restampFillings(next.faces, tokens, next.slot);
   dish.filling=tokens;
   dish.folds++; dish.hull=dishHull(); rebuildDishContact();
   dish.message=`Складок: ${dish.folds} · можно сложить ещё`;
@@ -1235,14 +1247,14 @@ function flipGeometry(dir,landing={x:0,y:0}){
     if(!q){ const d=(p.x-c.x)*nx+(p.y-c.y)*ny; q={x:p.x-2*d*nx+ox,y:p.y-2*d*ny+oy}; moved.set(p,q); }
     return q;
   };
-  const faces=[];
+  const faces=[]; let slot;
   for(let i=dish.faces.length-1;i>=0;i--){
     const f=dish.faces[i];
-    if(f.kind==="filling") continue;
+    if(f.kind==="filling"){ if(slot===undefined) slot=faces.length; continue; }   // лист теперь над начинкой
     faces.push({...f,turned:!f.turned,points:f.points.map(mirror)});
   }
   const filling=(dish.filling||[]).map(t=>{ const q=mirror({x:t.x,y:t.y}); return {...t,x:q.x,y:q.y}; });
-  return {faces:restampFillings(faces, filling),filling,axis:{nx,ny,c},from:c,to:{x:tx,y:ty}};
+  return {faces:restampFillings(faces, filling, slot),filling,axis:{nx,ny,c},from:c,to:{x:tx,y:ty}};
 }
 function startPanSession(){
   // Если на сталь легла уже золотая сторона, «0 с» засоряло бы замер бюджета: пишем «уже».
@@ -1517,7 +1529,8 @@ function moveDishGesture(p,client,time){
     if(g.preview && dish.filling && dish.filling.length){
       const tok=scootFillings(dish.filling, g.preview.crease.nx, g.preview.crease.ny, g.preview.crease.offset, foldYank(g));
       clampFillings(tok, g.preview.faces);
-      g.preview.faces=g.preview.faces.filter(f=>f.kind==="dough").concat(tok.map(fillingDiskFace));
+      const dough=g.preview.faces.filter(f=>f.kind==="dough"), at=g.preview.slot;
+      g.preview.faces=dough.slice(0,at).concat(tok.map(fillingDiskFace),dough.slice(at));   // под клапаном, как после отпускания
     }
     // Ведение НАРУЖУ — снятие (решение владелицы 16.09): лист едет за лопаткой. Пока быстрый
     // штрих свеж, лист не двигаем: это может быть мах, и лист прыгнул бы назад перед полётом.
