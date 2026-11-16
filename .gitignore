@@ -14,3 +14,6 @@ runs/
 
 # mood-борды и разговорные артефакты — локально, не в git
 runs/pitch-mood/
+
+# локальные настройки Claude Code — не в git (19.10 уехали в публичный main)
+.claude/settings.local.json
