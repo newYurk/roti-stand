@@ -41,7 +41,7 @@ function nbKb(url){ return +(nbBytes(url)/1024).toFixed(1); }
 function nbLoad(){
   const s = typeof eveNbRaw !== "undefined" ? eveNbRaw : null;
   if(!s || s.v !== NB_V || !Array.isArray(s.evenings)) return;
-  const snap = x => x && (x.to === "som" || x.to === "counter")
+  const snap = x => x && (x.to === "som" || x.to === "counter" || x.to === "dog")
     ? { to:x.to, img:typeof x.img === "string" && x.img.startsWith("data:image/") ? x.img : null, crisp:+x.crisp || 0, step:Math.round(+x.step) || 0, ts:x.ts } : null;
   const evenings = s.evenings.map(e => ({ ts:e && e.ts, snaps:(e && Array.isArray(e.snaps) ? e.snaps : []).map(snap).filter(Boolean).slice(0, NB_PER_EVENING) }))
     .filter(e => e.snaps.length).slice(-NB_EVENINGS);
@@ -109,10 +109,11 @@ function notebookSnap(to){
   let step = 0;
   try{ step = Math.max(stepOf(dishSideMean("cook", "contactWeights")), stepOf(dishSideMean("cook", "topWeights"))); }catch(e){}
   if(to === "som" && typeof GST !== "undefined" && GST.answers.length) step = Math.max(step, GST.answers[GST.answers.length - 1].step || 0);
-  ev.snaps.push({ to:to === "som" ? "som" : "counter", img, crisp:+(+dishCrisp || 0).toFixed(1), step, ts:new Date().toISOString() });
+  to = to === "som" || to === "dog" ? to : "counter";       // «dog» — шаг 4 (night.js): роти ушёл псу
+  ev.snaps.push({ to, img, crisp:+(+dishCrisp || 0).toFixed(1), step, ts:new Date().toISOString() });
   while(ev.snaps.length > NB_PER_EVENING) ev.snaps.shift();
   nbQuiet = NB_QUIET_S;
-  nbLog("snap", { to:to === "som" ? "som" : "counter", kb:nbKb(img), n:ev.snaps.length });
+  nbLog("snap", { to, kb:nbKb(img), n:ev.snaps.length });
 }
 // Снимки этого вечера (для ночного кадра, шаг 4).
 function notebookEvening(){ return NB.cur ? NB.evenings[NB.evenings.length - 1].snaps : []; }
@@ -251,7 +252,7 @@ function nbPic(url){
   if(!im){ im = new Image(); im.src = url; nbPics.set(url, im); }
   return im.complete && im.naturalWidth > 0 ? im : null;
 }
-// Метка «кто съел»: маленькая Сом (как её заглушка у стойки) или стойка с роти.
+// Метка «кто съел»: маленькая Сом (как её заглушка у стойки), морда пса (шаг 4) или стойка с роти.
 function nbMark(g, sx, sy, to, x, y, u){
   const ell = (cx, cy, rx, ry, fill) => { g.fillStyle = fill; g.beginPath(); g.ellipse(cx*sx, cy*sy, rx*sx, ry*sy, 0, 0, Math.PI*2); g.fill(); };
   if(to === "som"){
@@ -263,6 +264,15 @@ function nbMark(g, sx, sy, to, x, y, u){
       g.strokeStyle = "#e0a23a"; g.lineWidth = Math.max(1, 1.4*u*sx); g.beginPath();
       g.ellipse((x + s*9.5*u)*sx, (y + 6*u)*sy, 2.2*u*sx, 2.6*u*sy, 0, 0, Math.PI*2); g.stroke();
     }
+    return;
+  }
+  if(to === "dog"){                                        // те же цвета, что у пса под тележкой (night.js)
+    const rot = (cx, cy, rx, ry, a, fill) => { g.fillStyle = fill; g.beginPath(); g.ellipse(cx*sx, cy*sy, rx*sx, ry*sy, a, 0, Math.PI*2); g.fill(); };
+    rot(x - 9*u, y - 4*u, 4*u, 9*u, 0.45, "#8b7f6e"); rot(x + 9*u, y - 4*u, 4*u, 9*u, -0.45, "#8b7f6e");
+    ell(x, y + 1*u, 10*u, 10*u, "#d9d2c0");
+    ell(x, y + 6*u, 5.5*u, 4.5*u, "#f3ead4");
+    ell(x, y + 4.5*u, 2.2*u, 1.7*u, "#1d150e");
+    ell(x - 4*u, y - 1.5*u, 1.3*u, 1.5*u, "#1d150e"); ell(x + 4*u, y - 1.5*u, 1.3*u, 1.5*u, "#1d150e");
     return;
   }
   g.fillStyle = "#3a2c1e"; g.fillRect((x - 14*u)*sx, (y + 2*u)*sy, 28*u*sx, 9*u*sy);
