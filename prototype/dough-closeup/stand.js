@@ -1527,7 +1527,6 @@ function syncDishUI(){
     egg.hidden=!dish || dish.mode!=="fold" || dish.folds>0;
     egg.disabled=!!dishFlight || !!dishMove;
   }
-  if(typeof eveningHint==="function") eveningHint();
 }
 // Складка — только ВНУТРЬ листа. Раньше линия сгиба строилась по любому сдвигу длиннее
 // 0,12, и сдвиг пальца вдоль кромки на 10 CSS px складывал полсписта (портрет: сгиб
@@ -1800,6 +1799,10 @@ function endDishGesture(time){
     return;
   }
   if(dish.mode!=="fold"){
+    // Рамка вечера: ненарезанный роти повели из середины на стойку — это не рез, а «сначала разрежь».
+    if(!dish.cuts.length && eveningOn() && cutMiddle(g.start) && eveningCounterHit(g.samples[g.samples.length-1])){
+      dishNote("Сначала разрежь — проведи через роти"); return;
+    }
     // Конец штриха в нарисованной щели продлевается до выхода из материала (там же, по направлению).
     let end=g.end;
     if(g.cutShift && !onMaterial(end)){
@@ -6143,7 +6146,7 @@ function loop(now){
       ? `тот же край ${sameSlapN}× — обойди, иначе лепесток · лист ${pct}%${ready}${ragged}`
     : `коснись края · лист ${pct}%${ready}${ragged}`;
   // Рамка вечера говорит своё, когда стенду сказать нечего (стол пуст, лампа не горит, тава под крышкой).
-  if(typeof eveningLive==="function"){ const s = eveningLive(); if(s !== null) liveEl.textContent = s; }
+  if(typeof eveningLive==="function"){ const s = eveningLive(liveEl.textContent); if(s !== null) liveEl.textContent = s; }
   // Ответ на предсказание отличается цветом, иначе он теряется среди обычных подсказок.
   liveEl.style.color = verdictAge < 3500 ? (verdict.startsWith("угадала") ? "#8fbf6a" : "#f0c674")
                      : action.state!=="RESTING" ? "#8fbf6a" : "#d98b3a";

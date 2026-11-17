@@ -3,11 +3,12 @@
    Грузится ПОСЛЕ stand.js и только водит его: зажгла лампу → три шарика из миски → три роти на
    стойку → крышка на таву. Своей физики и своих жестов теста здесь нет. Стенд зовёт отсюда
    eveningActive / eveningDown / eveningMove / eveningUp / eveningDraw / eveningUpdate / eveningLive /
-   eveningHint / eveningCounterHit / eveningServed / eveningExport — всё под typeof, поэтому без этого
+   eveningCounterHit / eveningServed / eveningExport — всё под typeof, поэтому без этого
    файла (проверки в Node) и в режиме стенда (?dev=1, «панель стенда» в радио) стенд работает как раньше.
    Правило владелицы 17.11: без украшений — лампа, миска, шарики, крышка, радио и небо здесь плоские
    фигуры в палитре стенда; ни свечения, ни теней, ни анимаций, ни звуков. Слова — только в радио
-   и в служебной строке сверху. */
+   и в одной служебной строке сверху (#live); мелкая подсказка стенда (#hint) в игре спрятана: на
+   маленьком телефоне она вместе со строкой ложилась на радио и стойку. */
 
 const EVE_KEY = "roti_evening", EVE_VERSION = 1, EVE_BALLS = 3;
 const EVE_IDLE_HINT_MS = 6000;      // подсказка «шарик в миске» / «накрой крышкой» — только если она стоит
@@ -65,18 +66,20 @@ function eveFreshLump(){
   syncStepButtons(); reset();
 }
 // Привести стенд к сохранённому вечеру: при запуске, после «начать заново» и при выходе из режима стенда.
-// Начатый шарик начинается с комка — узлы листа не сохраняются (принято для v0).
+// Начатый шарик начинается с комка — узлы листа не сохраняются (принято для v0). Комок лежит на столе,
+// на таве пусто — крышка паузы не нужна; остаётся только крышка оконченного вечера.
 function eveApply(){
   eveDrag = null;
   if(eveDev){ sheetHidden = false; fryHold = false; return; }
   eveFreshLump();
+  if(!EVE.over) EVE.lid = false;
   sheetHidden = !(EVE.lamp && EVE.ball);
   fryHold = EVE.lid;
   eveIdleAt = performance.now();
   eveHintRefresh();
   eveSave();
 }
-function eveHintRefresh(){ syncStepButtons(); eveningHint(); }
+function eveHintRefresh(){ syncStepButtons(); }
 function eveSetDev(on){
   eveDev = !!on;
   if(eveRoot && eveRoot.classList) eveRoot.classList.toggle("dev", eveDev);
@@ -108,8 +111,11 @@ function eveLidEnd(){
   EVE.lid = true; EVE.over = true; EVE.lamp = false; fryHold = true;
   eveLog("lid-end"); eveHintRefresh();
 }
+// Пауза нужна, только когда на таве что-то жарится: пустую таву накрывать незачем, а в конце вечера
+// (крышка ждёт на столе) крышка на таве читалась бы как «закрыто».
+function eveFrying(){ return EVE.ball && phase === "PAN"; }
 function eveLidPause(){
-  if(eveDev || !EVE.lamp || EVE.over || EVE.lid) return;
+  if(eveDev || !EVE.lamp || EVE.over || EVE.lid || !eveFrying()) return;
   eveDrag = null;
   EVE.lid = true; fryHold = true;
   eveLog("lid-pause"); eveHintRefresh();
@@ -138,7 +144,7 @@ function eveGeo(){
   const radio = { x0:counter.x0 + 8*u, y1:counter.y0 + 3*u, w:40*u, h:24*u };
   radio.y0 = radio.y1 - radio.h; radio.x = radio.x0 + radio.w/2; radio.y = radio.y0 + radio.h/2; radio.hit = 32*u;
   const bowl = { x:work.x, y:H - 40*u, rx:62*u, ry:24*u };
-  const lidR = PAN_R*1.0;                               // крышка закрывает плиту целиком: лист под ней не торчит
+  const lidR = PAN_R*1.08;                              // крышка закрывает плиту с бортом: ни лист, ни маргарин из-под неё не торчат
   const lump = { x:work.x, y:work.y, r:34*u };
   return { W, H, u, pan, work, A, sky, counter, lamp, radio, bowl, lidR, lump };
 }
@@ -169,6 +175,7 @@ function eveningSpots(){
 // ─────────────────────────── ввод (стенд зовёт первым; true — касание забрано)
 function eveningDown(id, cx, cy, t){
   if(eveDev) return false;
+  eveIdleAt = performance.now();                           // трогает экран — значит, не стоит: подсказка простоя ждёт
   const sheet = eveEl("radioSheet");
   if(sheet && !sheet.hidden) return true;
   const G = eveGeo(), p = evePt(cx, cy);
@@ -241,30 +248,27 @@ eveBind("evLog", async () => {
   if(b){ b.textContent = r.ok ? `скопировано (${r.n})` : "не скопировалось"; setTimeout(() => { b.textContent = "скопировать журнал"; }, 1800); }
 });
 
-// ─────────────────────────── служебные строки сверху
-function eveningLive(){
+// ─────────────────────────── служебная строка сверху
+// Стенд зовёт это каждый кадр со своей строкой (cur). null — оставить её как есть; иначе — наши слова.
+// Слова стенда про кнопки, которых в игре нет («заново», «сейчас порвётся», яйцо), здесь заменяются простыми.
+const EVE_WORDS = [
+  ["Положи банан", "коснись середины — ляжет банан · потом заверни четыре стороны к середине"],
+  ["Банан", "банан лежит · заверни четыре стороны к середине"],
+  ["На столе", "на столе · проведи через роти — разрежь"],
+  ["Разрезов", "нарезано · возьми за середину и унеси наверх, на стойку"],
+  ["порвался без", "порвался — ничего, неси на таву"],
+  ["лист уже порван", "лист порван — ничего, неси на таву"],
+];
+function eveningLive(cur){
   if(eveDev) return null;
   if(EVE.over) return `вечер окончен · ${EVE_COUNT[EVE.rotiDone] || EVE.rotiDone} роти`;
   if(!EVE.lamp) return "";
   if(EVE.lid) return "тава под крышкой — сними крышку в сторону, и жарка пойдёт дальше";
   const idle = performance.now() - eveIdleAt > EVE_IDLE_HINT_MS;
   if(!EVE.ball) return !idle ? "" : EVE.ballsLeft > 0 ? "следующий шарик — в миске" : "накрой таву крышкой";
-  if(dish && typeof dish.message === "string"){            // слова стенда про кнопку яйца и «заново» — не для вечера
-    const m = dish.message;
-    if(m.startsWith("Положи банан")) return "положи банан в середину, потом заверни четыре стороны";
-    if(m.startsWith("Разрезов")) return "нарезано · возьми за середину и унеси наверх, на стойку";
-  }
+  const m = typeof cur === "string" ? cur : "";
+  for(const [from, to] of EVE_WORDS) if(m.startsWith(from)) return to;
   return null;
-}
-function eveningHint(){
-  if(eveDev) return;
-  if(!EVE.lamp || EVE.over || EVE.lid || !EVE.ball){ hintEl.textContent = ""; return; }
-  if(!dish) return;
-  if(dish.mode === "fold" && !dish.folds && !(dish.filling && dish.filling.length))
-    hintEl.textContent = "коснись середины листа — ляжет банан · веди от каждой стороны к середине — четыре складки дают конверт";
-  else if(dish.mode === "cut")
-    hintEl.textContent = dish.cuts.length ? "нарезано · возьми роти за середину и унеси наверх, на стойку"
-                                          : "на столе · проведи через конверт — разрежь";
 }
 
 // ─────────────────────────── кадр

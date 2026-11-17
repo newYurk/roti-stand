@@ -70,6 +70,8 @@
      висит лампа — служебные строки её не закрывают. */
   html:not(.dev) #panel{ display:none; }
   html:not(.dev) #topbar{ right:96px; }
+  /* В игре сверху одна строка (#live): вместе с мелкой подсказкой текст на 375×667 ложился на радио и стойку. */
+  html:not(.dev) #hint{ display:none; }
   #radioSheet{ position:absolute; inset:0; z-index:7; display:flex; align-items:center;
     justify-content:center; background:rgba(15,12,9,.78); }
   #radioBox{ display:flex; flex-direction:column; gap:10px; min-width:230px; padding:16px;
