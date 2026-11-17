@@ -428,10 +428,16 @@ test('N5', 'paging: arrows and swipes between evenings, an arrow only where ther
   tap(h, { x: 200, y: 60 });
   assert.equal(h.saved().notebook.events.filter(e => e.event === 'page').length, 6, 'the page rows are saved with the close');
   h.tick(2, 1 / 60, true); assert.equal(h.run('loopErrs'), 0);
-  // seven past evenings in the save; one roti tonight → the oldest is gone
+  // seven past evenings in the save; one roti tonight → eight pages while the evening goes (a radio restart may
+  // still take today's page back — step 5 review); the evening over and the next begun → the oldest is gone
   const e = nb({ storage: saveWith([1, 2, 3, 4, 5, 6, 7].map(i => pastEvening(i))) });
   assert.equal(e.NB().evenings.length, 7);
   light(e); ball(e);
+  assert.equal(e.NB().evenings.length, 8, 'seven past evenings and today');
+  assert.equal(e.NB().evenings[0].ts, pastEvening(1).ts, 'nothing is pushed out while the evening goes');
+  const r = reloadN(e); assert.equal(r.NB().evenings.length, 8, 'a reload keeps today and the seven');
+  r.run('eveNewEvening("radio")'); assert.equal(r.NB().evenings.length, 7); assert.equal(r.NB().evenings[0].ts, pastEvening(1).ts, 'the restart takes back today\'s page only');
+  e.run('EVE.over=true; eveNewEvening("lump")');   // script shortcut: the evening is over, the lump begins the next
   const N = e.NB();
   assert.equal(N.evenings.length, 7, 'seven evenings are kept');
   assert.equal(N.evenings[0].ts, pastEvening(2).ts, 'the first one is pushed out');

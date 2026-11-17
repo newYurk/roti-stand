@@ -255,9 +255,9 @@ function saveMid(done, { n = 2, sh = {}, gone = true, som = { jar: false, early:
 const sheetMid = h => h.J('(()=>{const b=dishBounds();return __harness.dishToClient({x:(b.left+b.right)/2,y:(b.top+b.bottom)/2})})()');
 const bananasOn = h => h.run('(dish.filling||[]).length');
 // a jam stroke: a finger led across the cut roti lying on the table (inside it, a little off the cut line)
-function jamStroke(h, dy = 0.3) {
+function jamStroke(h, dy = 0.3, v = 260) {
   const B = rotiBox(h), y = B.c.y + (B.b.y - B.c.y) * dy, a = { x: B.l.x + (B.c.x - B.l.x) * 0.3, y }, b = { x: B.r.x - (B.r.x - B.c.x) * 0.3, y };
-  drive(h, line(a, b, { v: 260, hold: 60 }), { settle: 12 });
+  drive(h, line(a, b, { v, hold: 60 }), { settle: 12 });
 }
 const lump = h => { tap(h, h.spots().lump); };
 
@@ -364,8 +364,11 @@ test('S3', 'jam: touch the jar, lead a finger over the cut roti — a jam stripe
     assert.equal(h.SHF().jam, 2 - i, 'the first stripe on a roti takes one step off the jar');
     levels.push(h.shelfDrawn().red);
     if (i === 0) {   // a second stripe on the same roti is free; the stripe is jam-coloured and flat
-      tap(h, h.sh().jarAt); assert.equal(h.sh().armed, true); jamStroke(h, -0.35);
+      tap(h, h.sh().jarAt); assert.equal(h.sh().armed, true); jamStroke(h, -0.35, 1100);   // a fast stroke after a slow one
       assert.equal(h.run('drizzleStrokes'), 2); assert.equal(h.SHF().jam, 2, 'the second stripe costs nothing');
+      const widths = h.J(`(()=>{const out=[],k=ctx.stroke;ctx.stroke=()=>out.push(ctx.lineWidth);try{drizzleDraw(ctx)}finally{ctx.stroke=k}return out})()`);
+      assert.ok(widths.length >= 2 && widths.every(w => w === widths[0]) && widths[0] >= 4, `a slow and a fast stripe are one width (${widths.join(',')})`);
+      h.stripeW = widths[0];
       const strokes = h.J(`(()=>{const out=[],k=ctx.stroke;ctx.stroke=()=>out.push(ctx.strokeStyle);try{drizzleDraw(ctx)}finally{ctx.stroke=k}return out})()`);
       assert.ok(strokes.includes('#a8402c'), `the stripe is drawn in the jam colour (${strokes.join(',')})`);
       assert.equal(h.run('_drops.length+_falls.length'), 0, 'no beads, no falling drops');
@@ -374,6 +377,19 @@ test('S3', 'jam: touch the jar, lead a finger over the cut roti — a jam stripe
       assert.equal(h.run('dish.cuts.length'), cuts + 1); h.frames(3);
       assert.ok(h.J('_trails.flatMap(t=>t.pts).filter(p=>p&&!p.break).every(p=>dish.faces[p.face]&&dish.faces[p.face].kind==="dough"&&pointInFace(dish.faces[p.face].points,p.x,p.y))'), 'every point of the stripes still lies in its piece');
       assert.equal(h.run('drizzleStrokes'), 2, 'both stripes are still there');
+    }
+    if (i === 2) {   // jam in the hand does not swallow a touch of the radio, the notebook or the jar: the jam goes back, the touch goes through
+      const st = () => [h.SHF().jam, h.SHF().jar, h.run('drizzleStrokes'), h.shev().at(-1)], was = st();
+      assert.deepEqual(was, [0, true, 1, 'empty:jam']);
+      tap(h, h.sh().jarAt); assert.equal(h.sh().armed, true, 'this roti already has jam: the empty jar still gives a free stripe');
+      tap(h, h.spots().radio); assert.equal(h.sh().armed, false, 'radio touched: the jam is back in the jar'); assert.equal(h.nodes.get('radioSheet').hidden, false, 'and the radio opens');
+      h.run('eveRadio(false)'); h.frames(2);
+      tap(h, h.sh().jarAt); assert.equal(h.sh().armed, true);
+      tap(h, h.sh().jarAt); assert.equal(h.sh().armed, false, 'a second touch of the jar puts the jam back'); assert.equal(h.run('drizzleModeOn'), false);
+      tap(h, h.sh().jarAt); assert.equal(h.sh().armed, true);
+      tap(h, h.n().item); h.frames(20); assert.equal(h.n().open, 1, 'the notebook opens with the jam in the hand'); assert.equal(h.sh().armed, false);
+      tap(h, h.n().leftPage); h.frames(20); assert.equal(h.n().open, 0);
+      assert.deepEqual(st(), was, 'nothing spent, nothing drawn, the jar is not put away');
     }
     if (i === 1) {   // in the hand the stripe goes with the roti; under the open notebook it is not drawn
       const at = () => h.J(`(()=>{const out=[],m=ctx.moveTo;ctx.moveTo=(x,y)=>out.push({x,y});try{drizzleDraw(ctx)}finally{ctx.moveTo=m}return out[0]||null})()`);
@@ -395,7 +411,7 @@ test('S3', 'jam: touch the jar, lead a finger over the cut roti — a jam stripe
   // the notebook is not blocked by the touches of the jar (no finger is left hanging)
   tap(h, h.n().item); h.frames(20); assert.equal(h.n().open, 1, 'the notebook opens after the jam'); tap(h, h.n().leftPage);
   assert.equal(h.run('loopErrs'), 0); assert.deepEqual(h.errors, []);
-  return { summary: `red of the jar, px: ${levels.join(' → ')}; journal ${h.shev().join(', ')}` };
+  return { summary: `red of the jar, px: ${levels.join(' → ')}; stripe width ${h.stripeW.toFixed(1)} canvas px at 260 and 1100 px/s; journal ${h.shev().join(', ')}` };
 });
 
 test('S4', 'Som the next day: after a jam evening she comes with the empty jar (picture 1 with a jar), it lands on the shelf, a touch puts it away; after a nod evening she comes on the 5th second of frying and knocks at once', () => {
@@ -459,7 +475,8 @@ test('S5', 'a new gift of the same kind refills, not adds; after 7 evenings the 
   }
   assert.equal(g.SHF().n, 8); assert.equal(g.saved().n, 8);
   const F = g.J('(()=>{const G=eveGeo(),F=guestShelf(G);return {x0:F.x0,x1:F.x0+F.w,u:G.u}})()'), S = g.J('shelfGeo(eveGeo())');
-  assert.ok(S.empty.x + 9 * F.u <= F.x1 + 0.5 && S.bunch.x - 12 * F.u >= F.x0 - 0.5, 'three places fit on the shelf plank');
+  assert.ok(S.empty.x + 9 * F.u <= S.x1 + 0.5 && S.bunch.x - 12 * F.u >= F.x0 - 0.5, 'three places fit on the shelf plank');
+  assert.ok(S.x1 <= g.J('(()=>{const G=eveGeo();return G.radio.x0+G.radio.w+48*G.u})()') + 0.5 && (S.empty.x - S.jar.x) / F.u >= 30 - 1e-6, 'the plank ends before the night cards; the jars stand 30 apart');
   assert.equal(g.NB().evenings.length, 7, 'the notebook keeps seven evenings');
   assert.ok(g.storage.get('roti_evening').length < 20000, 'the save does not grow without the pictures');
   assert.deepEqual(g.errors, []);
@@ -481,6 +498,37 @@ test('S6', '«начать вечер заново» in the radio restarts the c
   // a finished evening restarted from the radio: its page stays too
   const f = shelf({ storage: saveNight(['nod'], { n: 2, pages: 2, sh: { bananas: 2 } }) });
   f.run('eveNewEvening("radio")'); assert.equal(f.SHF().n, 2); assert.equal(f.NB().evenings.length, 2); assert.equal(f.SHF().bananas, 2);
+  // a full notebook (7 finished evenings): a roti served and the evening restarted from the radio — all 7 pages stay
+  const full = JSON.parse(saveMid(0, { n: 8 })[0][1]);
+  full.notebook.evenings = Array.from({ length: 7 }, (_, i) => ({ ts: `2026-11-1${i}T12:00:00.000Z`, n: i + 1, snaps: ['som', 'som', 'dog'].map((to, k) => snapOf(to, k)) }));
+  let p = shelf({ storage: [['roti_evening', JSON.stringify(full)]] });
+  const seven = JSON.stringify(p.NB().evenings);
+  ball(p); assert.equal(p.eve().rotiDone, 1); assert.equal(p.NB().evenings.length, 8, 'seven finished evenings and today');
+  assert.equal(p.NB().evenings[7].n, 8, 'the page carries the number of its evening');
+  p = reloadS(p); assert.equal(p.NB().evenings.length, 8, 'a reload keeps all eight'); assert.equal(p.n().pages, 8);
+  p.run('eveNewEvening("radio")'); p.frames(2);
+  assert.equal(JSON.stringify(p.NB().evenings), seven, 'the restart drops today\'s page only: the seven past evenings are all there');
+  p.run('notebookSnap("counter"); EVE.ballsLeft=0; EVE.rotiDone=3; EVE.ball=false; eveLidEnd();'); p.frames(2); lump(p);
+  assert.equal(p.SHF().n, 9); assert.equal(p.NB().evenings.length, 7, 'a finished evening pushes the oldest page out'); assert.equal(p.NB().evenings[6].n, 8);
+  // Som's empty jar and the restart: delivered — not brought again (on the shelf or put away); still in her hand — brought again
+  for (const [jarIn, empty, want] of [['shelf', true, 'shelf'], ['shelf', false, 'shelf'], ['hand', false, 'wait'], ['wait', false, 'wait']]) {
+    const j = shelf({ storage: saveMid(0, { n: 2, som: { jar: true, early: false }, sh: { jarIn, empty } }) });
+    j.run('eveNewEvening("radio")'); j.frames(2);
+    assert.deepEqual([j.SHF().jarIn, j.SHF().empty], [want, empty], `restart with the jar «${jarIn}»: ${want}`);
+    light(j); j.frames(3);
+    const b = j.J('gestures.filter(g=>g.kind==="evening"&&g.event==="begin").at(-1)');
+    assert.equal(b.n, 2); assert.equal(b.again, true, 'the journal marks the second begin of the same evening');
+    assert.equal(j.shev().filter(e => e === 'bring:empty-jar').length, 0, 'no second bring');
+  }
+  { const j = shelf({ storage: saveNight(['nod'], { n: 1 }) }); lump(j); light(j); j.frames(3);
+    assert.equal(j.J('"again" in gestures.filter(g=>g.kind==="evening"&&g.event==="begin").at(-1)'), false, 'a new evening is not «again»'); }
+  // a finished evening restarted from the radio leaves a second page with the same n: yesterday is still the evening before
+  const y = JSON.parse(saveNight(['nod'], { n: 2, pages: 2 })[0][1]);
+  y.notebook.evenings.forEach((e, i) => { e.n = i + 1; });
+  const yy = shelf({ storage: [['roti_evening', JSON.stringify(y)]] });
+  yy.run('eveNewEvening("radio")'); light(yy); yy.frames(2); yy.run('notebookSnap("counter")');
+  assert.deepEqual(yy.NB().evenings.map(e => e.n), [1, 2, 2]);
+  assert.equal(JSON.stringify(yy.J('notebookYesterday()')), JSON.stringify(yy.NB().evenings[0].snaps), 'yesterday is the page of evening 1, not the first run of evening 2');
   // the wipe button exists, is hidden outside the stand panel by CSS, asks twice and wipes everything
   const css = fs.readFileSync(path.join(path.dirname(H.sourcePath), 'stand.css'), 'utf8');
   assert.match(css, /html:not\(\.dev\) #evWipe\{ display:none; \}/, 'the wipe button is hidden in the game');
