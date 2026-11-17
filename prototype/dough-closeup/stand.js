@@ -11,7 +11,7 @@
 // до 400%+ и лист «рвётся» в середине от любого движения. Замер это обнаружил сразу.
 // Число узлов сохранено (1 060 после обрезки по кругу; прежняя оценка «~1150» была на глаз,
 // пересчитано 07.09.2026), однородность рёбер восстановлена.
-const BUILD = "2026-11-17 · тяга и шлепок, квадратная мишень · 69";
+const BUILD = "2026-11-17 · перенос в руке: лист на таву и роти на стол · 71";
 const GRID = 38;                   // 38x38, в круг попадает 1 060 узлов (посчитано, не оценка)
 let SUBSTEPS = 8;                  // T2: 8–10 подшагов, 1 итерация
 let DAMP = 0.986;
@@ -60,8 +60,9 @@ let quadCons = [], quadPrev = null, quadSm = null;
 let action = { state:"RESTING", pointerId:null, edgeNode:-1, gripIds:[], gripWeights:[],
   down:{x:0,y:0,t:0}, last:{x:0,y:0,t:0}, velocity:{x:0,y:0},
   impulse:0, direction:{x:0,y:0}, timer:0, mul:0, heldAtLift:0, kind:null,
-  // перенос «запятой»: накопленный поворот маха, его хвост и параметры полёта
+  // перенос в руке: откуда лист взят, поворот пути руки (украшение полёта) и параметры посадки
   sweep:0, tailDir:{x:1,y:0}, carryFrom:{x:0,y:0}, toss:null,
+  carryArm:false, two:null, back:null, carryT:0,
   liftRad:null };                   // наружный радиус в точке хвата на момент подъёма
 let lastDecision = "—";            // как классифицирован последний мах — для строки статистик
 // Сколько махов на шаге 3 стенд засчитал переносом. Нужен потому, что гейт 15°
@@ -112,9 +113,11 @@ let phase = "TABLE";
 let cook = null;                   // цвет узла: 0 сырое → 0,4 золотистое → >1,2 тёмное
 let dry = null;                    // сушка узла 0→1: пока не 1, цвета нет вообще
 let contactF = null;               // пятнистость контакта с плитой, 0,6…1,15
-// Перенос: пока лист в руке (CARRY) и летит (TOSS), узлы физики не двигаются —
-// сдвиг, поворот и подъём применяются к картинке и запекаются в узлы при посадке.
-let xf = null;                     // {cx,cy,ox,oy,th,lift}
+// Перенос: пока лист в руке (CARRY), ложится (LAY), летит (TOSS) или возвращается на стол (BACK),
+// узлы физики не двигаются — сдвиг, поворот и подъём применяются к картинке и запекаются в узлы
+// при посадке.
+let xf = null;                     // {cx,cy,ox,oy,th,lift, layS,layU,layH — укладка с ближнего края}
+function sheetInHand(){ const s = action.state; return s==="CARRY" || s==="TOSS" || s==="LAY" || s==="BACK"; }
 
 // Вид не сверху, а из-за прилавка: стол уходит от игрока, поэтому по вертикали
 // всё сжато, а дальний край ещё и сужен. Симуляция считается в плоскости стола,
@@ -322,6 +325,7 @@ let contactRebuilds = 0;        // счётчик пересборок конт�
 let dishFlight = null;
 // Перелёт снятого блюда с тавы на стол: поза интерполируется от места на таве к столу.
 let dishMove = null;
+let dishBack = null;               // роти, отпущенный из руки над тавой, возвращается на место: {slide,t0}
 // Поворот в процессе (предпросмотр): {input, angle, pivot, …}; запекается на отпускании (rotateDish).
 let dishTwist = null;
 const TWIST_HINT = "повернуть: два пальца, колесо или ⌥ + перетаскивание · раздвинуть: два пальца или ⌥ + колёсико";
@@ -1011,7 +1015,9 @@ function cookDish(dt){
     if(cur.gold===null && dishSideMean("cook","contactWeights")>=0.4) cur.gold=dish.panTime-cur.start;
   }
   tickFryStage();
-  if(performance.now()-fryJumpAt < 2400){
+  if(performance.now()<(dish.noteUntil||0)){
+    // подсказка о жесте (dishNote) держится пару секунд: строки стадии жарки её не затирают
+  } else if(performance.now()-fryJumpAt < 2400){
     const h="→ "+FRY_STAGE_NAME[fryStageNow];
     if(dish.message!==h){ dish.message=h; const live=document.getElementById("live"); if(live) live.textContent=h; }
   } else if(!(typeof bananaModeOn!=="undefined" && bananaModeOn) && !(typeof eggModeOn!=="undefined" && eggModeOn)){
@@ -1022,6 +1028,13 @@ function cookDish(dt){
       if(live) live.textContent=h;
     }
   }
+}
+// Подсказка в ответ на жест, который не сработал: держится DISH_NOTE_MS, иначе её в том же кадре
+// затирала строка стадии жарки, и «сначала сверни края» никто не видел (ревью сборки 70).
+const DISH_NOTE_MS = 2400;
+function dishNote(text){
+  dish.message=text; dish.noteUntil=performance.now()+DISH_NOTE_MS;
+  const live=typeof document!=="undefined" && document.getElementById("live"); if(live) live.textContent=text;
 }
 function fryHint(){
   const st=rotiStage(), mc=dishSideMean("cook","contactWeights"), md=dishSideMean("dry","contactWeights");
@@ -1429,7 +1442,7 @@ function syncDishUI(){
   const served=!!dish && dish.mode==="served";
   for(const id of ["flipDish","cutMode","undoDish"]){ const b=document.getElementById(id); if(b) b.hidden=served; }
   if(dish) hintEl.textContent=dish.mode==="fold"
-    ? (dish.folds ? "край: внутрь — складка · мах — переворот · на стол — снять · держи — прижим · "+TWIST_HINT
+    ? (dish.folds ? "край: внутрь — складка · мах — переворот · за середину — унести на стол · держи — прижим · "+TWIST_HINT
        : (dish.filling && dish.filling.length
          ? (fillingUnderSheet() ? "начинка под листом · мах — перевернуть обратно · край внутрь — складка"
            : "начинка на листе · край внутрь — складка")
@@ -1475,18 +1488,31 @@ function beginDishGesture(id,p,client,time){
     if(d<distance-1e-9){ distance=d; near.length=0; }
     if(d<=distance+1e-9) near.push({q,dx,dy});
   }
-  const onMat=onMaterial(start,distance>.30 ? 0 : .06);
-  // Дальше 0,30 от кромки лопатки нет: палец на тесте — прижим с первого кадра, мимо теста — ничего.
-  // Подсказки о возможном здесь не пишутся (критерий подсказок 07.09).
-  if(distance>.30){
+  // «Середина» — дальше 0,30 от кромки, а у сложенного (маленького) роти — дальше CARRY_ZONE от
+  // его полуширины: иначе у конверта в четверть листа середины не было бы вовсе (сборка 70).
+  const c=dish.hull.reduce((s,q)=>({x:s.x+q.x/dish.hull.length,y:s.y+q.y/dish.hull.length}),{x:0,y:0});
+  let inr=Infinity;
+  for(let i=0;i<dish.hull.length;i++){
+    const a=dish.hull[i],b=dish.hull[(i+1)%dish.hull.length],dx=b.x-a.x,dy=b.y-a.y,l=Math.hypot(dx,dy);
+    if(l>1e-9) inr=Math.min(inr,Math.abs((c.x-a.x)*dy-(c.y-a.y)*dx)/l);
+  }
+  // У готового конверта (четыре складки) складывать больше нечего — главный жест «взять и унести»,
+  // и полоса кромки ИЗНУТРИ сужается до 0,30 полуширины: середина была 88×54 px на роти 144×84 px
+  // (ревью сборки 70). Снаружи, на стали, полоса прежняя: мах-переворот начинается и оттуда.
+  const outDepth=Math.min(.30,CARRY_ZONE*inr);
+  const midDepth=dish.folds>=4 && onMaterial(start,0) ? Math.min(outDepth,ENVELOPE_EDGE*inr) : outDepth;
+  const onMat=onMaterial(start,distance>midDepth ? 0 : .06);
+  // Дальше от кромки лопатки нет: палец на тесте — прижим с первого кадра, мимо теста — ничего.
+  // Сложенный роти из середины можно взять и унести на стол (carryable): стоит палец — прижим,
+  // повела — роти в руке. Подсказки о возможном здесь не пишутся (критерий подсказок 07.09).
+  if(distance>midDepth){
     if(!onMat) return;
     const press=adoptPress(start);
-    dishGesture={id,start,end:start,client:at,samples,zone:"middle",t0,moved:false,press,latched:true};
+    dishGesture={id,start,end:start,client:at,samples,zone:"middle",t0,moved:false,press,latched:true,carryable:dish.folds>0};
     return;
   }
   const anchor=near[0].q, edge={dx:near[0].dx,dy:near[0].dy};
   // Внутренняя нормаль кромки: перпендикуляр, повёрнутый к центру оболочки.
-  const c=dish.hull.reduce((s,q)=>({x:s.x+q.x/dish.hull.length,y:s.y+q.y/dish.hull.length}),{x:0,y:0});
   const inwards=near.map(e=>{
     const len=Math.hypot(e.dx,e.dy)||1; let n={x:-e.dy/len,y:e.dx/len};
     if((c.x-anchor.x)*n.x+(c.y-anchor.y)*n.y<0) n={x:-n.x,y:-n.y};
@@ -1508,11 +1534,25 @@ function inwardFold(g){
 // Штрих — непрерывное движение пальца. Пауза длиннее STROKE_PAUSE_MS начинает новый штрих:
 // неподвижный палец событий не шлёт, и без этого пауза перед махом считалась бы его частью.
 // Начало штриха живёт в жесте, а не в буфере отсчётов, — длина буфера зависит от частоты событий.
-const STROKE_PAUSE_MS = 40, FOLD_PREVIEW_DELAY_MS = 110;
+// Сборка 70: как и на столе (pauseMs/staleMs/gapIsPause), пороги паузы и остановки растут со средним
+// шагом событий жеста, а разрыв — пауза, только если палец за него почти не сдвинулся. С постоянными
+// 40/50 мс телефон на пропущенных кадрах (события через 33–60 мс) резал один мах на куски: штрих
+// «начинался заново» на каждом событии, и мах-переворот не набирал ни пути, ни свежести.
+const ENVELOPE_EDGE = 0.30;                 // доля полуширины конверта: глубже от кромки — «середина»
+const STROKE_PAUSE_MS = 40, FOLD_PREVIEW_DELAY_MS = 110, DISH_STALL_CSS = 100;   // CSS px/с: медленнее за разрыв — палец стоял
+function dishEvStep(g){ return Math.min(60, Math.max(4, g.dtAvg || 16.7)); }
+function dishPauseMs(g){ return Math.max(STROKE_PAUSE_MS, 2.5*dishEvStep(g)); }
+function dishStaleMs(g){ return Math.max(FLICK_STALE_MS, 3*dishEvStep(g)); }
+function dishLongGapMs(g){ return Math.max(LONG_GAP_MS, 3*dishEvStep(g)); }
 function trackStroke(g,client,t){
-  const k=g.stroke, d=Math.hypot(client.x-k.pos.x,client.y-k.pos.y);
+  const k=g.stroke, d=Math.hypot(client.x-k.pos.x,client.y-k.pos.y), gap=t-k.lastT;
+  if(gap>1 && gap<70) g.dtAvg=g.dtAvg ? g.dtAvg*0.8+gap*0.2 : gap;
   if(d>=0.5){
-    if(k.start===null || t-k.lastMoveT>STROKE_PAUSE_MS){ k.start=Math.max(k.lastT,t-17); k.path=0; }
+    // Долгий разрыв — пауза при любом сдвиге: первое событие маха после паузы несёт целый кадр
+    // быстрого движения (35–60 px), и по одной скорости «сдвиг / разрыв» пауза терялась — мах
+    // «сдвинула, подержала, махнула» не переворачивал (ревью сборки 70).
+    const idle=t-k.lastMoveT, paused=idle>dishPauseMs(g) && (d/idle*1000<DISH_STALL_CSS || idle>dishLongGapMs(g));
+    if(k.start===null || paused){ k.start=Math.max(k.lastT,t-17); k.path=0; }
     k.path+=d; k.lastMoveT=t; k.pos={x:client.x,y:client.y};
   }
   k.lastT=t;
@@ -1530,12 +1570,20 @@ function moveDishGesture(p,client,time){
     if(g.stroke){ if(g.moved) trackStroke(g,client,t); else { g.stroke.pos={x:client.x,y:client.y}; g.stroke.lastT=t; } }
   } else { if(!g.moved) g.movedAt=t; g.moved=true; }   // вызов без экранных координат (проверки) — без мёртвой зоны
   if(g.zone==="middle"){
+    // Сложенный роти взяли за середину и повели — он в руке и идёт за пальцем 1:1 (сборка 70).
+    // Взять в руку — это повести сразу (первые CARRY_GRAB_MS); палец, который уже прижимал, должен
+    // уйти заметно дальше: иначе прижим со сползанием на 12 px поднимал роти (ревью сборки 70).
+    if(g.carry || (g.carryable && client && Math.hypot(client.x-g.client.x,client.y-g.client.y)>=(t-g.t0<=CARRY_GRAB_MS ? CARRY_SLOP_CSS : CARRY_SLOP_PRESS_CSS))){
+      if(!g.carry){ g.carry=true; releasePress(g); g.carryFrom={x:g.end.x,y:g.end.y}; g.carryAt=t; audioPeel(); dish.message="В руке — неси на стол и отпусти"; }
+      g.slide={x:g.end.x-g.carryFrom.x,y:g.end.y-g.carryFrom.y};
+      return;
+    }
     // До схватывания быстрый сдвиг — место под щипок (#19), не след прижима.
     if(g.moved && !g.pinch && g.movedAt-g.t0<=PINCH_WINDOW_MS && meanDry()<.25){ g.pinch=true; releasePress(g); }
     if(!g.pinch){ g.press.x=g.end.x; g.press.y=g.end.y; }
     return;
   }
-  if(g.moved) releasePress(g);               // сдвиг у кромки — складка, снятие или мах, прижим отпущен
+  if(g.moved) releasePress(g);               // сдвиг у кромки — складка или мах, прижим отпущен
   if(dish.mode==="fold"){
     if(!g.moved){ g.target=null; g.preview=null; return; }
     // Сохраняем смещение пальца от выбранной кромки, чтобы лист не прыгал к нему.
@@ -1551,36 +1599,12 @@ function moveDishGesture(p,client,time){
       const dough=g.preview.faces.filter(f=>f.kind==="dough"), at=g.preview.slot;
       g.preview.faces=dough.slice(0,at).concat(tok.map(fillingDiskFace),dough.slice(at));   // под клапаном, как после отпускания
     }
-    // Ведение НАРУЖУ — снятие (решение владелицы 16.09): лист едет за лопаткой. Пока быстрый
-    // штрих свеж, лист не двигаем: это может быть мах, и лист прыгнул бы назад перед полётом.
-    if(!fast && !g.preview && outwardSlide(g)){
-      let sx=g.end.x-g.start.x, sy=g.end.y-g.start.y;
-      if(!dish.folds){ const L=Math.hypot(sx,sy), k=L>.15 ? .15/L : 1; sx*=k; sy*=k; }   // несложенный упирается
-      g.slide={x:sx,y:sy};
-      if(Math.hypot(sx,sy)>=FOLD_MIN_DEPTH) g.slid=true;
-    } else g.slide=null;
+    // Ведение от кромки НАРУЖУ больше ничего не двигает (сборка 70): снятие на стол — тот же
+    // перенос в руке, что и со стола на таву (взять сложенный роти за середину), а штрих наружу
+    // остаётся за махом-переворотом и со снятием больше не спорит.
   }
 }
-function outwardSlide(g){
-  const vx=g.target.x-g.anchor.x, vy=g.target.y-g.anchor.y, len=Math.hypot(vx,vy);
-  // «Наружу» — от кромки или от центра конверта: у угла касание ближе к боковому ребру,
-  // и нормаль одного ребра смотрела бы вдоль движения к столу.
-  const c=dishCentroid(), rx=g.anchor.x-c.x, ry=g.anchor.y-c.y, rl=Math.hypot(rx,ry)||1;
-  const radial=vx*rx/rl+vy*ry/rl;
-  // От угла к столу палец часто идёт наискось к радиусу: для направления «от центра» конус шире (80°).
-  if(radial>=FOLD_MIN_DEPTH && radial>=len*Math.cos(80*Math.PI/180)) return true;
-  return (g.inwards || [g.inward]).some(n=>{
-    const out=-(vx*n.x+vy*n.y);
-    return out>=FOLD_MIN_DEPTH && out>=len*FOLD_MAX_ANGLE_COS;
-  });
-}
-// Лист снят, если его заметно сдвинули (не меньше 0,45 и 60 CSS px пальцем — случайный сдвиг
-// на 10 px в портрете снимал лист), а палец отпущен над рабочей частью стола за бортом тавы.
-const REMOVE_MIN_SLIDE = 0.45, REMOVE_MIN_CSS = 60;
-function slideFarEnough(g,client){
-  return Math.hypot(g.slide.x,g.slide.y)>=REMOVE_MIN_SLIDE &&
-    Math.hypot(client.x-g.client.x,client.y-g.client.y)>=REMOVE_MIN_CSS;
-}
+// Роти снят, если палец отпущен над рабочей частью стола за бортом тавы.
 function slideEndsOnTable(client){
   const p=toLocal(client.x,client.y), w=zone("work");
   const onTable=p.x>=w.x && p.x<=w.x+w.w && p.y>=w.y && p.y<=w.y+w.h;
@@ -1610,11 +1634,15 @@ function updateDishMove(){
 // (вариант A для пробы владелицы, #21). Удержание здесь не используется — оно закреплено
 // за прижимом (решение 07.09). Скорость — регрессия по отсчётам в CSS px за последние
 // 80 мс, чтобы исход не зависел от частоты событий (урок #91). Все пороги — для пробы.
-const FLICK_MIN_CSS = 850, FLICK_MIN_PATH_CSS = 40, FLICK_MAX_MS = 300, FLICK_STALE_MS = 50, FLICK_WINDOW_MS = 80;
+const FLICK_MIN_CSS = 850, FLICK_MIN_PATH_CSS = 40, FLICK_MAX_MS = 300, FLICK_STALE_MS = 50, FLICK_WINDOW_MS = 80, FLICK_SPAN_MS = 25;
 function velocityOf(g,tUp){
   const S=g.samples;
-  const win=S.filter(q=>q.t>=tUp-FLICK_WINDOW_MS);
-  const pts=win.length>=2 ? win : S.slice(-2);
+  // Окно 80 мс; если в него попало меньше двух отсчётов или они стоят вплотную (два события за
+  // пару мс после пропущенных кадров), окно расширяется назад: наклон по двум почти одновременным
+  // точкам с дрожанием ±1,5 px давал 1800 px/с на медленной складке (проверка в Node, сборка 70).
+  let i=S.length; while(i>0 && S[i-1].t>=tUp-FLICK_WINDOW_MS) i--;
+  while(i>0 && (S.length-i<2 || S[S.length-1].t-S[i].t<FLICK_SPAN_MS)) i--;
+  const pts=S.slice(i);
   let vx=0, vy=0;
   if(pts.length>=2){
     const n=pts.length, mt=pts.reduce((a,q)=>a+q.t,0)/n, mx=pts.reduce((a,q)=>a+q.x,0)/n, my=pts.reduce((a,q)=>a+q.y,0)/n;
@@ -1627,7 +1655,7 @@ function velocityOf(g,tUp){
 function flickOf(g,tUp){
   const {vx,vy,speed}=velocityOf(g,tUp), k=g.stroke;
   const path=k.path, duration=k.start===null ? 0 : tUp-k.start, stale=tUp-k.lastMoveT;
-  const ok=speed>=FLICK_MIN_CSS && path>=FLICK_MIN_PATH_CSS && duration<=FLICK_MAX_MS && stale<=FLICK_STALE_MS;
+  const ok=speed>=FLICK_MIN_CSS && path>=FLICK_MIN_PATH_CSS && duration<=FLICK_MAX_MS && stale<=dishStaleMs(g);
   return {ok,vx,vy,speed,duration,path,stale};
 }
 function logPanGesture(outcome,f,extra){
@@ -1646,7 +1674,25 @@ function endDishGesture(time){
   const g=dishGesture; dishGesture=null;
   const tUp=Number.isFinite(time) ? time : performance.now();
   releasePress(g);
+  if(g.zone==="middle" && g.carry){
+    // Отпустила роти из руки: над столом за бортом тавы — перелёт на стол (к нарезке), иначе обратно на таву.
+    const last=g.samples[g.samples.length-1], extra=pressExtra(g,tUp);
+    const f={speed:0,duration:tUp-(g.carryAt||g.t0),path:Math.hypot(last.x-g.client.x,last.y-g.client.y),stale:0};
+    if(slideEndsOnTable(last)){
+      // Для замера «когда снимать» (#14): цвет прижатой и видимой стороны в момент снятия.
+      const at={bottomCook:+meanCook().toFixed(3), topCook:+dishSideMean("cook","topWeights").toFixed(3),
+        panSeconds:Math.round(dish.panTime||0)};
+      logPanGesture(startRemoval(g.slide) ? "remove" : "carry-refused",f,{...extra,carry:true,...at});
+    } else {
+      dishBack={slide:g.slide,t0:performance.now()};
+      logPanGesture("carry-back",f,{...extra,carry:true}); dishNote("Неси дальше — на стол");
+    }
+    return;
+  }
   if(g.zone==="middle"){
+    // Несложенный лист с тавы не снимается: повела из середины на стол — говорим, что сначала.
+    const L=g.samples[g.samples.length-1];
+    if(!dish.folds && dish.mode==="fold" && g.moved && slideEndsOnTable(L)) dishNote("Сначала сверни края — потом на стол");
     logPanGesture(g.pinch ? "pinch" : "press",{speed:0,duration:tUp-g.t0,path:0,stale:0},pressExtra(g,tUp));
     return;
   }
@@ -1662,8 +1708,8 @@ function endDishGesture(time){
   }
   const last=g.samples[g.samples.length-1], f=flickOf(g,tUp), extra=pressExtra(g,tUp);
   if(g.press && !g.moved){ logPanGesture("press",f,extra); return; }
-  if(f.ok && !g.slid){
-    // Лист уходит по направлению маха (если лист уже поехал за пальцем — это не мах).: направление переводим из экрана в координаты блюда.
+  if(f.ok){
+    // Лист уходит по направлению маха: направление переводим из экрана в координаты блюда.
     const a=dishLocal(toLocal(last.x-f.vx*.05,last.y-f.vy*.05)), b=dishLocal(toLocal(last.x,last.y));
     const len=Math.hypot(b.x-a.x,b.y-a.y);
     if(len>1e-9){
@@ -1674,18 +1720,9 @@ function endDishGesture(time){
       if(ok) return;
     }
   }
-  if(g.slid && !g.slide){ logPanGesture("slide-back",f,extra); dish.message="Веди дальше — на стол"; return; }
-  if(g.slide){
-    const onTable=slideEndsOnTable(last), fingerFar=Math.hypot(last.x-g.client.x,last.y-g.client.y)>=REMOVE_MIN_CSS;
-    if(!dish.folds && onTable && fingerFar){ logPanGesture("slide-unfolded",f,extra); dish.message="Сначала сверни края — потом на стол"; return; }
-    if(!onTable || !slideFarEnough(g,last)){ logPanGesture("slide-back",f,extra); dish.message="Веди дальше — на стол"; return; }
-    // Для замера «когда снимать» (#14): цвет прижатой и видимой стороны в момент снятия.
-    const at={bottomCook:+meanCook().toFixed(3), topCook:+dishSideMean("cook","topWeights").toFixed(3),
-      panSeconds:Math.round(dish.panTime||0)};
-    logPanGesture(startRemoval(g.slide) ? "remove" : "slide-refused",f,{...extra,...at});
-    return;
-  }
   const ok=g.target&&inwardFold(g)&&foldDish(g.anchor,g.target,foldYank(g));
+  // Повела от кромки на стол — прежний жест снятия: подсказываем новый (взять за середину).
+  if(!ok && g.moved && slideEndsOnTable(last)) dishNote(dish.folds ? "На стол — возьми роти за середину и неси" : "Сначала сверни края — потом на стол");
   logPanGesture(ok ? "fold" : "none",f,extra);
 }
 // Section geometry belongs to a material snapshot, not to its screen size or heat.
@@ -2967,8 +3004,13 @@ function drawDish(g,sx,sy){
     pose={x:f.x+(pose.x-f.x)*e, y:f.y+(pose.y-f.y)*e-Math.sin(Math.PI*u)*.25*pose.scale, scale:f.scale+(pose.scale-f.scale)*e};
     moving=true;
   }
-  const slide=dishGesture && dishGesture.slide;
-  if(slide) pose={x:pose.x+slide.x*pose.scale, y:pose.y+slide.y*pose.scale, scale:pose.scale};
+  let slide=dishGesture && dishGesture.slide;
+  if(!slide && dishBack && dish.mode==="fold"){        // отпущен над тавой: роти возвращается на место
+    const u=(performance.now()-dishBack.t0)/1000/BACK_T, e=1-(1-u)*(1-u);
+    if(u>=0 && u<1) slide={x:dishBack.slide.x*(1-e),y:dishBack.slide.y*(1-e)}; else dishBack=null;
+  }
+  // в руке роти чуть приподнят над сталью
+  if(slide) pose={x:pose.x+slide.x*pose.scale, y:pose.y+slide.y*pose.scale-(dishGesture&&dishGesture.carry ? .05*pose.scale : 0), scale:pose.scale};
   const faces=dishGesture&&dishGesture.preview ? dishGesture.preview.faces : dish.faces;
   const T=dishTwist, tc=T ? Math.cos(T.angle) : 1, ts=T ? Math.sin(T.angle) : 0;
   const screen=p=>{ if(T) p=rotAbout(p,T.pivot,tc,ts); const x=pose.x+p.x*pose.scale,y=pose.y+p.y*pose.scale;return{x:prX(x,y)*sx,y:prY(x,y)*sy};};
@@ -3155,7 +3197,7 @@ function build(){
 function step(dt){
   // В руке и в полёте узлы заморожены: перенос — движение картинки, запекаемое при посадке.
   // На таве лист схватился и стоит — только жарится.
-  if(action.state==="CARRY" || action.state==="TOSS"){ updateAction(dt); return; }
+  if(sheetInHand()){ updateAction(dt); return; }
   if(dish){ updateDishFlight(); updateDishMove(); updateDishTwist(dt); cookDish(dt); return; }
   if(phase==="PAN"){ cookStep(dt); return; }
   // Шаг 1 — не физика листа, а карта нажима. XPBD здесь не гоняем: это и был лаг.
@@ -3364,6 +3406,8 @@ function clearAction(){
   action.sweep = 0; action.tailDir = {x:1,y:0}; action.toss = null;
   action.samples = []; action.stroke = null; action.moved = false; action.pull = null;
   action.liftI = 0; action.liftRad = null; action.rel = null; action.vPeak = 0; action.events = 0; action.lastClient = null;
+  action.carryArm = false; action.two = null; action.back = null; action.carryT = 0;
+  action.off = null; action.wasTwo = false;
 }
 
 function armAction(pointerId, p, tEv, client){
@@ -3384,7 +3428,9 @@ function armAction(pointerId, p, tEv, client){
     action.stroke = { start:null, path:0, lastMoveT:t0, i0:0, au:m.u, av:m.v, judged:false }; action.dtAvg = 0;
     action.liftI = 0; action.liftRad = null; action.rel = null; action.vPeak = 0; action.events = 0;
     action.lastClient = client || null; }
-  if(stepNo!==1) updateGripFromHold();                 // на шаге 1 дуга хвата не нужна
+  // Касание в середине листа — взять его в руку целиком (перенос), а не край (сборка 70).
+  action.carryArm = stepNo !== 1 && phase === "TABLE" && CARRY_MODE !== "two" && inCarryZone(p);
+  if(stepNo!==1 && !action.carryArm) updateGripFromHold();   // на шаге 1 и в середине листа дуга хвата не нужна
 }
 
 // Шаг 1: ладонь плющит шар в диск. Сетка остаётся кругом — точки не разлетаются.
@@ -3509,6 +3555,7 @@ const STALE_MS = 50;              // столько без движения — 
 // со средним шагом событий этого жеста, а разрыв между событиями — пауза, только если палец за него почти
 // не сдвинулся: события во время покоя не приходят, и первое после паузы несёт маленький сдвиг.
 const V_STALL = 1.5;              // gs/с: медленнее за разрыв — палец стоял
+const LONG_GAP_MS = 100;          // разрыв длиннее этого (и трёх шагов событий) — пауза при любом сдвиге
 function evStep(){ return Math.min(60, Math.max(4, action.dtAvg || 16.7)); }
 function pauseMs(){ return Math.max(PAUSE_MS, 2.5*evStep()); }
 function staleMs(){ return Math.max(STALE_MS, 3*evStep()); }
@@ -3516,10 +3563,11 @@ function gapIsPause(m, t){
   const S = action.samples, L = S && S[S.length-1], st = action.stroke;
   if(!L || !st || !(t - st.lastMoveT > pauseMs())) return false;
   const gap = Math.max(1, t - L.t);
-  return Math.hypot(m.u-L.u, m.v-L.v) / gap * 1000 < V_STALL;
+  // Долгий разрыв — пауза при любом сдвиге: первое событие маха после паузы несёт целый кадр пути.
+  return Math.hypot(m.u-L.u, m.v-L.v) / gap * 1000 < V_STALL || t - st.lastMoveT > Math.max(LONG_GAP_MS, 3*evStep());
 }
 const SAMPLES_MAX = 256;          // отсчётов жеста в памяти: секунда с лишним на 240 Гц (поворот запятой считается по ним)
-const GATE_PATH = 1.2;            // gs стола: столько пути после подъёма — и решаем «дуга или прямой»
+const LIFT_PATH = 1.2;            // gs стола: столько пути после подъёма — и мах бьёт сам
 try{
   const v = parseFloat(new URLSearchParams(location.search).get("vslap"));
   if(v >= 1 && v <= 20){ V_PULL_FULL *= v / V_SLAP; V_SLAP = v; }
@@ -3567,14 +3615,14 @@ function sampleVelocity(winMs){
     const l = Math.hypot(b.x-a.x, b.y-a.y), lu = Math.hypot(b.u-a.u, b.v-a.v);
     if(dur < 1 || l < 1e-9 || lu < 1e-9) return { x:0, y:0, speed:0 };
     const speed = Math.max(st.path, lu) / dur * 1000, k = speed * l / lu;   // k — та же скорость в единицах стола
-    return { x:(b.x-a.x)/l*k, y:(b.y-a.y)/l*k, speed };
+    return { x:(b.x-a.x)/l*k, y:(b.y-a.y)/l*k, speed, su:(b.u-a.u)/lu*speed, sv:(b.v-a.v)/lu*speed };
   }
   const n = pts.length; let mt=0,mx=0,my=0,mu=0,mv=0;
   for(const q of pts){ mt+=q.t; mx+=q.x; my+=q.y; mu+=q.u; mv+=q.v; } mt/=n; mx/=n; my/=n; mu/=n; mv/=n;
   let tt=0,tx=0,ty=0,tu=0,tv=0;
   for(const q of pts){ const dt=q.t-mt; tt+=dt*dt; tx+=dt*(q.x-mx); ty+=dt*(q.y-my); tu+=dt*(q.u-mu); tv+=dt*(q.v-mv); }
   if(tt < 1e-9) return { x:0, y:0, speed:0 };
-  return { x:tx/tt*1000, y:ty/tt*1000, speed:Math.hypot(tu/tt, tv/tt)*1000 };
+  return { x:tx/tt*1000, y:ty/tt*1000, speed:Math.hypot(tu/tt, tv/tt)*1000, su:tu/tt*1000, sv:tv/tt*1000 };   // su, sv — та же скорость по экрану
 }
 // Путь после подъёма, перебранный с постоянным шагом по ДЛИНЕ (стол): поворот и хвост не зависят от частоты событий.
 function liftPath(maxLen){
@@ -3587,18 +3635,6 @@ function liftPath(maxLen){
     carry += seg;
   }
   return { pts, total: total + (total < lim ? carry : 0) };
-}
-function pathTurn(maxLen){
-  const { pts, total } = liftPath(maxLen); let sweep = 0, tail = null;
-  for(let i=2; i<pts.length; i++){
-    const ax=pts[i-1].x-pts[i-2].x, ay=pts[i-1].y-pts[i-2].y, bx=pts[i].x-pts[i-1].x, by=pts[i].y-pts[i-1].y;
-    sweep += Math.atan2(ax*by-ay*bx, ax*bx+ay*by);
-  }
-  if(pts.length >= 2){ const a=pts[Math.max(0, pts.length-3)], b=pts[pts.length-1], l=Math.hypot(b.x-a.x, b.y-a.y)||1; tail = { x:(b.x-a.x)/l, y:(b.y-a.y)/l }; }
-  return { sweep, tail, total };
-}
-function liftGate(){   // вызывается, когда путь после подъёма набрал GATE_PATH, или при остановке руки
-  if(Math.abs(pathTurn(GATE_PATH).sweep) >= COMMA_MIN_SWEEP && action.pointerId !== null) enterCarry(); else toFlying();
 }
 // Наружный радиус в точке хвата (по листу ДО тяги) и центр, от которого он отложен.
 function grabRadial(){
@@ -3777,30 +3813,40 @@ function startLift(v, force, held){
   // длины покоя не тронуты, лист упруго вернётся сам.
   const rad = grabRadial(), sp = Math.hypot(v.x, v.y) || 1;
   action.state = "LIFTING";
-  if(stepNo === 3 && phase === "TABLE") tossTry++;   // попытка засчитывается с момента маха
   action.timer = LIFT_MAX; action.heldAtLift = Math.round(held);
   action.direction = { x:v.x/sp, y:v.y/sp };
   action.impulse = force;
-  action.sweep = 0; action.tailDir = { ...action.direction };
+  action.sweep = 0;
   action.liftI = Math.max(0, action.stroke.i0);
   action.liftRad = { x:rad.x, y:rad.y };
   noteRelease(v);
 }
 function updateActionMove(p, tEv, client){
-  if(action.state === "LIFTING" || action.state === "CARRY"){   // палец ещё ведёт дугу
+  if(action.state === "CARRY"){                          // лист в руке: идёт за пальцем 1:1
+    pushSample(p, tEv, client);
+    xf.ox = p.x - action.carryFrom.x; xf.oy = p.y - action.carryFrom.y;
+    return;
+  }
+  if(action.state === "LIFTING"){                        // палец ещё ведёт мах
     pushSample(p, tEv, client);
     const v = sampleVelocity(); action.velocity = { x:v.x, y:v.y };
-    const pt = pathTurn(); action.sweep = pt.sweep; if(pt.tail) action.tailDir = pt.tail;
-    if(action.state === "CARRY"){ xf.ox = p.x - action.carryFrom.x; xf.oy = p.y - action.carryFrom.y; return; }
     if(action.pull) pullTo(p, PULL_GAIN_FAST, 1);          // край на подъёме ещё идёт за пальцем
     // Мах ещё разгоняется: сила — по пику скорости, а не по первому событию за порогом.
     const f = slapForce(sampleVelocity(SLAP_WIN_MS), action.liftRad || action.direction, v);
     if(f > action.impulse){ action.impulse = f; noteRelease(v); }
-    if(pt.total >= GATE_PATH*gestureScale) liftGate();
+    // Дуга или прямой — больше не развилка: мах от края всегда шлепок (перенос — только в руке).
+    if(liftPath(LIFT_PATH).total >= LIFT_PATH*gestureScale) toFlying();
     return;
   }
   if(stepNo !== 1){
     if(action.state !== "ARMED" && action.state !== "PULLING") return;
+    if(action.carryArm){
+      // Взяла за середину: до CARRY_SLOP_CSS — дрожание пальца, дальше лист поднимается и идёт за рукой.
+      pushSample(p, tEv, client);
+      const m = action.samples[action.samples.length-1];
+      if(Math.hypot(m.u-action.downM.u, m.v-action.downM.v)*gsCss() >= CARRY_SLOP_CSS) enterCarry();
+      return;
+    }
     // Пауза длиннее PAUSE_MS: прежний штрих кончился — судим его до того, как начнётся новый.
     if(action.stroke && Number.isFinite(tEv) && gapIsPause(gestureMetric(p, client), tEv) && judgeEndedStroke()) return;
     pushSample(p, tEv, client);
@@ -3854,6 +3900,7 @@ function releaseAction(tEv){
     else clearAction();
     return;
   }
+  if(action.state === "ARMED" && action.carryArm){ clearAction(); return; }   // тронула середину и отпустила — ничего
   if(action.state === "ARMED" || action.state === "PULLING"){
     // Быстрый короткий мах мог целиком уместиться между двумя событиями: на отпускании решаем
     // по тем же числам. Палец, который остановился, шлепком не считается, и край догоняет его.
@@ -3871,9 +3918,9 @@ function releaseAction(tEv){
     pullTo(action.last, pullGain(v.speed), 0);
     noteRelease(v); pullCommit(); return;
   }
-  if(action.state === "LIFTING"){ if(commaLike()) endCarry(); else toFlying(); return; }   // бросок
-  if(action.state === "CARRY"){ endCarry(); return; }      // запятая дописана — решаем, куда летит
-  // FLYING/IMPACT/SETTLING/TOSS: жест автономен; поздний pointerup его не убивает.
+  if(action.state === "LIFTING"){ toFlying(); return; }    // шлепок
+  if(action.state === "CARRY"){ endCarry(tEv); return; }   // отпустила лист — решаем, куда он ляжет
+  // FLYING/IMPACT/SETTLING/TOSS/LAY/BACK: жест автономен; поздний pointerup его не убивает.
   // (Псевдокод аудита здесь очищал бы состояние — это обрывало бы удар на лету.)
   action.pointerId = null;
 }
@@ -3892,10 +3939,9 @@ function toFlying(){
 function updateAction(dt){
   if(action.state === "LIFTING"){
     action.timer -= dt;
-    // Подъём кончают путь GATE_PATH (в updateActionMove), отпускание, остановка руки (90 мс без
-    // событий) или предохранитель LIFT_MAX. «Дуга или прямой мах» решается по пути, перебранному
-    // с постоянным шагом длины, а не по числу событий, успевших в окно (#91).
-    if(action.timer <= 0 || performance.now() - action.last.t > Math.max(90, 4*evStep())) liftGate();
+    // Подъём кончают путь LIFT_PATH (в updateActionMove), отпускание, остановка руки (90 мс без
+    // событий) или предохранитель LIFT_MAX — и всегда ударом: развилки «дуга или прямой» нет (#91).
+    if(action.timer <= 0 || performance.now() - action.last.t > Math.max(90, 4*evStep())) toFlying();
   } else if(action.state === "PULLING"){
     // Палец остановился — край, отставший в коридоре скоростей, догоняет его.
     if(performance.now() - action.stroke.lastMoveT > staleMs()){
@@ -3906,13 +3952,22 @@ function updateAction(dt){
   } else if(action.state === "ARMED" && stepNo !== 1){
     if(action.stroke && performance.now() - action.stroke.lastMoveT > staleMs()) judgeEndedStroke();
   } else if(action.state === "CARRY"){
-    action.timer -= dt;
-    const stalled = performance.now() - action.last.t > Math.max(90, 4*evStep());   // рука остановилась — дуга кончилась
-    if(action.timer <= 0 || stalled) endCarry();
+    // Лист в руке, пока палец на экране: ни таймера, ни остановки по неподвижной руке.
+    action.carryT += dt;
+    xf.lift = sheetRadius()*CARRY_LIFT*Math.min(1, action.carryT/CARRY_LIFT_T);
   } else if(action.state === "TOSS"){
     action.timer -= dt;
     updateToss();
     if(action.timer <= 0) land();
+  } else if(action.state === "LAY"){
+    action.timer -= dt;
+    updateLay();
+    if(action.timer <= 0) land();
+  } else if(action.state === "BACK"){
+    action.timer -= dt;
+    const b = action.back, u = Math.max(0, Math.min(1, 1 - action.timer/BACK_T)), e = 1 - (1-u)*(1-u);
+    xf.ox = b.ox*(1-e); xf.oy = b.oy*(1-e); xf.lift = b.lift*(1-e);
+    if(action.timer <= 0){ xf = null; clearAction(); }   // узлы не трогались: лист тот же, бит в бит
   } else if(action.state === "FLYING"){
     action.timer -= dt;
     // язык в полёте отпускается наполовину (PULL_FLY_KEEP), остальное снимает удар
@@ -3927,70 +3982,161 @@ function updateAction(dt){
   }
 }
 
-// ─── Перенос на таву — «запятая» (идея владельца 25.08.2026) ───
-// Тот же глагол «поднять и шлёпнуть», но мах не прямой, а дугой: рука подхватывает лист,
-// ведёт его по кругу, и хвост дуги, смотрящий на таву, отправляет его в полёт. В воздухе
-// лист поворачивается тем сильнее, чем круче была дуга, садится на таву и начинает жариться.
-// Прямой мах к таве переносом НЕ считается — это шлепок; естественно ли это, решает живой тест.
-const COMMA_MIN_SWEEP = 15 * Math.PI/180;   // столько поворота за первые 80 мс уже отличает дугу от прямого маха
-const COMMA_SWEEP     = 40 * Math.PI/180;   // итоговый поворот, чтобы бросок считался запятой
-const COMMA_CONE      = 60 * Math.PI/180;   // хвост запятой должен смотреть на таву в пределах этого угла
-const COMMA_MAX       = 0.45;               // с: дольше вести — это уже не бросок, лист опускается
+// ─── Перенос на таву — взять лист в руку и отнести (сборка 70, 17.11.2026) ───
+// Было: «запятая» — мах дугой от края, который стенд распознавал и отправлял лист в полёт (идея
+// владелицы 25.08). Распознавание дуги и было источником «кидается» (#91). Теперь перенос — явное
+// действие: коснуться СЕРЕДИНЫ листа и повести палец (или поставить на лист второй палец, пока
+// первый держит край) — лист отрывается от стола и идёт за рукой 1:1, пока палец на экране.
+// Отпустила над тавой — лист ложится с ближнего края (LAY), шипение растёт с площадью касания.
+// Отпустила в другом месте — лист возвращается на своё место на столе (BACK): узлы не трогались,
+// ни удара, ни штрафа. Быстро отпустила в сторону тавы готовый лист — бросок (TOSS), как раньше.
+// Запятая осталась украшением: дуга руки от ARC_DECOR добавляет четверть оборота в полёте;
+// садится лист всегда ровно по осям стола. Мах от края, прямой или дугой, — всегда шлепок.
+// Недотянутый лист отнести и положить МОЖНО (⚑ владелица 08.09.2026): это теперь явный выбор.
+// Бросок недотянутого листа не засчитывается — быстрый мах из середины на шаге 2 иначе закидывал
+// бы лист на таву сам, а это и есть жалоба «кидается».
+// Все числа — стартовые, не замеры: подстраиваются по журналу жестов (записи kind "lay"/"toss"/"carry").
+const CARRY_ZONE = 0.45;                    // «середина»: ближе к центру, чем эта доля радиуса кромки в ту сторону
+const CARRY_SLOP_CSS = 12;                  // CSS px от касания: дальше — лист в руке
+const CARRY_GRAB_MS = 250, CARRY_SLOP_PRESS_CSS = 28;   // на таве: позже этого палец уже прижимает, и «в руку» — только дальше 28 px
+const CARRY_LIFT = 0.10, CARRY_LIFT_T = 0.10;   // подъём в руке (доля радиуса листа) и время отрыва, с
+const LAY_ZONE = 0.75;                      // центр листа ближе этой доли PAN_R к центру тавы — ляжет на таву
+const LAY_T = 0.30;                         // с: укладка с ближнего края
+const LAY_H = 0.30;                         // на сколько радиусов листа приподнят дальний край в начале укладки
+const LAY_TOUCH = 0.15;                     // доля LAY_T, когда ближний край касается стали
+const TOSS_MIN = 7;                         // gs/с на отпускании: быстрее и в сторону тавы — бросок
+const TOSS_CONE = Math.cos(50*Math.PI/180); // конус броска к таве
+const TOSS_AIM = 1.0;                       // …или луч по ходу руки проходит не дальше этой доли PAN_R от центра тавы
+const ARC_DECOR = 60*Math.PI/180;           // поворот пути руки: с него — четверть оборота в полёте
+const ARC_PATH = 5;                         // gs: поворот считается по последним стольким gs пути (примерно весь перенос)
+const BACK_T = 0.16;                        // с: возврат листа на место
+const CARRY_STALE_MS = 90;                  // мс без движения до отпускания: дольше — рука остановилась, броска нет
+// ?carry=mid|two|both — каким входом берётся лист (для пробы владелицы; по умолчанию оба).
+let CARRY_MODE = "both";
+try{ const m = new URLSearchParams(location.search).get("carry"); if(m==="mid" || m==="two" || m==="both") CARRY_MODE = m; }catch(e){}
 
-// Поворот руки (action.sweep) и хвост дуги считает pathTurn() — по пути, а не по событиям.
-function commaLike(){ return Math.abs(action.sweep) >= COMMA_MIN_SWEEP; }
-
+// Где точка относительно листа: 0 — центр мишени, 1 — кромка в эту сторону.
+function sheetReach(p){
+  const c = targetC(); rimProfile();
+  const dx = p.x-c.x, dy = p.y-c.y, r = rimProf[rimBin(Math.atan2(dy,dx))] || sheetRadius() || 1;
+  return Math.hypot(dx,dy)/r;
+}
+function inCarryZone(p){ return sheetReach(p) <= CARRY_ZONE; }
+function carryOverPan(){
+  if(!xf || phase !== "TABLE") return false;
+  const c = centerOfSheet();
+  return Math.hypot(c.x + xf.ox - panC.x, c.y + xf.oy - panC.y) <= LAY_ZONE*PAN_R;
+}
 function enterCarry(){
   pullRestore();                    // язык тяги в руку не едет: лист подхватывается ровным
   const c = centerOfSheet();
-  action.state = "CARRY"; action.timer = COMMA_MAX;
+  action.state = "CARRY"; action.kind = "carry"; action.carryArm = false; action.carryT = 0;
   action.carryFrom = { x:action.last.x, y:action.last.y };
-  xf = { cx:c.x, cy:c.y, ox:0, oy:0, th:0, lift: sheetRadius()*0.10 };
+  action.liftI = Math.max(0, action.samples.length-1);
+  xf = { cx:c.x, cy:c.y, ox:0, oy:0, th:0, lift:0 };
+  tossTry++; lastDecision = "лист в руке";
+  audioPeel();
 }
-function endCarry(){
-  pullRestore();
-  const c = centerOfSheet();
-  if(!xf) xf = { cx:c.x, cy:c.y, ox:0, oy:0, th:0, lift:0 };   // запятая уложилась в 80 мс
-  const hx = c.x + xf.ox, hy = c.y + xf.oy;                     // где лист сейчас, в руке
-  const dir = action.tailDir;
-  const tpx = panC.x - hx, tpy = panC.y - hy, tl = Math.hypot(tpx,tpy) || 1;
-  const cosA = (dir.x*tpx + dir.y*tpy)/tl;
-  const sweepDeg = Math.round(action.sweep*180/Math.PI);
-  const transfer = phase==="TABLE" && Math.abs(action.sweep) >= COMMA_SWEEP && cosA >= Math.cos(COMMA_CONE);
-  if(transfer){
-    // Размер листа в самом решении: закинуть недотянутый лист МОЖНО (⚑ владелица 08.09.2026,
-    // decisions-log), но тогда это должно читаться как выбор, а не как случайность.
-    // Отказ «ещё короткий край» (21.09, сборка 57) снят 19.10.2026: он спорил с этим решением.
-    const pctNow = sheetPct();
-    lastDecision = `запятая ${sweepDeg}° → тава · лист ${pctNow}%`;
-    startToss(hx, hy, dir, tl); return;
+// Второй палец на листе, пока первый держит край или середину: лист в руке, ведёт середина между пальцами.
+function carryTwo(id, p2, client, tEv){
+  const a = { id:action.pointerId, p:{ x:action.last.x, y:action.last.y }, c:action.lastClient || client };
+  if(action.state !== "CARRY") enterCarry();
+  action.two = { a, b:{ id, p:p2, c:client } };
+  const m = twoMid(), t = Number.isFinite(tEv) ? tEv : performance.now(), g = gestureMetric(m.p, m.c);
+  // отсчёты начинаются заново от середины: иначе прыжок «палец → середина» читался бы как рывок
+  action.samples = [{ x:m.p.x, y:m.p.y, u:g.u, v:g.v, t }]; action.downM = { u:g.u, v:g.v }; action.moved = false;
+  action.stroke = { start:null, path:0, lastMoveT:t, i0:0, au:g.u, av:g.v, judged:true }; action.liftI = 0;
+  action.last = { x:m.p.x, y:m.p.y, t }; action.lastClient = m.c;
+  action.carryFrom = { x:m.p.x - xf.ox, y:m.p.y - xf.oy };
+  lastDecision = "лист в руке · два пальца";
+}
+function twoMid(){
+  const T = action.two;
+  return { p:{ x:(T.a.p.x+T.b.p.x)*0.5, y:(T.a.p.y+T.b.p.y)*0.5 }, c:{ x:(T.a.c.x+T.b.c.x)*0.5, y:(T.a.c.y+T.b.c.y)*0.5 } };
+}
+// Поворот пути руки за последние ARC_PATH gs переноса. Точки пути берутся не по событиям, а по
+// расстоянию: новая — когда палец ушёл от прошлой на 0,25 gs. Дрожание стоящего пальца
+// (±1,5 px) до этого шага не дотягивается и поворота не набирает (урок #91). Окно — по длине
+// пути, а не по числу точек: на редких событиях точки стоят реже, и «последние 12» были бы длиннее.
+function carryTurn(){
+  const S = action.samples, stepL = 0.25*gestureScale, pts = [];
+  let i0 = Math.min(action.liftI || 0, S.length-1); if(i0 < 0) return 0;
+  let k = { x:S[i0].x, y:S[i0].y }; pts.push(k);
+  for(let i=i0+1; i<S.length; i++) if(Math.hypot(S[i].x-k.x, S[i].y-k.y) >= stepL){ k = { x:S[i].x, y:S[i].y }; pts.push(k); }
+  let from = pts.length-1, len = 0;
+  while(from > 1 && len < ARC_PATH*gestureScale){ len += Math.hypot(pts[from].x-pts[from-1].x, pts[from].y-pts[from-1].y); from--; }
+  let sweep = 0;
+  for(let i=Math.max(2, from+1); i<pts.length; i++){
+    const ax=pts[i-1].x-pts[i-2].x, ay=pts[i-1].y-pts[i-2].y, bx=pts[i].x-pts[i-1].x, by=pts[i].y-pts[i-1].y;
+    sweep += Math.atan2(ax*by-ay*bx, ax*bx+ay*by);
   }
-  // Не к таве: это шлепок с дугой — лист опускается там, где его отпустили, и бьётся.
-  lastDecision = `дуга ${sweepDeg}° → шлепок`;
-  dropCarry();
-  action.direction = { x:dir.x, y:dir.y };
-  toFlying();
+  return sweep;
 }
-// Опустить лист из руки на стол там, где он сейчас (в пределах рабочей зоны), без удара.
-function dropCarry(){
-  const c = centerOfSheet();
+// Скорость руки на отпускании. Окно растёт с шагом событий: на пропущенных кадрах (50 мс между
+// событиями) в 80 мс попадают два отсчёта, и скорость считалась бы по всему штриху от его начала.
+function carryVelocity(){ return sampleVelocity(Math.max(VEL_WIN_MS, 3.2*evStep())); }
+function endCarry(tEv){
   if(!xf){ clearAction(); return; }
-  const z = zone("work"), r = sheetRadius();
-  const nx = Math.max(z.x + r*0.6, Math.min(z.x + z.w - r*0.6, c.x + xf.ox));
-  const ny = Math.max(z.y + r*0.4, Math.min(z.y + z.h - r*0.4, c.y + xf.oy));
-  bakeTransform(nx - c.x, ny - c.y, 0);
-  xf = null;
-  if(action.state === "CARRY" && action.pointerId === null) clearAction();
+  const c = centerOfSheet(), hx = c.x + xf.ox, hy = c.y + xf.oy;   // где лист сейчас, в руке
+  const tUp = Number.isFinite(tEv) ? tEv : performance.now(), st = action.stroke;
+  // «Рука ещё шла»: с запасом CARRY_STALE_MS — у короткого броска всего два-три события, средний шаг
+  // событий по ним не набирается, и touchend через 59 мс после последнего движения (свой Chrome,
+  // события через 50 мс и реже) читался бы остановкой: бросок не засчитывался.
+  const fresh = action.moved && st && st.start !== null && tUp - st.lastMoveT <= Math.max(staleMs(), CARRY_STALE_MS);
+  const v = fresh ? carryVelocity() : { x:0, y:0, speed:0 };
+  const turn = carryTurn(), quarter = Math.abs(turn) >= ARC_DECOR ? Math.sign(turn)*Math.PI/2 : 0;
+  const two = !!action.two || !!action.wasTwo;
+  action.pointerId = null; action.two = null; action.off = null; action.sweep = turn; noteRelease(v);
+  action.rel.entry = two ? "two" : "mid"; action.rel.carry_ms = Math.round(action.carryT*1000);
+  if(phase === "TABLE" && carryOverPan()){
+    lastDecision = `в руке → на таву · лист ${sheetPct()}%`;
+    startLay(hx, hy, quarter); return;
+  }
+  const tpx = panC.x - hx, tpy = panC.y - hy, tl = Math.hypot(tpx,tpy) || 1, sp = Math.hypot(v.x, v.y);
+  // Конус — по ЭКРАНУ, как его видит рука: вид из-за прилавка сжимает стол по вертикали, и в
+  // координатах стола 30° вбок на экране в альбоме выходили за 50° (проверка в Node, сборка 70).
+  const qx = prX(panC.x,panC.y) - prX(hx,hy), qy = prY(panC.x,panC.y) - prY(hx,hy), ql = Math.hypot(qx,qy) || 1;
+  // Лист уже ушёл за пальцем вбок, и направление «от листа к таве» отворачивается от руки: конус
+  // 50° в портрете сжимался до ±28° (ревью сборки 70). Поэтому бросок засчитывается и тогда, когда
+  // луч от листа по ходу руки попадает в саму таву (на экране она эллипс: ось Y растянута на 1/TILT).
+  const ax = qx, ay = qy/TILT, dx = v.su||0, dy = (v.sv||0)/TILT, dl = Math.hypot(dx,dy);
+  const aims = dl > 1e-9 && (ax*dx + ay*dy) > 0 && Math.abs(ax*dy - ay*dx)/dl <= TOSS_AIM*PAN_R;
+  const toPan = sp > 1e-9 && v.speed > 1e-9 && (((v.su||0)*qx + (v.sv||0)*qy)/(v.speed*ql) >= TOSS_CONE || aims);
+  if(phase === "TABLE" && stepNo === 3 && v.speed >= TOSS_MIN && toPan){
+    lastDecision = `бросок ${v.speed.toFixed(1)} gs/с → тава · лист ${sheetPct()}%`;
+    startToss(hx, hy, { x:v.x/sp, y:v.y/sp }, tl, quarter); return;
+  }
+  lastDecision = v.speed >= TOSS_MIN && toPan ? "бросок недотянутого листа не считается → на стол" : "в руке → обратно на стол";
+  startBack();
 }
-function startToss(hx, hy, dir, distToPan){
-  // Куда сядет: бросок летит по хвосту запятой ровно на расстояние до тавы; промах
-  // от центра сохраняется, но не дальше 30 % радиуса — мимо тавы лист не пролетит.
-  const ax = hx + dir.x*distToPan - panC.x, ay = hy + dir.y*distToPan - panC.y;
-  const al = Math.hypot(ax,ay) || 1, cap = PAN_R*0.30, k = Math.min(1, cap/al);
-  const spin = Math.max(-1.4, Math.min(1.4, action.sweep*0.55));   // «немножко вращается»
+// Лист возвращается на своё место: узлы физики не трогались, поэтому он тот же бит в бит.
+function startBack(){
+  action.state = "BACK"; action.pointerId = null; action.two = null; action.timer = BACK_T;
+  action.back = { ox:xf.ox, oy:xf.oy, lift:xf.lift || 0 };
+  const r = action.rel || {};
+  gestures.push({ ...measurementContext(), kind:"carry", outcome:"back", entry:r.entry || "mid", carry_ms:r.carry_ms || 0,
+    v_gs:+(r.v||0).toFixed(2), sheet_pct: sheetPct(), ts: new Date().toISOString() });
+  if(gestures.length>200) gestures.shift();
+  try{ localStorage.setItem("dough_gestures", JSON.stringify(gestures)); }catch(e){}
+}
+function cancelCarry(){ xf = null; clearAction(); }   // отмена касания, уход в фон: лист на столе, как был
+// Куда сядет лист: центр не дальше от центра тавы, чем позволяет борт — углы остаются на стали.
+function landingSpot(x, y){
+  const c = centerOfSheet(); let rmax = 0;
+  for(const i of edgeNodes){ if(conDeg && conDeg[i] <= 0) continue; const d = Math.hypot(px[i]-c.x, py[i]-c.y); if(d > rmax) rmax = d; }
+  const cap = Math.max(0.05*PAN_R, 1.08*PAN_R - rmax);
+  const ax = x - panC.x, ay = y - panC.y, al = Math.hypot(ax,ay), k = al > cap ? cap/al : 1;
+  return { x:panC.x + ax*k, y:panC.y + ay*k, aim:al/PAN_R };
+}
+function startToss(hx, hy, dir, distToPan, quarter){
+  // Бросок летит по направлению руки ровно на расстояние до тавы; промах от центра сохраняется,
+  // но не дальше, чем позволяет борт (landingSpot). Садится ровно: поворот — 0 или четверть оборота
+  // (украшение дугой), а в воздухе лист ещё чуть покачивается.
+  const L = landingSpot(hx + dir.x*distToPan, hy + dir.y*distToPan);
+  if(!xf){ const c = centerOfSheet(); xf = { cx:c.x, cy:c.y, ox:hx-c.x, oy:hy-c.y, th:0, lift:0 }; }
   action.state = "TOSS"; action.pointerId = null;
-  action.toss = { x0:hx, y0:hy, x1:panC.x + ax*k, y1:panC.y + ay*k, spin,
-    T: 0.34 + 0.16*Math.min(1, distToPan/(cv.width*0.5)), sweep: action.sweep, aim: al/PAN_R };
+  action.toss = { x0:hx, y0:hy, x1:L.x, y1:L.y, spin:quarter || 0, wob:Math.max(-0.35, Math.min(0.35, (action.sweep||0)*0.3)),
+    T: 0.34 + 0.16*Math.min(1, distToPan/(cv.width*0.5)), sweep: action.sweep || 0, aim: L.aim };
   action.timer = action.toss.T;
 }
 function updateToss(){
@@ -3998,25 +4144,51 @@ function updateToss(){
   const e = u*u*(3-2*u);                                        // плавный разгон и посадка
   xf.ox = t.x0 + (t.x1-t.x0)*e - xf.cx;
   xf.oy = t.y0 + (t.y1-t.y0)*e - xf.cy;
-  xf.th = t.spin * e;
+  xf.th = t.spin*e + t.wob*Math.sin(Math.PI*u);                 // к посадке покачивание гаснет
   xf.lift = sheetRadius()*(0.10 + 0.38*Math.sin(Math.PI*u));    // подлетает и опускается
+}
+// Укладка: лист держат за дальние углы, ближний край касается стали первым, остальное
+// раскатывается от игрока. У каждого узла своё время касания по его месту вдоль листа.
+function startLay(hx, hy, quarter){
+  const L = landingSpot(hx, hy), cs = Math.cos(quarter), sn = Math.sin(quarter);
+  const s = new Float32Array(N); let lo = Infinity, hi = -Infinity;
+  for(let i=0;i<N;i++){ const y = (px[i]-xf.cx)*sn + (py[i]-xf.cy)*cs; s[i] = y; if(conDeg && conDeg[i] <= 0) continue; if(y < lo) lo = y; if(y > hi) hi = y; }
+  const span = Math.max(1e-6, hi - lo);
+  for(let i=0;i<N;i++) s[i] = Math.max(0, Math.min(1, (hi - s[i])/span));   // 0 — ближний край (к игроку), 1 — дальний
+  action.state = "LAY"; action.pointerId = null; action.timer = LAY_T;
+  action.toss = { x0:hx, y0:hy, x1:L.x, y1:L.y, spin:quarter, wob:0, T:LAY_T, sweep:action.sweep || 0, aim:L.aim, lay:true, touched:false };
+  xf.layS = s; xf.layU = 0; xf.layH = sheetRadius()*LAY_H; xf.lift0 = xf.lift || 0; xf.contact = 0;
+}
+function layTouchAt(s){ return LAY_TOUCH + (1-LAY_TOUCH)*s; }
+function updateLay(){
+  const t = action.toss, u = Math.max(0, Math.min(1, 1 - action.timer/t.T));
+  const e = Math.min(1, u/0.6), k = e*e*(3-2*e);                // на место лист встаёт за первые 60 % укладки
+  xf.ox = t.x0 + (t.x1-t.x0)*k - xf.cx;
+  xf.oy = t.y0 + (t.y1-t.y0)*k - xf.cy;
+  xf.th = t.spin*k; xf.layU = u;
+  let on = 0, n = 0; const S = xf.layS;
+  for(let i=0;i<N;i++){ if(conDeg && conDeg[i] <= 0) continue; n++; if(layTouchAt(S[i]) <= u) on++; }
+  xf.contact = n ? on/n : 1;
+  if(!t.touched && u >= LAY_TOUCH){ t.touched = true; audioPanTouch(); }
 }
 function land(){
   const t = action.toss;
   bakeTransform(t.x1 - xf.cx, t.y1 - xf.cy, t.spin);
   xf = null; phase = "PAN"; tossOk++;
   // Недотянутый лист тоже разрешено перенести. В step() эта ветка была недостижима:
-  // TOSS и PAN возвращаются раньше. Обновляем шаг в момент самой посадки.
+  // лист в руке и на таве возвращаются раньше. Обновляем шаг в момент самой посадки.
   if(stepNo < 3){
     stepNo = 3;
     try{ localStorage.setItem("dough_step","3"); }catch(e){}
     syncStepButtons();
   }
   measureThickness();
-  audioPanLand();
-  gestures.push({ ...measurementContext(), kind:"toss", sweep_deg: Math.round(t.sweep*180/Math.PI),
+  audioPanLand(!!t.lay);
+  const r = action.rel || {};
+  gestures.push({ ...measurementContext(), kind: t.lay ? "lay" : "toss", sweep_deg: Math.round(t.sweep*180/Math.PI),
     spin_deg: Math.round(t.spin*180/Math.PI), aim: +t.aim.toFixed(2),
     flight_ms: Math.round(t.T*1000), sheet_pct: sheetPct(),
+    entry: r.entry || null, carry_ms: r.carry_ms || 0, v_gs: +(r.v||0).toFixed(2),
     ts: new Date().toISOString() });
   if(gestures.length>200) gestures.shift();
   try{ localStorage.setItem("dough_gestures", JSON.stringify(gestures)); }catch(e){}
@@ -4560,6 +4732,12 @@ function audioFrame(){
     }
     return;
   }
+  if(action.state==="LAY" && xf && sizzleGain){
+    // Лист ложится на таву: шипение растёт с долей листа, уже коснувшейся стали.
+    sizzleGain.gain.setTargetAtTime(0.5*(xf.contact||0), now, 0.03);
+    tenseGain.gain.setTargetAtTime(0, now, 0.05);
+    return;
+  }
   if(sizzleGain) sizzleGain.gain.setTargetAtTime(0, now, 0.08);
   if(pressGain) pressGain.gain.setTargetAtTime(0, now, 0.08);
   // Только скрип натяжения от фактической работы — никакой привязки к толщине:
@@ -4630,10 +4808,28 @@ function audioCrackle(t, dry){
   g.gain.setValueAtTime(0.05 + 0.10*dry, t); g.gain.exponentialRampToValueAtTime(0.001, t+dur);
   s.connect(f); f.connect(g); g.connect(master); s.start(t); s.stop(t+dur+0.01);
 }
-// Посадка на таву: глухой шлепок и сразу волна шипения — маргарин встретил сырое тесто.
-function audioPanLand(){
+// Лист отрывается от стола: короткий мягкий «чпок» вверх по тону.
+function audioPeel(){
+  if(!AC || condition==="sight" || !noiseBuf) return;
+  const s=AC.createBufferSource(); s.buffer=noiseBuf;
+  const f=AC.createBiquadFilter(); f.type="bandpass"; f.Q.value=1.2;
+  const g=AC.createGain(); const t=AC.currentTime;
+  f.frequency.setValueAtTime(320,t); f.frequency.exponentialRampToValueAtTime(1100,t+0.09);
+  g.gain.setValueAtTime(0.0001,t); g.gain.exponentialRampToValueAtTime(0.10,t+0.02);
+  g.gain.exponentialRampToValueAtTime(0.001,t+0.12);
+  s.connect(f); f.connect(g); g.connect(master); s.start(t); s.stop(t+0.14);
+}
+// Ближний край листа коснулся стали: тихий шлепок; шипение дальше ведёт площадь касания (audioFrame).
+function audioPanTouch(){
   if(!AC || condition==="sight") return;
-  audioSlap(2.2);
+  audioSlap(0.8);
+  crackleNext = AC.currentTime + 0.10;
+}
+// Посадка на таву: глухой шлепок и сразу волна шипения — маргарин встретил сырое тесто.
+// soft — лист положили рукой (LAY): шлепка нет, шипение уже выросло вместе с касанием.
+function audioPanLand(soft){
+  if(!AC || condition==="sight") return;
+  if(!soft) audioSlap(2.2);
   const now = AC.currentTime;
   sizzleGain.gain.cancelScheduledValues(now);
   sizzleGain.gain.setValueAtTime(0.5, now);
@@ -4837,8 +5033,19 @@ function onDown(id, cx, cy, t){
             if(!fatGesture && !dishGesture && dish.mode==="fold" && onButter(p,{x:cx,y:cy})){ fatGesture={id,last:p}; return; }
             if(fatGesture) return;
             beginDishGesture(id,dishInputLocal(cx,cy),{x:cx,y:cy},t); return; }
-  if(action.pointerId !== null) return;              // один активный палец; второй игнорируется (audit §5)
+  if(action.pointerId !== null){
+    // Второй палец на листе, пока первый его держит, — взять лист в руку (сборка 70). Иначе второй
+    // палец, как и раньше, игнорируется (audit §5).
+    if(id[0]==="t" && id!==action.pointerId && !action.two && CARRY_MODE!=="mid" && stepNo!==1 && phase==="TABLE"
+       && (action.state==="ARMED" || action.state==="PULLING" || action.state==="CARRY")){
+      // Лист в руке нарисован со сдвигом: второй палец меряем по листу там, где он сейчас.
+      const p2 = toLocal(cx, cy), q2 = xf ? { x:p2.x-xf.ox, y:p2.y-xf.oy } : p2;
+      if(sheetReach(q2) <= 1.1) carryTwo(id, p2, {x:cx,y:cy}, t);
+    }
+    return;
+  }
   if(action.state === "SETTLING") finalizeGesture(); // быстрый повторный тап не ждёт хвоста успокоения
+  if(action.state === "BACK"){ xf = null; clearAction(); }   // и возврата листа на место тоже: узлы не трогались
   if(action.state !== "RESTING") return;             // остальные фазы доигрывают автономно
   const tDown = performance.now();
   audioInit(); if(AC && AC.state==="suspended") AC.resume();
@@ -4869,8 +5076,21 @@ function onMove(id, cx, cy, t){
   }
   if(fatGesture && fatGesture.id===id){ const p=toLocal(cx,cy); smearStroke(fatGesture.last,p); fatGesture.last=p; return; }
   if(dishGesture && dishGesture.id===id){ dbgMove++; moveDishGesture(dishInputLocal(cx,cy),{x:cx,y:cy},t); return; }
+  if(action.two){                                    // два пальца несут лист: ведёт середина между ними
+    const T = action.two, f = id===T.a.id ? T.a : id===T.b.id ? T.b : null;
+    if(!f) return;
+    f.p = toLocal(cx, cy); f.c = {x:cx,y:cy};
+    const m = twoMid(); dbgMove++;
+    updateActionMove(m.p, t, m.c);
+    return;
+  }
   if(action.pointerId !== id) return;
   dbgMove++;
+  if(action.off && action.state === "CARRY"){        // остался один палец из двух: ведёт ту же точку
+    const p = toLocal(cx, cy), o = action.off;
+    updateActionMove({x:p.x+o.x, y:p.y+o.y}, t, {x:cx+o.cx, y:cy+o.cy});
+    return;
+  }
   updateActionMove(toLocal(cx, cy), t, {x:cx,y:cy});
 }
 function onUp(id, cx, cy, t){
@@ -4884,11 +5104,26 @@ function onUp(id, cx, cy, t){
     if(Number.isFinite(cx) && Number.isFinite(cy) && (cx!==L.x || cy!==L.y)) moveDishGesture(dishInputLocal(cx,cy),{x:cx,y:cy},t);
     endDishGesture(t); return;
   }
+  // Лист несли двумя пальцами, один подняла: лист остаётся в руке у второго (случайный второй палец
+  // раньше ронял лист и оставлял первый ни с чем — ревью сборки 70). Отпускает последний палец.
+  // Ведущая точка не прыгает: оставшийся палец ведёт её с тем же сдвигом, что был до середины.
+  if(action.two && (id===action.two.a.id || id===action.two.b.id)){
+    const T = action.two, keep = id===T.a.id ? T.b : T.a, m = twoMid();
+    action.off = { x:m.p.x-keep.p.x, y:m.p.y-keep.p.y, cx:m.c.x-keep.c.x, cy:m.c.y-keep.c.y };
+    action.pointerId = keep.id; action.two = null; action.wasTwo = true;
+    return;
+  }
   if(action.pointerId !== id) return;
+  const o = action.off;
+  if(o && action.state === "CARRY" && Number.isFinite(cx) && Number.isFinite(cy)){
+    const p = toLocal(cx, cy), c = {x:cx+o.cx, y:cy+o.cy};
+    if(action.lastClient && (c.x !== action.lastClient.x || c.y !== action.lastClient.y)) updateActionMove({x:p.x+o.x, y:p.y+o.y}, t, c);
+    releaseAction(t); return;
+  }
   // touchend несёт последнюю точку: конец быстрого маха может прийти только в нём.
   if(stepNo !== 1 && Number.isFinite(cx) && Number.isFinite(cy) && action.lastClient
      && (cx !== action.lastClient.x || cy !== action.lastClient.y)
-     && (action.state === "ARMED" || action.state === "PULLING" || action.state === "LIFTING")){
+     && (action.state === "ARMED" || action.state === "PULLING" || action.state === "LIFTING" || action.state === "CARRY")){
     updateActionMove(toLocal(cx, cy), t, {x:cx,y:cy});
     if(action.pointerId !== id) return;              // тяга зафиксировалась сама (пальцы соскользнули)
   }
@@ -4901,10 +5136,11 @@ function onCancel(id){
   if(dishTwist && ((dishTwist.ids && dishTwist.ids.includes(id)) || dishTwist.id===id)){ twistDbg.cancels++; endTwist(dishTwist.input==="touch"); return; }
   if(fatGesture && fatGesture.id===id){ fatGesture=null; return; }
   if(dishGesture && dishGesture.id===id){ releasePress(dishGesture); dishGesture=null; return; }
+  if(action.two && (id===action.two.a.id || id===action.two.b.id)){ cancelCarry(); return; }
   if(action.pointerId !== id) return;
   // Отмена всегда возвращает покой из ARMED/LIFTING (audit §5); начатая тяга откатывается целиком;
   // автономные фазы (FLYING и дальше) доигрывают сами и очистятся за ≤0.4 с.
-  if(action.state === "CARRY"){ action.pointerId = null; dropCarry(); }
+  if(action.state === "CARRY"){ cancelCarry(); }       // отмена касания: лист возвращается на стол как был
   else if(action.state === "PULLING" || action.state === "LIFTING"){ pullRestore(); clearAction(); }   // и язык подъёма тоже
   else if(action.state === "ARMED") clearAction();
   else action.pointerId = null;
@@ -5024,7 +5260,7 @@ window.addEventListener("pointercancel", e=>{ onCancel("p"+e.pointerId); }, true
 addEventListener("blur", ()=>{
   releasePress(dishGesture); dishGesture=null; fatGesture=null;
   dishTouches.clear(); if(dishTwist) endTwist(dishTwist.input==="wheel");
-  if(action.state==="CARRY"){ action.pointerId = null; dropCarry(); }
+  if(action.state==="CARRY"){ cancelCarry(); }
   else if(action.state==="PULLING"||action.state==="LIFTING"){ pullRestore(); clearAction(); }   // иначе тяга висела до «заново»: физика в ней стоит
   else if(action.state==="ARMED") clearAction();
 });
@@ -5068,7 +5304,7 @@ document.getElementById("tools").addEventListener("click", e=>{ if(e.target.id==
 const HINTS = {
   1: "прижимай кусок: где ведёшь — там тоньше, край остаётся толстым. Когда весь тонкий — можно тянуть край",
   2: "шаг 2: резкий мах от края — шлепок, лист растёт. Медленно потяни за угол — выйдет квадрат. Тяни там, где до пунктира далеко",
-  3: "шаг 3: возьми край и круговым махом-«запятой» перекинь на таву — полетит, повернётся, зашипит",
+  3: "шаг 3: возьми лист за середину и отнеси на таву — отпусти над ней, он ляжет и зашипит",
 };
 function syncStepButtons(){
   document.querySelectorAll("[data-s]").forEach(b=>b.classList.toggle("on", +b.dataset.s === stepNo));
@@ -5334,10 +5570,14 @@ let vxBuf=null, vyBuf=null;
 function viewX(){
   if(!vxBuf || vxBuf.length!==N){ vxBuf = new Float32Array(N); vyBuf = new Float32Array(N); }
   const c = Math.cos(xf.th), s = Math.sin(xf.th);
+  // Укладка (LAY): у каждого узла свой подъём — ближний край уже на стали, дальний ещё в руке.
+  const S = xf.layS, u = xf.layU || 0, H = xf.layH || 0, L0 = xf.lift0 || 0, ramp = Math.min(1, u/LAY_TOUCH);
   for(let i=0;i<N;i++){
     const dx = px[i]-xf.cx, dy = py[i]-xf.cy;
+    let lift = xf.lift;
+    if(S){ const tau = layTouchAt(S[i]); lift = u >= tau ? 0 : (L0 + H*S[i]*ramp)*(1 - u/tau); }
     vxBuf[i] = xf.cx + xf.ox + dx*c - dy*s;
-    vyBuf[i] = xf.cy + xf.oy + dx*s + dy*c - xf.lift;
+    vyBuf[i] = xf.cy + xf.oy + dx*s + dy*c - lift;
   }
   return vxBuf;
 }
@@ -5545,7 +5785,7 @@ function drawTable(g, sx, sy){   // пикселизация делается н
   const R_ = (x)=>x*sx, D_ = (y)=>y*sy;
   // В раме стол и тава уже нарисованы на картинке экрана — свои не рисуем. Но жир, кусочек
   // маргарина и мишень растяжки остаются: это не декорация, а игра (владелица 17.09 о раме).
-  if(frameOn){ drawFatAndButter(g, sx, sy); return drawStretchTarget(g, sx, sy); }
+  if(frameOn){ drawFatAndButter(g, sx, sy); drawPanGlow(g, sx, sy); return drawStretchTarget(g, sx, sy); }
 
   // Столешница — весь кадр: и рабочая зона, и зона тавы стоят на одном столе.
   // Раньше здесь стояла высота РАБОЧЕЙ зоны; пока зоны делились по ширине, это было
@@ -5560,8 +5800,7 @@ function drawTable(g, sx, sy){   // пикселизация делается н
     g.fillRect(0, D_((i+1)*bh-1), R_(cv.width), Math.max(1, D_(1)));
   }
 
-  // Тава (กระทะโรตี): толстая сталь с вогнутым дном — кольца темнеют к борту,
-  // в центре лужица маргарина. Рисуется в координатах стола той же проекцией, что мишень.
+  // Тава (กระทะโรตี): толстая плоская круглая плита, в центре лужица маргарина. Рисуется в координатах стола той же проекцией, что мишень.
   const pcx = R_(prX(panC.x, panC.y)), pcy = D_(prY(panC.x, panC.y));
   const ell = (r, fill, dy)=>{
     g.fillStyle = fill; g.beginPath();
@@ -5569,14 +5808,24 @@ function drawTable(g, sx, sy){   // пикселизация делается н
   };
   ell(PAN_R*1.16, "#0e0a07", PAN_R*0.06);   // тень и горелка под тавой
   ell(PAN_R*1.08, "#2a2622");               // борт
-  ell(PAN_R*1.00, "#3a342d");
-  ell(PAN_R*0.82, "#433c33");
-  ell(PAN_R*0.62, "#4b4338");
-  ell(PAN_R*0.42, "#544a3c");
-  ell(PAN_R*0.30, "#6b5a2a");               // лужица маргарина в центре вогнутого дна
+  ell(PAN_R*1.00, "#3a342d");               // кромка плиты
+  ell(PAN_R*0.96, "#4b4338");               // плоская плита: один тон, без колец «в глубину» (тава плоская, решение 17.11)
+  ell(PAN_R*0.30, "#6b5a2a");               // лужица маргарина в центре
   ell(PAN_R*0.16, "#8a7436", -PAN_R*0.02);  // блик на масле
   drawFatAndButter(g, sx, sy);
+  drawPanGlow(g, sx, sy);
   drawStretchTarget(g, sx, sy);
+}
+// Борт тавы светится, пока лист в руке над ней: «отпусти — ляжет сюда» (и гаснет за время укладки).
+function drawPanGlow(g, sx, sy){
+  const lay = action.state === "LAY";
+  if(!lay && !(action.state === "CARRY" && carryOverPan())) return;
+  const now = performance.now(), a = lay ? 0.85*Math.max(0, 1 - (xf ? xf.layU || 0 : 1)) : 0.62 + 0.23*Math.sin(now/110);
+  const x = prX(panC.x, panC.y)*sx, y = prY(panC.x, panC.y)*sy;
+  for(const [k, w, al] of [[1.05, 0.10, 0.28], [1.04, 0.04, 1]]){
+    g.strokeStyle = `rgba(255,198,96,${(a*al).toFixed(3)})`; g.lineWidth = Math.max(1, PAN_R*w*sx);
+    g.beginPath(); g.ellipse(x, y, PAN_R*k*sx, PAN_R*k*TILT*sy, 0, 0, Math.PI*2); g.stroke();
+  }
 }
 // Мишень: докуда растянуть лист — только пока лист на столе. Шаг 1 — круг расплющивания;
 // с шага 2 — пунктирный квадрат со скруглёнными углами (targetAt), по осям стола.
@@ -5713,7 +5962,7 @@ function loop(now){
   // заполнение мишени нужно только листу на столе с шага 2 (на таве и на шаге 1 его не показывают)
   const fillNow = phase==="TABLE" && stepNo>=2 && !dish ? sheetFill() : 0, pct = Math.round(fillNow*100);
   const ragged = tornAt ? " · рваный узор" : "";
-  const ready = fillNow >= READY_FILL ? " ✓ готов · запятой на таву →" : "";
+  const ready = fillNow >= READY_FILL ? " ✓ готов · неси на таву →" : "";
   const banner = advancedAt && performance.now()-advancedAt < 2600;
   const mc = meanCook(), md = meanDry();
   const verdictAge = verdictAt ? performance.now() - verdictAt : Infinity;
@@ -5723,11 +5972,14 @@ function loop(now){
                      : "на таве · сырое · подсыхает")
                      : fryStageNow===2 ? "на таве · приготовленное"
                      : "на таве · зажаренное · дальше темнеть не будет")
-    : action.state==="CARRY" ? "в руке — веди запятую к таве"
+    : action.state==="CARRY" ? (carryOverPan() ? "над тавой — отпускай, ляжет" : "лист в руке — неси к таве")
     : action.state==="TOSS" ? "летит…"
-    : banner ? (stepNo===3 ? "✓ растянуто — теперь круговым махом-«запятой» на таву"
+    : action.state==="LAY" ? "ложится на таву…"
+    : action.state==="BACK" ? "лёг обратно на стол"
+    : banner ? (stepNo===3 ? "✓ растянуто — возьми за середину и неси на таву"
                            : "✓ тонкий — шлёпай край махом или тяни его медленно")
     : stepNo===1 ? flattenLiveWord()
+    : (action.state==="ARMED" && action.carryArm) ? "держишь лист за середину — веди, и он пойдёт за рукой"
     : action.state==="ARMED" ? `держишь край · хват ${Math.round(action.mul||GRIP_MIN)} · тяни медленно или смахни!`
     : action.state==="PULLING" ? (action.pull && action.pull.cap<=0 ? "эта сторона дотянута — тяни, где до пунктира далеко"
                                                                     : "тянешь край — отпусти, и останется")
