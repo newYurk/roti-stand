@@ -438,7 +438,7 @@ test('N5', 'paging: arrows and swipes between evenings, an arrow only where ther
   assert.deepEqual(N.evenings[6].snaps.map(s => s.to), ['counter']);
   assert.ok(N.evenings.reduce((s, x) => s + x.snaps.length, 0) <= 21);
   // nine evenings in a save (written by an older rule or by hand) are cut to seven on load; a broken record is dropped
-  const big = nb({ storage: saveWith([1, 2, 3, 4, 5, 6, 7, 8, 9].map(i => pastEvening(i, i === 9 ? 5 : 2)).concat([{ ts: 'x', snaps: [{ to: 'dog' }] }])) });
+  const big = nb({ storage: saveWith([1, 2, 3, 4, 5, 6, 7, 8, 9].map(i => pastEvening(i, i === 9 ? 5 : 2)).concat([{ ts: 'x', snaps: [{ to: 'fence' }] }])) });   // ('dog' is a real eater since step 4)
   assert.equal(big.NB().evenings.length, 7); assert.equal(big.NB().evenings.at(-1).snaps.length, 3);
   return { summary: `pages ${S.pages}; kept ${N.evenings.length} evenings, ${N.evenings.reduce((s, x) => s + x.snaps.length, 0)} snapshots after the eighth` };
 });
