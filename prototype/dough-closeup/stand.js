@@ -3300,10 +3300,14 @@ function build(){
 // физике. px/py не меняются; дыры, складки, начинка и рез считаются как раньше.
 // У рваного края (порванная ячейка кромки, оторванный узел) сглаживания нет: окно узла
 // обрывается на первом таком соседе, так что разрыв остаётся разрывом.
+// Два предела (правка после ревью сборки 74): узел кромки сдвигается не дальше RIM_CAP своей
+// кратчайшей соседней стороны кромки, и ни одна ячейка не рисуется меньше RIM_AREA своей
+// физической площади — иначе в сжатом углу листа ячейки схлопывались и выворачивались.
 let RIM_K = 4;                               // 0 — рисовать кромку как в физике (так её меряет checks/edge-regression.cjs «до»)
-let dX = null, dY = null, rimRaw = null;
+let RIM_CAP = 0.8, RIM_AREA = 0.3, RIM_RAMP = 0.2, RIM_STEP = 0.75, RIM_STEPS = 8;   // пределы сглаживания: сдвиг узла в долях соседней стороны кромки; нарисованная площадь ячейки в долях физической
+let dX = null, dY = null, rimRaw = null, rimF = null, rimCells = [];
 function buildRimLoop(){
-  rimLoop = []; rimLoopQuad = [];
+  rimLoop = []; rimLoopQuad = []; rimCells = [];
   const key = (a,b)=> a<b ? a*65536+b : b*65536+a;
   const uses = new Map();
   const sides = (q)=>{ const [a,b,d,e] = quads[q]; return [[a,b],[b,d],[d,e],[e,a]]; };
@@ -3319,6 +3323,8 @@ function buildRimLoop(){
   do { const e = next.get(n); if(!e) return; loop.push(n); lq.push(e.q); n = e.v; } while(n !== start && loop.length <= next.size);
   if(n !== start || loop.length !== next.size) return;
   rimLoop = loop; rimLoopQuad = lq;
+  const onRim = new Uint8Array(N); for(const i of loop) onRim[i] = 1;
+  for(let q=0;q<quads.length;q++){ const s = quads[q]; if(onRim[s[0]] || onRim[s[1]] || onRim[s[2]] || onRim[s[3]]) rimCells.push(q); }
 }
 function rimDraw(){
   if(!dX || dX.length !== N){ dX = new Float32Array(N); dY = new Float32Array(N); }
@@ -3347,6 +3353,54 @@ function rimDraw(){
       sx += w*px[id]; sy += w*py[id]; sw += w;
     }
     dX[L[i]] = sx/sw; dY[L[i]] = sy/sw;
+  }
+  // Предел сдвига: узел кромки рисуется не дальше RIM_CAP от своей кратчайшей соседней стороны
+  // кромки. Где ячейки сжаты (угол листа после тяг и шлепков), окно в ±RIM_K узлов длиннее
+  // самого угла и утягивало узел внутрь на целую ячейку.
+  if(RIM_CAP > 0) for(let i=0;i<n;i++){
+    const id = L[i], ex = dX[id]-px[id], ey = dY[id]-py[id], e2 = ex*ex+ey*ey;
+    if(e2 === 0) continue;
+    const a = L[(i+n-1)%n], b = L[(i+1)%n];
+    const la = Math.hypot(px[a]-px[id], py[a]-py[id]), lb = Math.hypot(px[b]-px[id], py[b]-py[id]);
+    const lim = RIM_CAP*(la < lb ? la : lb);
+    if(e2 > lim*lim){ const k = lim/Math.sqrt(e2); dX[id] = px[id]+ex*k; dY[id] = py[id]+ey*k; }
+  }
+  // Ячейка не должна схлопнуться или вывернуться в рисунке: если её нарисованная площадь меньше
+  // RIM_AREA от физической, сглаживание её узлов кромки убавляется (доля rimF: ×RIM_STEP за шаг, на
+  // последнем из RIM_STEPS — ноль), а доля соседей по обходу подтягивается ступенями по RIM_RAMP, чтобы
+  // переход от сглаженной кромки к физической не был изломом.
+  if(RIM_AREA > 0){
+    if(!rimF || rimF.length !== N) rimF = new Float32Array(N);
+    let touched = false;
+    const guard = ()=>{
+      let changed = false;
+      for(const q of rimCells){
+        const ids = quads[q], a = ids[0], b = ids[1], d = ids[2], e = ids[3];
+        const ap = (px[d]-px[a])*(py[e]-py[b]) - (px[e]-px[b])*(py[d]-py[a]);
+        if(ap === 0) continue;
+        for(let t=0;t<RIM_STEPS;t++){
+          const ad = (dX[d]-dX[a])*(dY[e]-dY[b]) - (dX[e]-dX[b])*(dY[d]-dY[a]);
+          if(ad/ap >= RIM_AREA) break;
+          if(!touched){ for(const id of L) rimF[id] = 1; touched = true; }
+          for(const id of ids){
+            if(dX[id] === px[id] && dY[id] === py[id]) continue;
+            const k = t < RIM_STEPS-1 ? RIM_STEP : 0;
+            rimF[id] *= k; dX[id] = px[id]+(dX[id]-px[id])*k; dY[id] = py[id]+(dY[id]-py[id])*k;
+          }
+          changed = true;
+        }
+      }
+      return changed;
+    };
+    for(let round=0; round<3 && guard(); round++){
+      // подтянуть доли соседей: вперёд и назад по обходу, не больше RIM_RAMP на узел
+      for(let dir=0;dir<2;dir++) for(let c=0;c<2*n;c++){
+        const i = dir ? (2*n-1-c)%n : c%n, id = L[i], prev = L[dir ? (i+1)%n : (i+n-1)%n];
+        const cap = rimF[prev] + RIM_RAMP;
+        if(rimF[id] > cap){ const k = cap/rimF[id]; rimF[id] = cap; dX[id] = px[id]+(dX[id]-px[id])*k; dY[id] = py[id]+(dY[id]-py[id])*k; }
+      }
+    }
+    if(touched) guard();
   }
 }
 
@@ -5766,8 +5820,8 @@ function pathSheetOutline(g, sx, ox, sy, oy, extraY){
     if(conDeg && conDeg[i]<=0) continue;
     let b = Math.floor((Math.atan2(py[i]-c.y, px[i]-c.x)+Math.PI)/(2*Math.PI)*bins);
     if(b<0) b=0; else if(b>=bins) b=bins-1;
-    xs[b]+=prX(px[i],py[i])*sx+ox;
-    ys[b]+=prY(px[i],py[i])*sy+oy+(extraY||0);
+    xs[b]+=prX(dX[i],dY[i])*sx+ox;          // та же сглаженная кромка, что у ячеек (draw зовёт rimDraw раньше)
+    ys[b]+=prY(dX[i],dY[i])*sy+oy+(extraY||0);
     cn[b]++;
   }
   const P=[];
