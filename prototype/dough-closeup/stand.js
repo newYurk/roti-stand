@@ -11,7 +11,7 @@
 // до 400%+ и лист «рвётся» в середине от любого движения. Замер это обнаружил сразу.
 // Число узлов сохранено (1 060 после обрезки по кругу; прежняя оценка «~1150» была на глаз,
 // пересчитано 07.09.2026), однородность рёбер восстановлена.
-const BUILD = "2026-11-17 · тяга и шлепок, квадратная мишень · 68";
+const BUILD = "2026-11-17 · тяга и шлепок, квадратная мишень · 69";
 const GRID = 38;                   // 38x38, в круг попадает 1 060 узлов (посчитано, не оценка)
 let SUBSTEPS = 8;                  // T2: 8–10 подшагов, 1 итерация
 let DAMP = 0.986;
@@ -3381,7 +3381,7 @@ function armAction(pointerId, p, tEv, client){
     const m = gestureMetric(p, client);
     action.samples = [{ x:p.x, y:p.y, u:m.u, v:m.v, t:t0 }]; action.moved = false; action.pull = null;
     action.downM = { u:m.u, v:m.v }; action.evFb0 = evTimeFallbacks;
-    action.stroke = { start:null, path:0, lastMoveT:t0, i0:0, au:m.u, av:m.v, judged:false };
+    action.stroke = { start:null, path:0, lastMoveT:t0, i0:0, au:m.u, av:m.v, judged:false }; action.dtAvg = 0;
     action.liftI = 0; action.liftRad = null; action.rel = null; action.vPeak = 0; action.events = 0;
     action.lastClient = client || null; }
   if(stepNo!==1) updateGripFromHold();                 // на шаге 1 дуга хвата не нужна
@@ -3503,6 +3503,21 @@ const SLAP_MIN_PATH = 0.45, SLAP_OUT_COS = Math.cos(80*Math.PI/180);
 const VEL_WIN_MS = 80, PAUSE_MS = 40, IMPULSE_KS = 0.25;
 const SLAP_WIN_MS = 160, SLAP_MIN_MS = 150, PATH_Q = 0.05;
 const STALE_MS = 50;              // столько без движения — палец остановился, скорость считается нулевой
+// Частота событий у телефона своя и проседает: на 30 кадрах или при пропуске пары кадров события идут
+// через 33–60 мс, и постоянные 40/50 мс резали один быстрый мах на куски-«тяги» (проверка в своём Chrome
+// 17.11: мах 0,9 листа за 90 мс засчитан тягой со скоростью 0). Поэтому пороги паузы и остановки растут
+// со средним шагом событий этого жеста, а разрыв между событиями — пауза, только если палец за него почти
+// не сдвинулся: события во время покоя не приходят, и первое после паузы несёт маленький сдвиг.
+const V_STALL = 1.5;              // gs/с: медленнее за разрыв — палец стоял
+function evStep(){ return Math.min(60, Math.max(4, action.dtAvg || 16.7)); }
+function pauseMs(){ return Math.max(PAUSE_MS, 2.5*evStep()); }
+function staleMs(){ return Math.max(STALE_MS, 3*evStep()); }
+function gapIsPause(m, t){
+  const S = action.samples, L = S && S[S.length-1], st = action.stroke;
+  if(!L || !st || !(t - st.lastMoveT > pauseMs())) return false;
+  const gap = Math.max(1, t - L.t);
+  return Math.hypot(m.u-L.u, m.v-L.v) / gap * 1000 < V_STALL;
+}
 const SAMPLES_MAX = 256;          // отсчётов жеста в памяти: секунда с лишним на 240 Гц (поворот запятой считается по ним)
 const GATE_PATH = 1.2;            // gs стола: столько пути после подъёма — и решаем «дуга или прямой»
 try{
@@ -3519,15 +3534,17 @@ function pushSample(p, tEv, client){
   const S = action.samples, L = S[S.length-1], st = action.stroke;
   let t = Number.isFinite(tEv) ? tEv : performance.now(); if(t <= L.t) t = L.t + 0.01;
   const m = gestureMetric(p, client), s = { x:p.x, y:p.y, u:m.u, v:m.v, t };
+  const gap = t - L.t, paused = gapIsPause(m, t);
+  if(gap > 1 && gap < 70) action.dtAvg = action.dtAvg ? action.dtAvg*0.8 + gap*0.2 : gap;
   // мёртвая зона — от точки КАСАНИЯ (action.downM), а не от S[0]: массив отсчётов сдвигается
   if(!action.moved && Math.hypot(m.u-action.downM.u, m.v-action.downM.v) >= gestureSlop()) action.moved = true;
   if(action.moved){
     const d = Math.hypot(m.u-L.u, m.v-L.v);
     if(d > 1e-4){
-      if(st.start === null || t - st.lastMoveT > PAUSE_MS){
+      if(st.start === null || paused){
         // Начало штриха — предыдущий отсчёт; после паузы он старый, и движение началось
         // не раньше кадра назад (события во время покоя не приходят).
-        st.start = t - L.t > PAUSE_MS ? t - 17 : L.t; st.path = 0; st.i0 = S.length - 1; st.au = L.u; st.av = L.v;
+        st.start = t - L.t > pauseMs() ? t - 17 : L.t; st.path = 0; st.i0 = S.length - 1; st.au = L.u; st.av = L.v;
         st.judged = false;
       }
       st.lastMoveT = t;
@@ -3785,7 +3802,7 @@ function updateActionMove(p, tEv, client){
   if(stepNo !== 1){
     if(action.state !== "ARMED" && action.state !== "PULLING") return;
     // Пауза длиннее PAUSE_MS: прежний штрих кончился — судим его до того, как начнётся новый.
-    if(action.stroke && Number.isFinite(tEv) && tEv - action.stroke.lastMoveT > PAUSE_MS && judgeEndedStroke()) return;
+    if(action.stroke && Number.isFinite(tEv) && gapIsPause(gestureMetric(p, client), tEv) && judgeEndedStroke()) return;
     pushSample(p, tEv, client);
     updateGripFromHold();
     if(!action.moved) return;
@@ -3841,7 +3858,7 @@ function releaseAction(tEv){
     // Быстрый короткий мах мог целиком уместиться между двумя событиями: на отпускании решаем
     // по тем же числам. Палец, который остановился, шлепком не считается, и край догоняет его.
     const tUp = Number.isFinite(tEv) ? tEv : performance.now(), st = action.stroke;
-    const fresh = action.moved && st.start !== null && tUp - st.lastMoveT <= STALE_MS;
+    const fresh = action.moved && st.start !== null && tUp - st.lastMoveT <= staleMs();
     // Штрих на ходу (fresh) судим сейчас. Вставший палец шлепком не считается — кроме короткого
     // маха, который ещё никто не судил: «рывок — стоп — отпустила» остаётся шлепком.
     if(fresh){
@@ -3878,19 +3895,19 @@ function updateAction(dt){
     // Подъём кончают путь GATE_PATH (в updateActionMove), отпускание, остановка руки (90 мс без
     // событий) или предохранитель LIFT_MAX. «Дуга или прямой мах» решается по пути, перебранному
     // с постоянным шагом длины, а не по числу событий, успевших в окно (#91).
-    if(action.timer <= 0 || performance.now() - action.last.t > 90) liftGate();
+    if(action.timer <= 0 || performance.now() - action.last.t > Math.max(90, 4*evStep())) liftGate();
   } else if(action.state === "PULLING"){
     // Палец остановился — край, отставший в коридоре скоростей, догоняет его.
-    if(performance.now() - action.stroke.lastMoveT > STALE_MS){
+    if(performance.now() - action.stroke.lastMoveT > staleMs()){
       if(judgeEndedStroke()) return;                         // короткий рывок и стоп — шлепок бьёт сам
       const P = action.pull;
       if(P && (P.gain < 1 || P.fast > 0)) pullTo(action.last, Math.min(1, P.gain + dt*4), Math.max(0, P.fast - dt*6));
     }
   } else if(action.state === "ARMED" && stepNo !== 1){
-    if(action.stroke && performance.now() - action.stroke.lastMoveT > STALE_MS) judgeEndedStroke();
+    if(action.stroke && performance.now() - action.stroke.lastMoveT > staleMs()) judgeEndedStroke();
   } else if(action.state === "CARRY"){
     action.timer -= dt;
-    const stalled = performance.now() - action.last.t > 90;   // рука остановилась — дуга кончилась
+    const stalled = performance.now() - action.last.t > Math.max(90, 4*evStep());   // рука остановилась — дуга кончилась
     if(action.timer <= 0 || stalled) endCarry();
   } else if(action.state === "TOSS"){
     action.timer -= dt;
