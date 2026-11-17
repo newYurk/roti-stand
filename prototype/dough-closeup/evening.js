@@ -16,7 +16,7 @@
    notebookUpdate, notebookDrawItem, notebookDraw, notebookSnap, notebookNewEvening, notebookOpen,
    notebookState, notebookExport. Её снимки лежат в том же сохранении (roti_evening.notebook) и вечер
    заново не стирает прошлые вечера. Экран не гаснет, пока лампа горит (eveWakeSync, внизу файла).
-   Пёс и ночной кадр (night.js, шаг 4 v0) грузятся последними; их зовут под typeof: nightDogHit, nightServe,
+   Пёс и ночной кадр (night.js, шаг 4 v0) грузятся последними; их зовут под typeof: nightDogHit, nightServe, nightLive,
    nightTook, nightUpdate, nightDrawUnder, nightDrawOver, nightDraw, nightReset, nightState, nightExport.
    С ним строка «вечер окончен» пустая: конец вечера показывает ночной кадр. */
 
@@ -313,6 +313,7 @@ function eveningLive(cur){
   if(!EVE.ball) return !idle ? "" : EVE.ballsLeft > 0 ? "следующий шарик — в миске" : "накрой таву крышкой";
   const m = typeof cur === "string" ? cur : "";
   if(typeof guestLive === "function"){ const s = guestLive(m); if(s) return s; }
+  if(typeof nightLive === "function"){ const s = nightLive(m); if(s) return s; }   // роти берёт и пёс: без «на стойку»
   for(const [from, to] of EVE_WORDS) if(m.startsWith(from)) return to;
   return null;
 }

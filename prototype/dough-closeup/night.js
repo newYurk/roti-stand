@@ -9,7 +9,7 @@
    кому ушёл каждый (Сом / пёс / стойка); полку с подарками, тележку под крышкой и ком теста рисуют
    evening.js и guest.js, как раньше. После перезагрузки оконченный вечер открывается этим же кадром.
    Рамка вечера зовёт отсюда под typeof: nightDogHit, nightServe, nightTook, nightUpdate, nightDrawUnder,
-   nightDrawOver, nightDraw, nightReset, nightState, nightExport. Без этого файла вечер идёт как в шаге 3.
+   nightDrawOver, nightDraw, nightLive, nightReset, nightState, nightExport. Без этого файла вечер идёт как в шаге 3.
    Правила владелицы 17.11: плоские фигуры в палитре стенда, без свечения, частиц и анимаций — позы пса
    сменяются, а не двигаются (взмах хвоста — две нарисованные чёрточки); звука нет; слов нет.
    Пёс — заглушка: по решению 17.09 собак две (мама и дочка), окрас и имена не утверждены. */
@@ -18,6 +18,7 @@ const NIGHT_V = 1;
 const NIGHT_EAT_S = 2.5;               // сколько пёс стоит в позе «ест» (как ответ Сом)
 const NIGHT_LOOK_Y = 2/3;              // роти в руке выше этой доли высоты экрана — пёс поднимает голову
 const NIGHT_DOG = { w:100, h:56, left:8, bottom:8, pad:14 };   // CSS px: рамка пса и запас зоны «ему»
+const NIGHT_SIL = 2.5;                 // CSS px: на сколько тёмный силуэт под псом шире его самого (только поверх роти в руке)
 const NIGHT_FUR = "#d9d2c0", NIGHT_EAR = "#8b7f6e", NIGHT_DARK = "#1d150e";
 
 function nightFresh(){ return { v:NIGHT_V, dog:0, shown:false }; }
@@ -68,7 +69,19 @@ function nightOverDog(client){
   return p.x <= Z.x1 && p.y >= Z.y0;
 }
 // evening.js спрашивает это вместе со стойкой: отпущен ли роти там, где его подают.
-function nightDogHit(client){ return nightDogWants() && nightOverDog(client); }
+// Ненарезанный роти псу не подаётся и штриху из середины в его угол не мешает: это обычный рез (ревью шага 4).
+function nightDogHit(client){ return nightDogWants() && !!dish && dish.cuts.length > 0 && nightOverDog(client); }
+// Слова строки, пока роти берёт и пёс: «на стойку» спорило бы с жестом вниз, а про пса слов нет нигде.
+const NIGHT_WORDS = [
+  ["Разрезов", "нарезано · возьми за середину и неси"],
+  ["В руке — неси наверх", "в руке — неси и отпусти"],
+  ["Неси выше", "роти на столе · возьми за середину и неси"],
+];
+function nightLive(cur){
+  if(typeof cur !== "string" || !nightDogWants()) return null;
+  for(const [from, to] of NIGHT_WORDS) if(cur.startsWith(from)) return to;
+  return null;
+}
 // evening.js зовёт это из eveningServed после гостьи (она смотрит первой), ДО сброса стенда.
 function nightServe(client){
   if(!nightDogHit(client)) return null;
@@ -115,12 +128,13 @@ function nightSpots(){
 
 // ─────────────────────────── кадр
 // Пёс: три неподвижные позы в одной рамке, мордой к миске. nx, ny — доли рамки.
-function nightDogDraw(g, sx, sy, G){
-  const B = nightDogBox(G), pose = nightDogPose();
-  const X = nx => (B.x0 + nx*B.w)*sx, Y = ny => (B.y0 + ny*B.h)*sy, RX = n => Math.max(.5, n*B.w*sx), RY = n => Math.max(.5, n*B.h*sy);
-  const ell = (nx, ny, rx, ry, fill, rot) => { g.fillStyle = fill; g.beginPath(); g.ellipse(X(nx), Y(ny), RX(rx), RY(ry), rot || 0, 0, Math.PI*2); g.fill(); };
+// sil — плоский тёмный силуэт той же позы, на NIGHT_SIL px шире: подложка под пса, нарисованного поверх роти.
+function nightDogDraw(g, sx, sy, G, sil){
+  const B = nightDogBox(G), pose = nightDogPose(), grow = sil ? NIGHT_SIL*G.u : 0;
+  const X = nx => (B.x0 + nx*B.w)*sx, Y = ny => (B.y0 + ny*B.h)*sy, RX = n => Math.max(.5, (n*B.w + grow)*sx), RY = n => Math.max(.5, (n*B.h + grow)*sy);
+  const ell = (nx, ny, rx, ry, fill, rot) => { g.fillStyle = sil ? NIGHT_DARK : fill; g.beginPath(); g.ellipse(X(nx), Y(ny), RX(rx), RY(ry), rot || 0, 0, Math.PI*2); g.fill(); };
   const stroke = (pts, w, color) => {
-    g.strokeStyle = color; g.lineWidth = Math.max(1, RX(w)); g.lineCap = "round"; g.beginPath();
+    g.strokeStyle = sil ? NIGHT_DARK : color; g.lineWidth = Math.max(1, (w*B.w + 2*grow)*sx); g.lineCap = "round"; g.beginPath();
     g.moveTo(X(pts[0][0]), Y(pts[0][1]));
     if(pts.length === 3) g.quadraticCurveTo(X(pts[1][0]), Y(pts[1][1]), X(pts[2][0]), Y(pts[2][1]));
     else g.lineTo(X(pts[1][0]), Y(pts[1][1]));
@@ -162,7 +176,8 @@ function nightDogDraw(g, sx, sy, G){
 // evening.js зовёт это в нижнем слое после миски: тесто на столе ложится поверх пса.
 function nightDrawUnder(g, sx, sy, G){ if(!eveDev) nightDogDraw(g, sx, sy, G); }
 // Роти в руке закрыл бы пса — пока его несут, пёс рисуется поверх (как гостья): видно, кому несёшь.
-function nightDrawOver(g, sx, sy, G){ if(!eveDev && nightCarried()) nightDogDraw(g, sx, sy, G); }
+// Шерсть почти одного тона с роти — под пса кладётся тёмный силуэт, иначе читались только ухо, глаз и нос.
+function nightDrawOver(g, sx, sy, G){ if(!eveDev && nightCarried()){ nightDogDraw(g, sx, sy, G, true); nightDogDraw(g, sx, sy, G); } }
 // Метка под карточкой — те же, что в тетради (notebook.js), мельче.
 function nightDraw(g, sx, sy, G){
   if(!nightFrameOn() || typeof nbMark !== "function") return;
