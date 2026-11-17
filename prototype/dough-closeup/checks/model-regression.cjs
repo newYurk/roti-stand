@@ -14,11 +14,10 @@
 // the report to runs/checks/model-regression-results.json of this checkout (runs/ is not in git).
 // Changes against the 16.09 copy: press() releases the finger (since e4f7a81 step 1 is committed
 // on release), the thin-quads check also fills the flatten map that step 1 is drawn with, a resize
-// check and a steady-swipe check. slap() is the 16.09 slap (one stationary event, then one move at
-// the requested speed along the grabbed rim) and its strength is checked exactly, as on 16.09:
-// the stand measures the hand speed between two neighbouring events. swipe() is a steady 60 Hz
-// swipe; its rim turns a little between the events, so it is checked exactly against the stand's
-// own formula along the grip axis, not against the requested strength.
+// check and a steady-swipe check.
+// 17.11.2026 (build 67): slap() and swipe() are timed multi-event strokes, pull()/stroke()/drive()
+// are new — see the comment above slap(). The slice-1 acceptance checks of the square stretch
+// (classification across event cadences, pulls, square target) live in square-stretch-regression.cjs.
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
@@ -241,59 +240,110 @@ function press(h) {
   h.run('releaseAction();');h.tick(60);
   return {seconds:frames/60,metrics:h.metrics()};
 }
-function slap(h, index, impulse=2.3) {
+// 17.11.2026 (build 67, #91): the stand no longer measures the hand between two neighbouring
+// events. A gesture is a series of time-stamped samples; speed is a least-squares fit over the
+// last 80 ms of the current stroke, and the slap strength is IMPULSE_KS × that speed. slap() is
+// therefore a timed multi-event stroke longer than the dead zone: 250 ms hold, then events at
+// `hz` with constant speed strength/IMPULSE_KS (gs/s) along the radius of the grabbed rim, a
+// physics frame between events, release two events after the lift. Coordinates are internal
+// table units (no client point), so the gesture metric is table units ÷ gestureScale.
+// The exact "speed between neighbouring events" check is gone with the method; what is checked
+// is that the delivered strength is the requested one within 2 % at any event cadence.
+function slap(h, index, impulse=2.3, {hz=120}={}) {
   assert.equal(h.run('action.state'),'RESTING');
-  const angle=index*Math.PI/2;
-  h.run(`{const c=centerOfSheet(),r=sheetRadius();armAction("test",{x:c.x+Math.cos(${angle})*r,y:c.y+Math.sin(${angle})*r});}`);
+  const angle=index*Math.PI/2, dt=1000/hz;
+  h.run(`{const c=centerOfSheet(),r=sheetRadius();armAction("test",{x:c.x+Math.cos(${angle})*r,y:c.y+Math.sin(${angle})*r},${h.getTime()});}`);
   h.tick(15);
-  // A stationary event makes the following event's dt explicit. Coordinates are
-  // internal table units; this intentionally bypasses DOM and gesture projection.
-  h.run('updateActionMove({x:action.last.x,y:action.last.y});');
-  h.advance(1000/60);
-  h.run(`{const c=centerOfSheet(),r=Math.hypot(px[action.edgeNode]-c.x,py[action.edgeNode]-c.y),dx=(px[action.edgeNode]-c.x)/r,dy=(py[action.edgeNode]-c.y)/r;updateActionMove({x:action.last.x+dx*gestureScale*${impulse}/IMPULSE_K/60,y:action.last.y+dy*gestureScale*${impulse}/IMPULSE_K/60});}`);
-  assert.equal(h.run('action.state'),'LIFTING','native straight swipe reaches LIFTING');
-  const actualImpulse=h.run('action.impulse');
-  assert.ok(Math.abs(actualImpulse-impulse)<1e-6,`requested impulse ${impulse}; actual ${actualImpulse}`);
-  h.run('releaseAction();');h.tick(60);
-  assert.equal(h.run('action.state'),'RESTING');
-  assert.equal(h.run('gestures.at(-1).kind'),'slap');
-  assert.ok(h.metrics().finite);
-  return {impulse:actualImpulse, ...h.metrics()};
-}
-// A steady swipe like a hand: after the 250 ms hold, move events at 60 Hz with constant velocity
-// gestureScale·impulse/IMPULSE_K along the radius the grabbed rim had at the start, a physics frame
-// between events, two more events after the lift starts. The held rim moves between the events, so
-// the delivered strength is not the requested one (at compliance 30 it is 1.6–2.6 for 2.3); what must
-// hold exactly is the recognition itself: the hand speed at the lift is the speed between the two
-// last events, and the strength is the stand's formula along the grabbed rim at that moment.
-function swipe(h, index, impulse=2.3) {
-  assert.equal(h.run('action.state'),'RESTING');
-  const angle=index*Math.PI/2;
-  h.run(`{const c=centerOfSheet(),r=sheetRadius();armAction("test",{x:c.x+Math.cos(${angle})*r,y:c.y+Math.sin(${angle})*r});}`);
-  h.tick(15);
-  h.run(`{const c=centerOfSheet(),r=Math.hypot(px[action.edgeNode]-c.x,py[action.edgeNode]-c.y);globalThis.__slap={x:action.last.x,y:action.last.y,dx:(px[action.edgeNode]-c.x)/r,dy:(py[action.edgeNode]-c.y)/r,v:gestureScale*${impulse}/IMPULSE_K};}`);
-  let lifted=-1, speed=null, formula=null;
-  for(let k=1;k<=12 && (lifted<0 || k<=lifted+2);k++){
-    h.tick();
-    h.run(`updateActionMove({x:__slap.x+__slap.dx*__slap.v*${k}/60,y:__slap.y+__slap.dy*__slap.v*${k}/60});`);
-    if(lifted<0 && h.run('action.state')==='LIFTING'){
-      lifted=k;
-      speed=h.run('Math.hypot(action.velocity.x,action.velocity.y)/__slap.v');
-      formula=h.run(`(()=>{const c=action.liftC||centerOfSheet(),e=action.edgeNode,rl=Math.hypot(px[e]-c.x,py[e]-c.y)||1,rx=(px[e]-c.x)/rl,ry=(py[e]-c.y)/rl,v=action.velocity,out=Math.max(0,v.x*rx+v.y*ry),tan=Math.abs(rx*v.y-ry*v.x);return Math.min(IMPULSE_MAX,IMPULSE_K*(out+0.55*tan)/Math.max(1,gestureScale));})()`);
-    }
+  h.run(`{const c=centerOfSheet(),e=action.edgeNode,r=Math.hypot(px[e]-c.x,py[e]-c.y);globalThis.__slap={x:action.last.x,y:action.last.y,dx:(px[e]-c.x)/r,dy:(py[e]-c.y)/r,v:gestureScale*${impulse}/IMPULSE_KS};}`);
+  let lifted=-1;
+  for(let k=1;k<=80 && (lifted<0 || k<=lifted+2);k++){
+    h.tick(1,dt/1000);
+    h.run(`updateActionMove({x:__slap.x+__slap.dx*__slap.v*${k*dt/1000},y:__slap.y+__slap.dy*__slap.v*${k*dt/1000}},${h.getTime()});`);
+    if(lifted<0 && h.run('action.state')==='LIFTING') lifted=k;
   }
   assert.ok(lifted>0,'native straight swipe reaches LIFTING');
-  assert.equal(h.run('action.state'),'LIFTING','swipe still lifting two events later');
+  assert.match(h.run('action.state'),/^(LIFTING|FLYING)$/,'the lift ends by itself only into the flight');
   const actualImpulse=h.run('action.impulse');
-  assert.ok(Math.abs(speed-1)<1e-6,`hand speed at the lift is the speed between the last two events: ${speed} of the swipe`);
-  assert.ok(Math.abs(actualImpulse-formula)<1e-6,`impulse is the stand's formula along the grabbed rim at the lift: ${formula}; actual ${actualImpulse}`);
-  h.run('releaseAction();');h.tick(60);
+  assert.ok(Math.abs(actualImpulse-impulse)<=0.02*impulse,`requested impulse ${impulse}; actual ${actualImpulse}`);
+  h.run(`releaseAction(${h.getTime()});`);h.tick(60);
   assert.equal(h.run('action.state'),'RESTING');
   assert.equal(h.run('gestures.at(-1).kind'),'slap');
   assert.ok(h.metrics().finite);
-  return {impulse:actualImpulse, liftEvent:lifted, ...h.metrics()};
+  return {impulse:actualImpulse, liftEvent:lifted, hz, ...h.metrics()};
 }
-module.exports={boot,press,slap,swipe,sourcePath,sourceSha256:crypto.createHash('sha256').update(source).digest('hex')};
+// The former steady 60 Hz swipe: the same stroke at 60 Hz.
+function swipe(h, index, impulse=2.3) { return slap(h, index, impulse, {hz:60}); }
+// A slow pull in table units: grab the rim at `angle`, hold 250 ms, move outward by `ext` gs at
+// `speed` gs/s with events at `hz`, release at the end. Returns what the stand decided.
+function pull(h, angle, ext=0.8, speed=1.5, hz=60) {
+  assert.equal(h.run('action.state'),'RESTING');
+  const dt=1000/hz, before=h.run('gestures.length');
+  h.run(`{const c=centerOfSheet();rimProfile(c);const r=rimProf[rimBin(${angle})]*0.98;armAction("test",{x:c.x+Math.cos(${angle})*r,y:c.y+Math.sin(${angle})*r},${h.getTime()});globalThis.__pull={x:action.last.x,y:action.last.y,dx:Math.cos(${angle}),dy:Math.sin(${angle}),gs:gestureScale};}`);
+  h.tick(15);
+  const n=Math.max(2,Math.round(ext/speed*1000/dt));
+  for(let k=1;k<=n && h.run('action.pointerId')!==null;k++){
+    h.tick(1,dt/1000);
+    h.run(`updateActionMove({x:__pull.x+__pull.dx*__pull.gs*${ext*k/n},y:__pull.y+__pull.dy*__pull.gs*${ext*k/n}},${h.getTime()});`);
+  }
+  const state=h.run('action.state');
+  if(h.run('action.pointerId')!==null) h.run(`releaseAction(${h.getTime()});`);
+  const decision=h.run('lastDecision');
+  for(let i=0;i<90 && h.run('action.state')!=='RESTING';i++) h.tick();
+  assert.equal(h.run('action.state'),'RESTING');
+  const kind=h.run('gestures.length')>before?h.run('gestures.at(-1).kind'):(h.run('phase')==='PAN'?'toss':'none');
+  return {kind, decision, stateBeforeRelease:state, ...h.metrics()};
+}
+// A stroke through the real touch handlers, in client px, with its own clock: events and
+// physics frames are scheduled independently (frames every frameMs, events at their own times),
+// as on a phone. opts: angle — where on the rim (table angle); speed — screen gs/s; dist — screen gs;
+// hz — event cadence; phase — offset of the first event in event intervals; jitter — ±CSS px on
+// every point; tjitter — ±ms on every event time; off — the stroke direction turned by this many
+// radians from the projected outward radius; hold — ms before the first move; frames — false:
+// no physics frames at all (classification only), 'stroke': frames only after the hold.
+// Returns {kind, decisionAtRelease, ...}: kind is 'pull'|'slap'|'toss'|'none' after the gesture
+// played out (settle:true) or as decided at release (settle:false).
+function lcg(seed){ let s=(seed>>>0)||1; return ()=>{ s=(Math.imul(s,1664525)+1013904223)>>>0; return s/4294967296-0.5; }; }
+function strokePoints(h, {angle=0, speed=2, dist=1.5, hz=60, phase=0.5, jitter=0, tjitter=0, off=0, hold=300, seed=1, from=1}={}) {
+  // (typeof guards: the same driver replays strokes on older builds, e.g. build 66, to show what they did)
+  const st=JSON.parse(h.run(`(()=>{const c=centerOfSheet(),sq=typeof rimProfile==='function';if(sq)rimProfile(c);return JSON.stringify({c,r:sq?rimProf[rimBin(${angle})]:sheetRadius(),gcss:typeof gsCss==='function'?gsCss():Math.max(1,gestureScale*cv.getBoundingClientRect().width/cv.width)})})()`));
+  const rnd=lcg(seed), dt=1000/hz, T=dist/speed*1000;
+  const p0=h.toClient(st.c.x+Math.cos(angle)*st.r*from,st.c.y+Math.sin(angle)*st.r*from), p1=h.toClient(st.c.x+Math.cos(angle)*st.r*(from+0.3),st.c.y+Math.sin(angle)*st.r*(from+0.3));
+  let dx=p1.x-p0.x, dy=p1.y-p0.y; const l=Math.hypot(dx,dy); dx/=l; dy/=l;
+  if(off){ const c=Math.cos(off), s=Math.sin(off); [dx,dy]=[dx*c-dy*s, dx*s+dy*c]; }
+  const at=t=>{ const d=dist*st.gcss*Math.min(1,Math.max(0,t/T)); return {x:p0.x+dx*d+2*jitter*rnd(), y:p0.y+dy*d+2*jitter*rnd()}; };
+  const pts=[{...p0, t:0}];
+  for(let t=phase*dt; t<T; t+=dt) pts.push({...at(t), t:hold+t+2*tjitter*rnd()});
+  pts.push({...at(T), t:hold+T, up:true});
+  for(let i=1;i<pts.length;i++) if(pts[i].t<=pts[i-1].t) pts[i].t=pts[i-1].t+0.5;
+  return pts;
+}
+// pts: [{x,y,t(ms from touchstart)}]; the last point is the release (its coordinates travel in touchend).
+function drive(h, pts, {frameMs=1000/60, frames='stroke', id='t1', glue=1, settle=true, release=true}={}) {
+  const t0=h.getTime(), before=h.run('gestures.length');
+  const to=t=>{ const d=t0+t-h.getTime(); if(d>0) h.advance(d); };
+  h.touch('start',id,pts[0].x,pts[0].y);
+  let nextFrame=frameMs; const holdEnd=pts.length>1?pts[1].t-frameMs:0;
+  const frame=()=>{ if(frames===false){ nextFrame+=frameMs; return; } to(nextFrame); if(frames===true || nextFrame>=holdEnd) h.run(`step(${frameMs/1000})`); nextFrame+=frameMs; };
+  // glue>1: events are delivered in batches of `glue` right before a frame, keeping their own timestamps
+  let batch=[];
+  const flush=()=>{ for(const p of batch) h.touch(p.up&&release?'end':'move',id,p.x,p.y,{timeStamp:t0+p.t}); batch=[]; };
+  for(const p of pts.slice(1)){
+    if(p.up && !release) break;
+    while(nextFrame<=p.t){ if(glue>1) flush(); frame(); }
+    if(glue>1 && !p.up){ batch.push(p); if(batch.length>=glue){ to(p.t); flush(); } continue; }
+    to(p.t); if(glue>1) flush(); h.touch(p.up?'end':'move',id,p.x,p.y);
+  }
+  const atRelease={state:h.run('action.state'), kind:h.run('action.kind'), decision:h.run('lastDecision'), impulse:h.run('action.impulse')};
+  let kind = atRelease.kind==='pull' ? 'pull' : /LIFTING|FLYING|IMPACT|SETTLING/.test(atRelease.state) ? 'slap' : /CARRY|TOSS/.test(atRelease.state) ? 'toss'
+    : h.run('gestures.length')>before ? h.run('gestures.at(-1).kind') : 'none';
+  if(settle && release){
+    for(let i=0;i<120 && h.run('action.state')!=='RESTING';i++) h.tick();
+    kind = h.run('gestures.length')>before ? h.run('gestures.at(-1).kind') : (h.run('phase')==='PAN'?'toss':'none');
+  }
+  return {kind, atRelease, phase:h.run('phase'), events:pts.length};
+}
+function stroke(h, opts={}, driveOpts={}) { return drive(h, strokePoints(h, opts), driveOpts); }
+module.exports={boot,press,slap,swipe,pull,stroke,strokePoints,drive,lcg,sourcePath,sourceSha256:crypto.createHash('sha256').update(source).digest('hex')};
 if(require.main===module){
 test('standalone script boots and executes three render/physics frames',()=>{const h=boot();h.tick(3,1/60,true);assert.deepEqual(h.errors,[]);assert.equal(h.metrics().n,1060);assert.equal(h.run('loopErrs'),0);return h.metrics();});
 test('identical seed produces identical initial geometry across tuning presets',()=>{const a=boot({com:30,creep:30,brk:72}),b=boot({com:100,creep:100,brk:100});assert.equal(a.run('JSON.stringify(Array.from(px))'),b.run('JSON.stringify(Array.from(px))'));assert.equal(a.run('JSON.stringify(Array.from(py))'),b.run('JSON.stringify(Array.from(py))'));});
@@ -308,10 +358,13 @@ for(const tuple of [[30,30,72],[100,100,100],[100,100,72],[100,30,72],[30,100,72
     const record={preset:name,flattenSeconds:flatten.seconds,progressAfterFlatten:flatten.metrics.progress,progressAfterEachSlap:slaps.map(s=>s.progress),areaAfterFlatten:flatten.metrics.area,invertedAfterFlatten:flatten.metrics.invertedQuads,invertedAfterSlaps:last.invertedQuads,areaAfterSlaps:last.area,areaRatio:last.areaRatio,retention:{radius:retained.radius/last.radius,area:retained.area/last.area},broken:last.broken,holeQuads:last.holeQuads,minThickness:last.minThickness,medianThickness:last.medianThickness};outputs.push(record);return record;
   });
 }
-test('steady 60 Hz swipe: speed between neighbouring events, impulse by the stand formula',()=>{
-  const h=boot({com:100,creep:100,brk:100});press(h);const rows=[];
-  for(let i=0;i<5;i++){const r=swipe(h,i,2.3);rows.push({impulse:r.impulse,liftEvent:r.liftEvent,invertedQuads:r.invertedQuads,progress:r.progress});}
-  assert.ok(rows.every(r=>r.impulse>2&&r.impulse<2.6),'a 2.3 swipe on the stiff sheet stays a moderate slap');
+test('steady swipe: the same strength at 30, 60, 120 and 240 Hz event cadence',()=>{
+  const rows=[];
+  for(const hz of [30,60,120,240]){
+    const h=boot({com:100,creep:100,brk:100});press(h);
+    for(let i=0;i<5;i++){const r=slap(h,i,2.3,{hz});rows.push({hz,impulse:r.impulse,liftEvent:r.liftEvent,invertedQuads:r.invertedQuads,progress:r.progress});}
+  }
+  assert.ok(rows.every(r=>Math.abs(r.impulse-2.3)<=0.046),'a 2.3 swipe is a 2.3 slap at every cadence');
   return rows;
 });
 test('maximum strength still allows native thickness tear criterion',()=>{
