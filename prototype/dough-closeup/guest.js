@@ -272,7 +272,7 @@ function guestFigure(g, sx, sy, G){
     const im = gImgs[pic - 1], k = Math.min(S.w/im.naturalWidth, S.h/im.naturalHeight), w = im.naturalWidth*k, h = im.naturalHeight*k;
     const turn = guestHeadTurn();                          // «нет»: картинка 1 чуть сжимается и уходит в сторону, как поворот головы
     const w2 = w*(1 - 0.07*Math.abs(turn));
-    g.drawImage(im, (S.x0 + (S.w - w2)/2 + turn*0.035*S.w)*sx, (S.y0 + S.h - h + dy)*sy, w2*sx, h*sy);
+    g.drawImage(im, (S.x0 + (S.w - w2)/2 + turn*0.05*S.w)*sx, (S.y0 + S.h - h + dy)*sy, w2*sx, h*sy);
   } else guestPlaceholder(g, sx, sy, S, dy, pic, guestHeadTurn());
   g.restore();
 }
@@ -323,8 +323,8 @@ function guestPlaceholder(g, sx, sy, S, dy, pic, turn = 0){
   // голова: в кивке наклонена и чуть опущена
   const tilt = pic === 3 ? 0.16 : 0, hx = 0.5, hy = pic === 3 ? 0.445 : 0.42;
   g.save(); g.translate(X(hx), Y(hy)); g.rotate(tilt); g.translate(-X(hx), -Y(hy));
-  g.translate(R(0.03*turn), 0);                            // «нет»: голова уходит в сторону, лицо — ещё дальше (face)
-  const face = 0.055*turn;
+  g.translate(R(0.045*turn), 0);                            // «нет»: голова уходит в сторону, лицо — ещё дальше (face)
+  const face = 0.085*turn;
   ell(hx, hy - 0.27, 0.075, 0.07, HAIR);                   // пучок
   ell(hx, hy - 0.05, 0.215, 0.26, HAIR);                   // волосы
   ell(hx, hy + 0.03, 0.175, 0.215, SKIN);                  // лицо
@@ -338,7 +338,7 @@ function guestPlaceholder(g, sx, sy, S, dy, pic, turn = 0){
     for(const [cx, cy] of [[-0.13, 0.13], [0.12, 0.11], [0.14, 0.18], [-0.11, 0.19], [0.03, 0.235], [-0.045, 0.24]]) ell(hx + cx, hy + cy, 0.014, 0.016, "#f0c674");   // крошки
   } else {
     const look = pic === 1 ? 0.03 : 0, r = pic === 2 ? 0.03 : 0.023;   // 1 — смотрит вниз, на таву; 2 — на тебя
-    for(const s of [-1, 1]) ell(hx + face + s*0.075*(1 - 0.25*Math.abs(turn)), hy + 0.01 + look*(turn ? 0 : 1), r, r*1.1, DARK);
+    for(const s of [-1, 1]) ell(hx + face + s*0.075*(1 - 0.3*Math.abs(turn)), hy + 0.01 + look*(turn ? 0 : 1), r, r*1.1, DARK);
     stroke(pic === 3 ? [[hx - 0.07, hy + 0.135], [hx + 0.07, hy + 0.135]] : [[hx + face - 0.035, hy + 0.135], [hx + face + 0.035, hy + 0.135]], 0.02, DARK);
   }
   g.restore();
