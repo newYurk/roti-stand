@@ -242,6 +242,23 @@ test('T6', 'fast flick 12 and 20 gs/s at 33 ms event step: slap 16/16 each', () 
   if (rows.some(r => r.kind !== 'slap')) failWith({ ...out, rows }, out.summary);
   return out;
 });
+// ── T6b: dropped frames do not cut a swipe into pulls ─────────────────────────────────────────
+// Own Chrome 17.11: events came every 33–50 ms, and the fixed 40 ms pause cut one fast swipe into
+// many short «strokes», each committed as a pull with speed 0. On a phone that is one or two dropped
+// frames. A gap is a pause only when the finger barely moved across it.
+test('T6b', 'swipe with 50 and 60 ms event gaps (dropped frames): fast is a slap, slow is a pull', () => {
+  const h = fresh(); snap(h); const rows = [];
+  for (const [v, want] of [[8, 'slap'], [12, 'slap'], [2, 'pull']]) for (const hz of [20, 16.7]) for (let dir = 0; dir < 8; dir += 2) for (const phase of [0.3, 0.8]) {
+    back(h);
+    const r = stroke(h, { angle: dir * Math.PI / 4, speed: v, dist: 1.5, hz, phase }, { settle: false });
+    rows.push({ v, hz, dir, phase, want, kind: r.kind });
+  }
+  const wrong = rows.filter(r => r.kind !== r.want);
+  const out = { byCase: Object.fromEntries([8, 12, 2].map(v => [v, count(rows.filter(r => r.v === v), 'kind')])), wrong: wrong.length,
+    summary: `${rows.length} strokes at 20 and 16.7 Hz: 8 gs/s ${JSON.stringify(count(rows.filter(r => r.v === 8), 'kind'))}, 12 gs/s ${JSON.stringify(count(rows.filter(r => r.v === 12), 'kind'))}, 2 gs/s ${JSON.stringify(count(rows.filter(r => r.v === 2), 'kind'))}; wrong ${wrong.length}` };
+  if (wrong.length) failWith({ ...out, rows }, out.summary);
+  return out;
+});
 // ── T7: the comma gate does not depend on how many events fit a window ────────────────────────
 // Path A of gesture-comma.svg («через верх», запятая 98° → тава) as described in issue #91:
 // 1448×786, step 3, sheet at the target, 130 ms hold, an arc whose heading turns by 98° towards
