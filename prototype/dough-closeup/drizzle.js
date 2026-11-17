@@ -179,7 +179,10 @@ function _tableFromLocal(mx, my, face) {
   if (typeof dishTwist !== "undefined" && dishTwist && typeof rotAbout === "function")
     p = rotAbout(p, dishTwist.pivot, Math.cos(dishTwist.angle), Math.sin(dishTwist.angle));
   const pose = typeof dishPose === "function" ? dishPose() : { x: 0, y: 0, scale: 1 };
-  return { x: pose.x + p.x * pose.scale, y: pose.y + p.y * pose.scale };
+  // роти в руке (несут на стойку): стенд рисует его со сдвигом жеста — нить идёт вместе с ним
+  const g = typeof dishGesture !== "undefined" ? dishGesture : null;
+  const sl = g && g.slide ? { x: g.slide.x * pose.scale, y: g.slide.y * pose.scale - (g.carry ? 0.05 * pose.scale : 0) } : { x: 0, y: 0 };
+  return { x: pose.x + sl.x + p.x * pose.scale, y: pose.y + sl.y + p.y * pose.scale };
 }
 
 function _screen(mx, my, face) {

@@ -142,6 +142,25 @@ function shelfDisarm(){
   window.drizzleTint = null;
 }
 
+// Полосы рисует drizzle.js поверх готового кадра. В игре над роти бывает ещё кое-что: открытая тетрадь
+// (полосы под ней не рисуются) и гостья с псом, когда роти несут к ним (они рисуются поверх ещё раз).
+(function wrapDrizzleDraw(){
+  const orig = window.drizzleDraw;
+  if(typeof orig !== "function" || orig._shelf) return;
+  const w = function(g){
+    if(eveDev) return orig.apply(this, arguments);
+    if(typeof notebookOpen === "function" && (notebookOpen() || (typeof nbAnim !== "undefined" && nbAnim > 0))) return;
+    const strokes = window.drizzleStrokes || 0;
+    orig.apply(this, arguments);
+    if(!strokes) return;
+    const G = eveGeo();
+    if(typeof guestDrawOver === "function") guestDrawOver(g, 1, 1, G);
+    if(typeof nightDrawOver === "function") nightDrawOver(g, 1, 1, G);
+  };
+  w._shelf = true;
+  window.drizzleDraw = w;
+})();
+
 // ─────────────────────────── Сом на другой день (guest.js спрашивает под typeof)
 function shelfSomArrive(normal){ return SHF.som.early ? Math.min(normal, SHELF_ARRIVE_EARLY_S) : normal; }
 function shelfKnockWait(normal){ return SHF.som.early ? SHELF_KNOCK_EARLY_S : normal; }

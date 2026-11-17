@@ -375,6 +375,15 @@ test('S3', 'jam: touch the jar, lead a finger over the cut roti — a jam stripe
       assert.ok(h.J('_trails.flatMap(t=>t.pts).filter(p=>p&&!p.break).every(p=>dish.faces[p.face]&&dish.faces[p.face].kind==="dough"&&pointInFace(dish.faces[p.face].points,p.x,p.y))'), 'every point of the stripes still lies in its piece');
       assert.equal(h.run('drizzleStrokes'), 2, 'both stripes are still there');
     }
+    if (i === 1) {   // in the hand the stripe goes with the roti; under the open notebook it is not drawn
+      const at = () => h.J(`(()=>{const out=[],m=ctx.moveTo;ctx.moveTo=(x,y)=>out.push({x,y});try{drizzleDraw(ctx)}finally{ctx.moveTo=m}return out[0]||null})()`);
+      const a0 = at(); let p = grab(h); p = go(h, p, { x: p.x, y: p.y - 150 }); h.frames(2);
+      assert.equal(h.run('nightCarried()'), true); const a1 = at(), k = h.J('cv.height/cv.getBoundingClientRect().height');
+      assert.ok(a0.y - a1.y > 120 * k, `the stripe is drawn ${((a0.y - a1.y) / k).toFixed(0)} px higher with the roti carried 150 px up`);
+      p = go(h, p, { x: p.x + 30, y: p.y + 160 }); drop(h, p); assert.equal(h.run('dish.mode'), 'cut', 'put back on the table');
+      tap(h, h.n().item); h.frames(20); assert.equal(h.n().open, 1); assert.equal(at(), null, 'no stripe over the open notebook');
+      tap(h, h.n().leftPage); h.frames(20); assert.ok(at(), 'the notebook is closed: the stripe is back');
+    }
     serve(h); assert.equal(h.eve().rotiDone, i + 1); assert.equal(h.run('drizzleStrokes'), 0, 'the next roti is clean');
   }
   assert.deepEqual(levels, [19, 12.7, 6.3, 0], 'the level as drawn: full, two thirds, one third, empty');
