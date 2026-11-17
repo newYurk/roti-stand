@@ -359,11 +359,12 @@ test('T9', 'square: 4 slaps + 12 corner pulls, portrait and landscape', () => {
 //   superellipse) and cannot be met by a sheet that is ready by the stand's own rule (fill 0.92:
 //   82 % of the sectors ≥ 0.92 of the target, none below 0.85 → area from ~0.81). Builds 67–74
 //   only came near it because the slaps threw the sides to 1.2–1.3 of the target. The floor is
-//   AREA_MIN = 0.85; rows below the spec's 0.95 are counted in the summary ("below the spec floor").
+//   AREA_MIN = 0.88 (measured over 200 sequences: 0.89–0.991; 0.85 until the review of build 75 —
+//   too loose to guard anything); rows below the spec's 0.95 are counted in the summary ("below the spec floor").
 // · inverted cells from pulls are counted over INTACT cells only: a torn cell keeps a frozen shard
 //   node (breakCon pins it), the sheet moves around it and the cell's signed area flips — that is
 //   the hole, reported in `holes`, not a fold made by the pull (seed 7007: all 3 such cells torn).
-const AREA_MIN = 0.85, AREA_SPEC_MIN = 0.95;
+const AREA_MIN = 0.88, AREA_SPEC_MIN = 0.95;
 const invertedIntact = h => h.run(`quads.reduce((n,[a,b,c,d],i)=>n+((px[a]*(py[b]-py[d])+px[b]*(py[c]-py[a])+px[c]*(py[d]-py[b])+px[d]*(py[a]-py[c]))<0&&!quadCons[i].some(c=>c.broken)?1:0),0)`);
 test('T9b', `convergence: ${FULL ? 200 : 12} seeded random sequences of pulls and slaps until ready`, () => {
   const n = FULL ? 200 : 12, rows = [];
@@ -408,19 +409,26 @@ test('T9c', 'cap: 9 slaps, then 10 pulls on a finished side', () => {
 // them by slaps on the other sides (build 74: 1.22 in both cases). 1.05 = the pull's own
 // allowance past the dashes (PULL_OVER 1.03) plus 2 %. Slaps round the corners (the slap cap on the
 // diagonals is 0.92 of the target), so corner/side stays below the target's 1.233.
-test('T9i', 'slaps stop at the dashes: 14 moderate slaps; a pulled side under 6 slaps elsewhere', () => {
+// Review of build 75 (P2-1): at the force ceiling the rim goes further past the dashes than at 2.3
+// (the spread of the nodes set by yield, not the rest-length growth) — its own pass and bound, 1.07.
+// Review P2-2: slaps alone must not play the "ready" chord — the corners are the pulls' work.
+test('T9i', 'slaps stop at the dashes: 14 moderate slaps; 14 slaps at the force ceiling; a pulled side under 6 slaps elsewhere', () => {
   const sideRatio = (h, a) => h.run(`(()=>{rimProfile();let m=0;for(let b=0;b<RIM_BINS;b++){const th=(b+0.5)/RIM_BINS*2*Math.PI-Math.PI;let d=Math.abs(th-(${a}));if(d>Math.PI)d=2*Math.PI-d;if(d<Math.PI/6)m=Math.max(m,rimProf[b]/targetAt(th));}return m})()`);
   const a = fresh(), rows = [];
   for (let i = 0; i < 14 && a.run('phase') === 'TABLE'; i++) { midSlap(a, i); const s = shape(a); rows.push({ slap: i + 1, step: s.step, binMax: r3(s.binMax), binMin: r3(s.binMin), squareness: r3(s.squareness), area: r3(s.areaOverDisc) }); }
   a.tick(60); const sa = shape(a), worst = Math.max(...rows.map(r => r.binMax));
+  const c = fresh(); let worstC = 0, chordC = false;
+  for (let i = 0; i < 14 && c.run('phase') === 'TABLE'; i++) { strongSlap(c, i); const s = shape(c); worstC = Math.max(worstC, s.binMax); chordC = chordC || s.chord; }
+  c.tick(60); const sc = shape(c);
   // one side pulled first (pulls until the stand refuses), then slaps at the other three sides
   const b = fresh(); let pulls = 0; for (let i = 0; i < 12; i++) { if (pull(b, 0, 2.4, 1.5).kind !== 'pull') break; pulls++; }
   b.tick(60); const before = sideRatio(b, 0), track = [];
   for (let i = 0; i < 6 && b.run('phase') === 'TABLE'; i++) { midSlap(b, 1 + (i % 3)); track.push(r3(sideRatio(b, 0))); }
   b.tick(60); const after = sideRatio(b, 0), sb = shape(b);
-  const out = { slapsOnly: rows, slapsOnlyEnd: sa, pulledSide: { pulls, before, afterEachSlap: track, after, end: sb },
-    summary: `14 moderate slaps: rim/target max over the run ${r3(worst)}, at the end ${r3(sa.binMin)}…${r3(sa.binMax)}, corner/side ${r3(sa.squareness)}, area ${r3(sa.areaOverDisc)}, inverted ${sa.inverted}, holes ${sa.holes}; side pulled first (${pulls} pulls) ${r3(before)} → after 6 slaps at the other sides ${r3(after)} (max on the way ${Math.max(...track)}), sheet max ${r3(sb.binMax)}` };
+  const out = { slapsOnly: rows, slapsOnlyEnd: sa, ceilingSlaps: { worst: worstC, chord: chordC, end: sc }, pulledSide: { pulls, before, afterEachSlap: track, after, end: sb },
+    summary: `14 moderate slaps: rim/target max over the run ${r3(worst)}, at the end ${r3(sa.binMin)}…${r3(sa.binMax)}, corner/side ${r3(sa.squareness)}, area ${r3(sa.areaOverDisc)}, inverted ${sa.inverted}, holes ${sa.holes}, corners ticked ${sa.corners}, chord ${sa.chord}; 14 slaps at the force ceiling: rim/target max over the run ${r3(worstC)}, at the end ${r3(sc.binMin)}…${r3(sc.binMax)}, corners ticked ${sc.corners}, chord ${chordC || sc.chord}, holes ${sc.holes}; side pulled first (${pulls} pulls) ${r3(before)} → after 6 slaps at the other sides ${r3(after)} (max on the way ${Math.max(...track)}), sheet max ${r3(sb.binMax)}` };
   if (!(worst <= 1.05 && sa.binMin >= 0.85 && sa.squareness <= 1.18 && sa.inverted === 0 && sa.finite)) failWith(out, out.summary);
+  if (!(worstC <= 1.07 && sc.finite) || sa.chord || chordC || sc.chord) failWith(out, out.summary);
   if (!(Math.max(after, ...track) <= 1.05 && sb.binMax <= 1.05 && sb.finite)) failWith(out, out.summary);
   return out;
 });
