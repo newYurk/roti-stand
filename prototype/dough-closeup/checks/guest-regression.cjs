@@ -2,8 +2,11 @@
 'use strict';
 // v0 step 2 — Aunt Som, the first guest (docs/v0-step2-aunt-som.md): she comes while the first roti
 // fries, knocks on the tava, knocks again on every new frying step, takes the roti released over her
-// picture and answers honestly by the ladder she knocks by: the fried side reached «приготовленное»
-// (or the stand's crisp dishCrisp >= 5) — crunch, otherwise a nod; leaves
+// picture and answers honestly by the ladder she knocks by (the stand's fryStep) and by BOTH sides of
+// the roti (build 78, the stand's fryVerdict): both sides at least «приготовленное» — crunch; the same if
+// one is «приготовленное», the other at least «бледное» and the stand's crisp dishCrisp >= 5 (margarine
+// under the edge stands for frying the second side through); both sides raw — she shakes her head
+// and does not take it; a burnt side — a nod, no jam; otherwise a nod; leaves
 // a gift on the shelf, sits, takes the second roti, leaves; the third roti goes to the counter.
 // Pure Node/vm with the mocks of model-regression.cjs: stand.js, banana.js, egg.js, evening.js and
 // guest.js run in ONE context in the order of index.html. Every action of the player goes through
@@ -158,6 +161,19 @@ function until(h, cond, max = 60 * 400) { let n = 0; while (!h.run(cond) && n < 
 function onPan(h) { stretched(h); toPan(h); }
 function arrive(h) { until(h, 'GST.here'); until(h, 'guestPic()===2'); until(h, 'guestPic()===1'); }
 function finish(h, crisp) { envelope(h); toTable(h); cut(h); if (crisp !== undefined) h.run(`dishCrisp=${crisp}`); }
+// script shortcuts for the colour of the roti: every side set to c / the side on the steel and the side
+// seen from above set apart (dry is set to 1: colour without dryness does not exist in the model)
+const cookAll = (h, c) => h.run(`for(const t of dish.thermal) if(t){t.dry[0]=t.dry[1]=1;t.cook[0]=t.cook[1]=${c};}`);
+const cookSides = (h, bottom, top) => h.run(`for(let i=0;i<dish.thermal.length;i++){const t=dish.thermal[i];if(!t)continue;t.dry[0]=t.dry[1]=1;
+  for(let s=0;s<2;s++){ if(dish.contactWeights[i][s]) t.cook[s]=${bottom}; else if(dish.topWeights[i][s]) t.cook[s]=${top}; }}`);
+// a real flick from the edge of the envelope outward: v CSS px/s, 60 Hz, released on the move
+function flick(h, v = 700) {
+  const e = h.J(`(()=>{const b=dishBounds();return [__harness.dishToClient({x:b.right-0.02,y:(b.top+b.bottom)/2}),__harness.dishToClient({x:b.right+0.5,y:(b.top+b.bottom)/2})]})()`);
+  const a = e[0], dir = Math.sign(e[1].x - a.x) || 1, pts = [{ x: a.x, y: a.y, t: 0 }];
+  for (let i = 1; i <= 9; i++) pts.push({ x: a.x + dir * v * i / 60, y: a.y, t: 120 + i * 1000 / 60 });
+  pts.push({ ...pts.at(-1), t: pts.at(-1).t + 1 });
+  drive(h, pts, { settle: 50 });
+}
 const nextBall = h => { tap(h, h.spots().bowl); assert.equal(h.eve().ball, true, 'a ball is taken from the bowl'); };
 const FRESH = { v: 1, here: false, gone: false, knocked: false, answers: [], gifts: [], taken: 0 };
 
@@ -263,27 +279,57 @@ test('G3', 'released over her picture — hers; lower, on the counter band — t
   return { summary: `her zone x ${Math.round(G.zone.x0)}…${Math.round(G.zone.x1)}, y ≤ ${Math.round(G.zone.y1)}; counter band below to ${Math.round(h.spots().counterBottom)}` };
 });
 
-test('G4', 'the answer follows the frying ladder she knocks by: a bottom that reached «приготовленное» → crunch and jam, less → nod and bananas; the stand crisp >= 5 is a crunch too; 2.5 s; the gift survives a reload', () => {
+test('G4', 'the answer follows the frying ladder and BOTH sides: one side «приготовленное» and the other less → nod; flipped and both «приготовленное» → crunch and jam; flipped, the second side «бледное» and the stand crisp >= 5 → crunch too; raw → refused, no gift; burnt → nod, no jam; 2.5 s; the gift survives a reload', () => {
   const out = [];
-  // fry: 'short' — taken off right after her first knock; 'done' — fried on (fast preset of the stand panel) until
-  // her hint at «приготовленное». crisp: undefined — as fried (0 without margarine); a number — SET by script.
-  for (const [fry, crisp, answer, gift, pic] of [['short', undefined, 'nod', 'bananas', 3], ['done', undefined, 'crunch', 'jam', 4], ['short', 4.94, 'nod', 'bananas', 3], ['short', 4.95, 'crunch', 'jam', 4]]) {
-    const h = guest(); light(h); onPan(h); arrive(h);
-    if (fry === 'done') {
-      h.run('COOK_RATE=FRY_RATES[40]');   // script shortcut: the fast frying preset
+  // the verdict as a table (numbers are the mean colour of the side on the steel, of the side seen from above, the crisp)
+  for (const [b, t, crisp, v] of [[0.05, 0.05, 0, 'raw'], [0.05, 0.02, 9, 'raw'], [0.10, 0.02, 0, 'nod'], [0.30, 0.02, 0, 'nod'], [0.60, 0.07, 0, 'nod'],
+    [0.30, 0.08, 0, 'nod'], [0.09, 0.30, 0, 'nod'], [0.30, 0.28, 0, 'crunch'], [0.60, 0.60, 0, 'crunch'], [0.10, 0.10, 0, 'nod'], [0.10, 0.10, 9, 'nod'],
+    [0.30, 0.02, 9, 'nod'], [0.30, 0.08, 4.9, 'nod'], [0.30, 0.08, 5, 'crunch'], [0.09, 0.30, 5, 'crunch'],
+    [1.10, 0.30, 0, 'burnt'], [0.30, 1.20, 9, 'burnt']]) {
+    const h0 = out.h || (out.h = guest());
+    assert.equal(h0.run(`guestVerdict(${b},${t},${crisp})`), v, `bottom ${b}, top ${t}, crisp ${crisp} → ${v}`);
+  }
+  delete out.h;
+  assert.deepEqual(guest().J('[0.05,0.08,0.28,0.55,1.10].map(c=>[guestStepOf(c),fryStep(c),cookWord(c)])'),
+    [[0, 0, 'сырое'], [1, 1, 'бледное'], [2, 2, 'приготовленное'], [3, 3, 'зажаренное'], [4, 4, 'горелое']], 'her ladder is the ladder of the stand');
+  // fry: 'short' — taken off right after her first knock; 'done' — fried on until her hint at «приготовленное», never
+  // flipped; 'flip' — the same, then flipped by a real flick (700 px/s) and fried until her hint at «приготовленное»
+  // of the second side; 'flip-pale' — flipped and taken off when the second side is «бледное».
+  // crisp: undefined — as fried (0 without margarine); a number — SET by script.
+  for (const [fry, crisp, answer, gift, pic] of [['short', undefined, 'nod', 'bananas', 3], ['done', undefined, 'nod', 'bananas', 3], ['flip', undefined, 'crunch', 'jam', 4],
+    ['flip-pale', undefined, 'nod', 'bananas', 3], ['flip-pale', 4.94, 'nod', 'bananas', 3], ['flip-pale', 4.95, 'crunch', 'jam', 4], ['done', 9, 'nod', 'bananas', 3]]) {
+    // 'done' and 'flip' fold at once, as quick hands do (the envelope is ready ~7 s after the sheet lands): the top
+    // of the envelope is then raw. A sheet left open for ~12 s has its future top «бледное» already — measured in
+    // frying-regression.cjs F1.
+    const h = guest(); light(h); onPan(h);
+    if (fry !== 'short') envelope(h);
+    arrive(h);
+    let flipS = null;
+    if (fry !== 'short') {
       until(h, 'guestCookStep()>=2'); h.frames(2);
       assert.equal(h.grows().at(-1).event, 'hint'); assert.equal(h.grows().at(-1).bottom, 'приготовленное', 'her knock at this step is the «ready» sign');
       until(h, 'guestPic()===1');
     }
-    const best = h.run('gBest');
-    finish(h, crisp);
+    if (fry.startsWith('flip')) {
+      const t0 = h.run('dish.panTime'), n0 = h.gev().length;
+      flick(h, 700); assert.equal(h.run('dish.flips'), 1, 'a 700 px/s flick turns the finished envelope');
+      until(h, `guestCookStep()>=${fry === 'flip' ? 2 : 1}`); h.frames(2); flipS = h.run('dish.panTime') - t0;
+      assert.equal(h.grows().at(-1).event, 'hint', 'she knocks at the steps of the second side too');
+      assert.equal(h.gev().length, n0 + (fry === 'flip' ? 2 : 1));
+      until(h, 'guestPic()===1');
+    }
+    if (h.run('dish.folds') < 4) envelope(h);
+    const sides = h.J('guestSides()');
+    toTable(h); cut(h); if (crisp !== undefined) h.run(`dishCrisp=${crisp}`);
     serve(h, h.gs().som);
     const a = h.g().answers[0];
     assert.equal(a.answer, answer, `${fry}, crisp ${crisp} → ${answer}`); assert.equal(a.ballNo, 1);
     assert.equal(a.crisp, crisp === undefined ? 0 : +crisp.toFixed(1));
     assert.equal(a.crisp, h.run('gestures.filter(g=>g.kind==="serve").at(-1).crisp'), 'the same number as the stand card');
-    assert.ok(a.step >= best, 'the step of the answer is the highest of this roti');
-    if (fry === 'done') assert.ok(a.step >= 2); else assert.ok(a.step < 2, `a short fry stays below «приготовленное» (step ${a.step})`);
+    assert.equal(a.step, Math.max(h.run(`fryStep(${sides.bottom})`), h.run(`fryStep(${sides.top})`)), 'the step of the answer is the higher of the two sides');
+    if (fry === 'short') assert.ok(a.step >= 1 && h.run(`fryStep(${sides.top})`) < 2, `a short fry: the top is not «приготовленное» (steel side step ${a.step})`); else assert.ok(a.step >= 2);
+    if (fry === 'done') assert.equal(h.run(`fryStep(${sides.top})`), 0, 'never flipped: the top is raw — a nod, not a crunch, with any crisp');
+    assert.equal(h.run(`fryVerdict(${sides.bottom},${sides.top},${a.crisp})`), answer, 'the verdict of the stand is her answer');
     assert.deepEqual(h.g().gifts, [gift]); assert.equal(h.pic(), pic, `picture ${pic}`);
     assert.equal(h.gs().low, false, 'the view does not move while she answers');
     const left = h.run('gAnswer'); let n = 0; while (h.pic() === pic && n < 400) { h.frames(1); n++; }
@@ -298,15 +344,34 @@ test('G4', 'the answer follows the frying ladder she knocks by: a bottom that re
     assert.deepEqual(r.g().gifts, [gift], 'the gift is on the shelf after a reload'); assert.equal(r.g().here, true); assert.equal(r.gs().sat, true);
     assert.equal(r.eve().rotiDone, 1); assert.equal(r.g().taken, 1);
     r.tick(3, 1 / 60, true); assert.equal(r.run('loopErrs'), 0);
-    out.push(`${fry}/${a.crisp}/step ${a.step}→${answer}/${gift}`);
+    out.push(`${fry}/${a.crisp}/step ${a.step}→${answer}/${gift}` + (flipS !== null ? ` (${flipS.toFixed(1)} s after the flick)` : ''));
   }
-  // the step is the highest of the roti, not the one at the moment of serving: the fried side may be turned away
-  const m = guest(); light(m); onPan(m); arrive(m);
-  m.run('for(const t of dish.thermal) if(t){t.dry[0]=t.dry[1]=1;t.cook[0]=t.cook[1]=0.3;}'); m.frames(2);   // script: past «приготовленное»
-  m.run('for(const t of dish.thermal) if(t){t.cook[0]=t.cook[1]=0.05;}');                                   // script: the sides now read raw
-  assert.equal(m.run('gBest'), 2);
-  finish(m); serve(m, m.gs().som);
-  assert.equal(m.g().answers[0].answer, 'crunch', 'the highest step of the roti counts'); assert.equal(m.g().answers[0].step, 2);
+  // raw: both sides below «бледное» — she shakes her head, takes nothing, the roti stays on the table; a crisp does not help
+  for (const crisp of [0, 9]) {
+    const m = guest(); light(m); onPan(m); arrive(m); finish(m, crisp);
+    cookAll(m, 0.05);   // script: the sides read raw
+    const before = m.eve().rotiDone;
+    serve(m, m.gs().som);
+    assert.equal(m.g().taken, 0, 'a raw roti is not taken'); assert.deepEqual(m.g().answers, []); assert.deepEqual(m.g().gifts, [], 'no gift');
+    assert.equal(m.eve().rotiDone, before, 'the evening does not count it'); assert.equal(m.run('dish.mode'), 'cut', 'the roti is still on the table');
+    assert.equal(m.grows().at(-1).event, 'refuse'); assert.equal(m.run('gestures.filter(g=>g.kind==="pan").at(-1).outcome'), 'serve-refused');
+    assert.equal(m.pic(), 1, 'picture 1'); assert.equal(m.g().here, true, 'she still waits');
+    const turns = []; for (let i = 0; i < 80; i++) { turns.push(m.gs().head); m.frames(1); m.tick(1, 1 / 60, true); }
+    assert.ok(Math.max(...turns) > 0.5 && Math.min(...turns) < -0.5, 'her head turns both ways');
+    assert.equal(m.gs().head, 0, 'and comes to rest in 1.1 s'); assert.equal(m.run('loopErrs'), 0);
+    serve(m);   // the counter takes it without a word
+    assert.equal(m.eve().rotiDone, before + 1); assert.equal(m.g().taken, 0);
+  }
+  out.push('raw → refused, stays on the table, counter takes it');
+  // burnt: a nod, bananas, no jam — even with a crisp
+  {
+    const m = guest(); light(m); onPan(m); arrive(m); finish(m, 9);
+    cookSides(m, 1.2, 0.3);   // script: the side on the steel is burnt
+    serve(m, m.gs().som);
+    assert.equal(m.g().answers[0].answer, 'nod'); assert.equal(m.g().answers[0].burnt, true); assert.deepEqual(m.g().gifts, ['bananas'], 'burnt: no jam');
+    assert.equal(m.grows().at(-1).verdict, 'burnt'); assert.equal(m.pic(), 3);
+    out.push('burnt → nod/bananas');
+  }
   return { summary: out.join(' · ') + '; held 2.5 s; gift after reload' };
 });
 
@@ -319,6 +384,7 @@ test('G5', 'second ball — hers again, hints go on; after the second answer she
   until(h, 'guestCookStep()>=1'); h.frames(2);
   assert.equal(h.grows().at(-1).event, 'hint'); assert.equal(h.grows().at(-1).ballNo, 2, 'she knocks on the second ball too');
   assert.equal(h.gev().length, n0 + 1); until(h, 'guestPic()===1');
+  cookSides(h, 0.3, 0.1);   // script: the steel side «приготовленное», the top «бледное» — with the crisp below it is a crunch
   finish(h, 7.2); serve(h, h.gs().som);
   assert.deepEqual(h.g().answers.map(a => a.answer), ['nod', 'crunch'], 'the second answer is honest too');
   assert.deepEqual(h.g().gifts, ['bananas', 'jam']); assert.equal(h.pic(), 4); assert.equal(h.g().here, true);
@@ -401,7 +467,7 @@ test('G6', 'the lid pause freezes her: no knock under the lid, the knock comes a
   const r = reloadG(h);
   assert.deepEqual(r.g().answers.map(a => a.answer), ['crunch']); assert.deepEqual(r.g().gifts, ['jam']); assert.equal(r.g().here, true);
   // a reload in the middle of the second answer: both are kept, she is gone
-  sec(h, 3); nextBall(h); onPan(h); finish(h, 1); serve(h, h.gs().som);
+  sec(h, 3); nextBall(h); onPan(h); cookAll(h, 0.1); finish(h, 1); serve(h, h.gs().som);   // script: pale on both sides (a raw roti she would not take)
   const r2 = reloadG(h);
   assert.deepEqual(r2.g().answers.map(a => a.answer), ['crunch', 'nod']); assert.deepEqual(r2.g().gifts, ['jam', 'bananas']);
   assert.equal(r2.g().here, false); assert.equal(r2.g().gone, true);
@@ -445,7 +511,7 @@ test('G8', 'layout at 390×844 and 375×667: her picture is above the counter, b
     until(h, 'guestPic()===2'); h.tick(2, 1 / 60, true);
     until(h, 'guestPic()===1'); finish(h, 0); serve(h, h.gs().som); assert.equal(h.pic(), 3); h.tick(2, 1 / 60, true);
     sec(h, 3); assert.equal(h.gs().low, true, 'she sits'); h.tick(2, 1 / 60, true);
-    nextBall(h); onPan(h); finish(h, 8); serve(h, h.gs().som); assert.equal(h.pic(), 4); h.tick(2, 1 / 60, true);
+    nextBall(h); onPan(h); cookAll(h, 0.3); finish(h, 8); serve(h, h.gs().som); assert.equal(h.pic(), 4); h.tick(2, 1 / 60, true);   // script: «приготовленное» on both sides
     assert.equal(h.gs().low, false, 'the second answer is shown at full height, not behind the counter');
     assert.equal(h.run('loopErrs'), 0, 'all four pictures and the shelf draw without errors'); assert.deepEqual(h.errors, []);
     out.push(`${w}×${hh}: slot ${Math.round(G.slot.w)}×${Math.round(G.slot.h)} at ${Math.round(G.slot.x)},${Math.round(G.slot.y)}`);
