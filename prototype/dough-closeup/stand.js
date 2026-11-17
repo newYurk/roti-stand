@@ -11,7 +11,7 @@
 // до 400%+ и лист «рвётся» в середине от любого движения. Замер это обнаружил сразу.
 // Число узлов сохранено (1 060 после обрезки по кругу; прежняя оценка «~1150» была на глаз,
 // пересчитано 07.09.2026), однородность рёбер восстановлена.
-const BUILD = "2026-11-17 · гладкая кромка листа в рисунке (стол, рука, тава, конверт) · 74";
+const BUILD = "2026-11-17 · шлепок встаёт у пунктира, углы дотягивает тяга · 75";
 const GRID = 38;                   // 38x38, в круг попадает 1 060 узлов (посчитано, не оценка)
 let SUBSTEPS = 8;                  // T2: 8–10 подшагов, 1 итерация
 let DAMP = 0.986;
@@ -3457,12 +3457,16 @@ function step(dt){
   // «на таву» вручную ПЕРЕСОБИРАЛО лист — растянутый своими руками уходил в мусор,
   // и на таву летел свежий. Это спорило с «как порвал, так и пожаришь»: дырки,
   // заработанные при растяжке, до тавы не доезжали (замечание владельца 08.09.2026).
-  if(stepNo===2 && sheetReadyToPan()){
+  updateAction(dt);
+  // Сборка 75: готовность судится по листу в покое — после updateAction, только в RESTING и когда
+  // узлы встали (средняя скорость ниже READY_STILL·targetR в секунду; после шлепка это ~0,3 с,
+  // после тяги сразу). Раньше шаг менялся на лету шлепка: разлёт узлов на миг давал 0,92, лист
+  // оседал до 0,91 с самым коротким сектором 0,847 при норме 0,85 (Node 17.11, серии 7006 и 7008).
+  if(stepNo===2 && action.state==="RESTING" && sheetReadyToPan() && sheetSpeed() < READY_STILL*targetR){
     stepNo = 3; advancedAt = performance.now();
     try{ localStorage.setItem("dough_step","3"); }catch(e){}
     syncStepButtons();
   }
-  updateAction(dt);
   creep(dt);
   if(action.state === "SETTLING") relaxRim(dt);
   measureThickness();
@@ -3895,7 +3899,7 @@ const PULL_SIGMA = 1.0;           // рад: угловая ширина пол�
 const PULL_OUT_COS = Math.cos(65*Math.PI/180);   // конус тяги уже конуса шлепка: вбок край не тащим
 const PULL_SKEW = 25*Math.PI/180; // край идёт за пальцем не дальше этого угла от радиуса хвата
 const PULL_NEIGH = 1.25;          // тянутый участок — не дальше стольких радиусов соседей (±30°): ни звезды, ни креста
-const PULL_OVER = 0.03;           // тяга ведёт кромку до пунктира и на столько за него; дальше — только шлепки (SQ_OVER)
+const PULL_OVER = 0.03;           // тяга ведёт кромку до пунктира и на столько за него; шлепок встаёт у пунктира (SLAP_CAP)
 const PULL_FAST_BAND = 0.25;      // доля V_SLAP над порогом, за которую язык укорачивается до PULL_FAST_CAP
 const PULL_MIN = 0.25;            // gs: короче — тесто возвращается
 const PULL_CAP_GS = 1.4, PULL_CAP_R = 0.55;   // предел хода: в gs и в радиусах листа
@@ -4543,6 +4547,7 @@ function impactAction(){
   action.state = "IMPACT";
   action.pull = null;               // язык отпущен: узлы остаются где были, длины покоя не тронуты
   const c = centerOfSheet();
+  slapRoom(action.impulse, action.direction, c);   // доли роста по секторам: до пунктира и не дальше
   applySlapImpulse(action.impulse * gestureScale, action.direction, c);
   // Сработал стоп-сигнал audit §6.6: скоростной импульс в одиночку не растил площадь —
   // жёсткий решатель гасил растяжение раньше, чем пластичность его захватывала
@@ -4592,20 +4597,19 @@ function slapWeight(x, y, direction, center, sr, t){
 // ─── Мишень шага 2 — квадрат со скруглёнными углами (16.11.2026) ───
 // Владелица: роти квадратный; на кадрах бангкокских продавцов края тянут руками в почти квадрат
 // (docs/sources). Мишень — суперэллипс по осям стола: полусторона SQ_SIDE·targetR, угол на 1,11·targetR.
-// Рост режется ПО УГЛУ: сторона, дошедшая до пунктира, затухает к контуру × (1+SQ_OVER) и встаёт,
-// углы ещё растут — «тяни там, где до пунктира далеко». Раньше был один общий стоп по радиусу листа.
-// У углов запас меньше, чем у сторон (SQ_OVER_CORNER): с общим запасом 0,12 углы уходили на 1,24
-// мишени при сторонах 0,92 — готовый лист был «подушкой» с вогнутыми сторонами (ревью 17.11, P5).
-const SQ_N = 5, SQ_SIDE = 0.90, SQ_OVER = 0.12, SQ_OVER_CORNER = 0.05, RIM_BINS = 48;
+// Рост режется ПО УГЛУ: сторона, дошедшая до пунктира, встаёт, остальные ещё растут — «тяни там,
+// где до пунктира далеко». Раньше был один общий стоп по радиусу листа. Сборки 67–74 гасили рост
+// шлепка только ЗА пунктиром (до × 1,12 у сторон и × 1,05 у углов) — сборка 75 останавливает его
+// у пунктира заранее, см. «Шлепок уважает квадрат» ниже.
+const SQ_N = 5, SQ_SIDE = 0.90, RIM_BINS = 48;
 const READY_FILL = 0.92;          // sheetFill() с этого значения — лист готов к таве
+const READY_STILL = 0.02;         // …и лист при этом стоит: средняя скорость узлов, доля targetR в секунду
 const FILL_WORST = 0.85;          // готовый лист ни в одном секторе не короче этой доли мишени
 const CORNER_TICK = 0.93;         // кромка/мишень на диагонали: угол дотянут — нота и вспышка
 const CORNER_SIDE = 0.80;         // …и соседние стороны (±30° от диагонали) дотянуты хотя бы настолько
 let rimProf = new Float32Array(RIM_BINS), rimSrc = new Float32Array(RIM_BINS), fillBuf = new Float32Array(RIM_BINS);
 const pullS = new Float32Array(RIM_BINS), pullS2 = new Float32Array(RIM_BINS);   // доли хода тяги по секторам (pullTo)
 function targetAt(th){ const c=Math.abs(Math.cos(th)), s=Math.abs(Math.sin(th)); return targetR*SQ_SIDE/Math.pow(Math.pow(c,SQ_N)+Math.pow(s,SQ_N), 1/SQ_N); }
-// Запас за пунктиром по направлению: SQ_OVER на серединах сторон, SQ_OVER_CORNER на диагоналях.
-function sqOver(th){ const c = Math.cos(2*th); return SQ_OVER_CORNER + (SQ_OVER - SQ_OVER_CORNER)*c*c; }
 // Центр мишени — место на столе, а не центр масс листа: пунктир не ездит за тестом и не прыгает
 // на отпускании (ревью 17.11, P12: 0,06 gs после двух тяг). Ставится по центру листа на входе в
 // шаг 2 и заново после любого переноса листа целиком (ресайз, возврат из руки на стол, «заново»).
@@ -4666,36 +4670,101 @@ function checkCorners(){
   }
   if(!left && !readyBlinkAt && sheetFill() >= READY_FILL){ audioReady(); readyBlinkAt = performance.now(); }
 }
-// Доля роста в точке (x, y): 1 до пунктира, затухает к контуру × (1+over) и там 0.
-// Профиль кромки и угол — от центра мишени (rimProfile() уже посчитан вызывающим).
-function growEase(x, y){
-  const tc = targetC(), th = Math.atan2(y - tc.y, x - tc.x);
-  const over = rimProf[rimBin(th)]/targetAt(th);
-  return over > 1.0 ? Math.max(0, 1 - (over-1.0)/sqOver(th)) : 1;
-}
-function plasticStretch(I, direction, center){
+// ─── Шлепок уважает квадрат (сборка 75, 17.11.2026) ───
+// Сборки 67–74 гасили рост шлепка только ЗА пунктиром: сторона на 0,95 мишени получала полный
+// шлепок и за один удар уходила на 1,25 (Node, серия 7005: 1,04 → 1,26; случайные серии T9b —
+// кромка 1,19–1,31 мишени). Теперь шлепок до удара считает, куда уедет кромка в каждом из
+// 48 секторов, и берёт от сектора не больше, чем осталось до пунктира:
+//   кромка′ ≈ кромка · (1 + SLAP_REACH · SLAP_GROW · I · w̄),  w̄ — средний вес шлепка вдоль луча
+//   сектора (узлы взвешены 1/r: среднее по лучу, а не по площади);
+//   доля сектора slapS = запас до пунктира × slapCap / прогноз, 0…1, сглажена по соседям.
+// Пока запаса хватает всем секторам (slapS = 1 везде), шлепок прежний, бит в бит: длины покоя
+// растут одинаково во все стороны по весу slapWeight.
+// Как только хоть один сектор упёрся, одной доли на связь мало: соседние секторы, растущие во все
+// стороны, раздвигают и поднимают упёршийся (замер Node: сторона 1,02 → 1,07 за шлепок при своей
+// доле 0). Поэтому общая часть (наименьшая доля slapMin) растит лист по-старому, а остаток даётся
+// полем смещений, как у тяги: каждый узел едет наружу ПО СВОЕМУ ЛУЧУ, кромка сектора — на
+// slapG = (slapS − slapMin) · прогноз, внутри луча — по профилю 0,28 + 0,24·(r/кромка)², и связи
+// принимают длину сдвинутой сетки. Такое поле ничего не раздвигает вбок: упёршийся сектор стоит.
+// Той же долей гаснет рывок скоростей (до SLAP_KICK_FLOOR): его разлёт закрепляет текучесть.
+// Углы: на диагоналях шлепок ведёт кромку только до пунктира × SLAP_CAP_CORNER — лист от одних
+// шлепков выходит скруглённым квадратом, острый угол дотягивает тяга. Провал узкий (sin¹⁶ 2θ):
+// ниже READY_FILL остаются 8 секторов из 48, и лист от одних шлепков готов за те же 7 шлепков.
+// SLAP_REACH 1,3 — поправка прогноза: при росте во все стороны кромка уходит дальше среднего по
+// лучу (первый шлепок: прогноз +29 %, по замеру Node +37 %).
+let SLAP_CAP = 1.0, SLAP_CAP_CORNER = 0.92, SLAP_REACH = 1.3, SLAP_KICK_FLOOR = 0.25;
+const slapS = new Float32Array(RIM_BINS), slapG = new Float32Array(RIM_BINS), slapW = new Float32Array(RIM_BINS), slapD = new Float32Array(RIM_BINS);
+let slapMin = 1, slapQx = null, slapQy = null;
+function slapCap(th){ const q = Math.sin(2*th), q2 = q*q, q4 = q2*q2, q8 = q4*q4; return SLAP_CAP + (SLAP_CAP_CORNER - SLAP_CAP)*q8*q8; }
+function slapRoom(I, direction, center){
   rimProfile();
-  const sr = Math.max(1, sheetRadius());
+  const tc = targetC(), sr = Math.max(1, sheetRadius()), rMin = sr*0.08;
+  slapW.fill(0); slapD.fill(0);
+  for(let i=0;i<N;i++){
+    if(conDeg && conDeg[i] <= 0) continue;
+    const dx = px[i]-tc.x, dy = py[i]-tc.y, r = Math.hypot(dx, dy);
+    if(r < rMin) continue;
+    const b = rimBin(Math.atan2(dy, dx)), k = 1/r;
+    slapW[b] += slapWeight(px[i], py[i], direction, center, sr, thick[i]||1) * k; slapD[b] += k;
+  }
+  for(let b=0;b<RIM_BINS;b++){
+    const th = (b+0.5)/RIM_BINS*2*Math.PI - Math.PI;
+    const grow = SLAP_REACH * SLAP_GROW * I * (slapD[b] > 0 ? slapW[b]/slapD[b] : 0);
+    const room = targetAt(th)*slapCap(th)/Math.max(1e-6, rimProf[b]) - 1;
+    slapS[b] = room <= 0 ? 0 : grow > room ? room/grow : 1;
+    slapG[b] = grow;
+  }
+  // гладко по углу и не больше себя: сосед дотянутой стороны не тащит её дальше
+  const s = slapD; s.set(slapS); slapMin = 1;
+  for(let b=0;b<RIM_BINS;b++){
+    const l = s[(b-1+RIM_BINS)%RIM_BINS], r = s[(b+1)%RIM_BINS];
+    slapS[b] = Math.min(s[b], (l + 2*s[b] + r)*0.25);
+    if(slapS[b] < slapMin) slapMin = slapS[b];
+  }
+  for(let b=0;b<RIM_BINS;b++) slapG[b] *= slapS[b] - slapMin;   // ход кромки сверх общей доли, в долях её радиуса
+}
+// Величина сектора в точке: линейно между серединами секторов (slapRoom() уже посчитан).
+function slapAt(arr, th){
+  const f = (th + Math.PI)/(2*Math.PI)*RIM_BINS - 0.5, b0 = Math.floor(f), t = f - b0;
+  return arr[((b0%RIM_BINS)+RIM_BINS)%RIM_BINS]*(1-t) + arr[(((b0+1)%RIM_BINS)+RIM_BINS)%RIM_BINS]*t;
+}
+function slapEase(x, y){ const tc = targetC(); return slapAt(slapS, Math.atan2(y - tc.y, x - tc.x)); }
+function plasticStretch(I, direction, center){
+  const sr = Math.max(1, sheetRadius()), limited = slapMin < 1;
+  if(limited){
+    // поле смещений «сверх общей доли»: узел едет по своему лучу, кромка — на slapG своего сектора
+    const tc = targetC();
+    if(!slapQx || slapQx.length !== N){ slapQx = new Float32Array(N); slapQy = new Float32Array(N); }
+    for(let i=0;i<N;i++){
+      const dx = px[i]-tc.x, dy = py[i]-tc.y, r = Math.hypot(dx, dy);
+      if(r < 1e-6){ slapQx[i] = px[i]; slapQy[i] = py[i]; continue; }
+      const th = Math.atan2(dy, dx), rim = slapAt(rimProf, th), e = rim > 0 ? Math.min(1.15, r/rim) : 1;
+      const u = slapAt(slapG, th) * (0.28 + 0.24*e*e)/0.52;       // u_r/r для профиля роста 0,28 + 0,72·e²
+      slapQx[i] = px[i] + dx*u; slapQy[i] = py[i] + dy*u;
+    }
+  }
   for(let k2=0;k2<cons.length;k2++){
     const c2 = cons[k2]; if(c2.broken) continue;
     const mx = (px[c2.a]+px[c2.b])*0.5, my = (py[c2.a]+py[c2.b])*0.5;
     const t = ((thick[c2.a]||1)+(thick[c2.b]||1))*0.5;
     const w = slapWeight(mx, my, direction, center, sr, t);
-    c2.rest *= 1 + SLAP_GROW * I * w * growEase(mx, my);
+    c2.rest *= 1 + SLAP_GROW * I * w * slapMin;
+    if(limited){
+      const d0 = Math.hypot(px[c2.b]-px[c2.a], py[c2.b]-py[c2.a]);
+      if(d0 > 1e-6) c2.rest *= Math.hypot(slapQx[c2.b]-slapQx[c2.a], slapQy[c2.b]-slapQy[c2.a])/d0;
+    }
   }
 }
 
-// Рывок скоростей тоже гаснет у дотянутой стороны (до SLAP_KICK_FLOOR): иначе разлёт узлов
+// Рывок скоростей гаснет той же долей сектора (до SLAP_KICK_FLOOR): иначе разлёт узлов
 // закреплялся текучестью, и сторона уходила за пунктир на 15 % при любом предохранителе длин
 // покоя (Node 17.11: девять сильных шлепков — сторона 1,16 мишени, площадь 1,63 круга).
-const SLAP_KICK_FLOOR = 0.25;
 function applySlapImpulse(I, direction, center){
   const sr = Math.max(1, sheetRadius());
-  rimProfile();
   for(let i=0;i<N;i++){
     const loose = conDeg ? Math.min(1, conDeg[i]/3) : 1;
     const ddx = px[i]-center.x, ddy = py[i]-center.y;
-    const kick = SLAP_KICK_FLOOR + (1-SLAP_KICK_FLOOR) * growEase(px[i], py[i]);
+    const kick = SLAP_KICK_FLOOR + (1-SLAP_KICK_FLOOR) * slapEase(px[i], py[i]);
     const w = slapWeight(px[i], py[i], direction, center, sr, thick[i]||1) * loose * kick;
     const dl = Math.hypot(ddx,ddy) || 1;
     vx[i] += (ddx/dl*0.78 + direction.x*0.22) * I * w;
