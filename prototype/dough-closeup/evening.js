@@ -18,6 +18,7 @@
    заново не стирает прошлые вечера. Экран не гаснет, пока лампа горит (eveWakeSync, внизу файла). */
 
 const EVE_KEY = "roti_evening", EVE_VERSION = 1, EVE_BALLS = 3;
+const EVE_WAKE_IDLE_MS = 5*60*1000; // экран держится включённым столько после последнего касания или события вечера
 const EVE_IDLE_HINT_MS = 6000;      // подсказка «шарик в миске» / «накрой крышкой» — только если она стоит
 const EVE_LID_ON = 0.6;             // крышка легла, если её середина ближе этой доли радиуса тавы к центру
 const EVE_SKY = ["#5b4a55", "#40384a", "#292838", "#14141d"];   // сумерки → вечер → поздний вечер → ночь
@@ -202,6 +203,7 @@ function eveningSpots(){
 function eveningDown(id, cx, cy, t){
   if(eveDev) return false;
   eveIdleAt = performance.now();                           // трогает экран — значит, не стоит: подсказка простоя ждёт
+  if(!eveWake) eveWakeSync();                              // вернулась после долгого простоя — экран снова держится
   const sheet = eveEl("radioSheet");
   if(sheet && !sheet.hidden) return true;
   if(typeof notebookDown === "function" && notebookDown(id, cx, cy)) return true;   // тетрадь: открыта — забирает всё; закрыта — своё место рядом с радио
@@ -309,6 +311,7 @@ function eveningUpdate(dt){
   if(eveStageNow() !== eveStage) eveSave();                // шаг сменился — сохранить
   if(typeof guestUpdate === "function") guestUpdate(dt);
   if(typeof notebookUpdate === "function") notebookUpdate(dt);
+  if(eveWake && !eveWakeWanted()) eveWakeSync();           // телефон оставлен на 5 минут — экран отпускается
 }
 function eveningDraw(g, sx, sy, layer){
   if(eveDev) return;
@@ -368,9 +371,11 @@ function eveningDraw(g, sx, sy, layer){
 // ─────────────────────────── экран не гаснет (Screen Wake Lock)
 // Жарка — минуты без касаний, телефон заблокировался бы раньше. Пока лампа горит и страница видна,
 // стенд держит экран включённым; свернули — система отпускает сама, вернулись — просим снова;
-// вечер окончен — отпускаем. Где navigator.wakeLock нет или в нём отказано — ничего не происходит.
+// вечер окончен — отпускаем. Оставила телефон с зажжённой лампой — через 5 минут без касаний отпускаем
+// тоже (жарка одного роти короче); первое касание просит снова.
+// Где navigator.wakeLock нет или в нём отказано — ничего не происходит.
 let eveWake = null, eveWakeAsk = false;
-function eveWakeWanted(){ return !eveDev && EVE.lamp && !EVE.over && !document.hidden; }
+function eveWakeWanted(){ return !eveDev && EVE.lamp && !EVE.over && !document.hidden && performance.now() - eveIdleAt < EVE_WAKE_IDLE_MS; }
 function eveWakeSync(){
   if(!eveWakeWanted()){
     if(eveWake){ const w = eveWake; eveWake = null; try{ w.release(); }catch(e){} }

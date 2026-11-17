@@ -16,6 +16,7 @@ const NB_EVENINGS = 7, NB_PER_EVENING = 3;             // хранится 7 в�
 const NB_SHOT_PX = 240, NB_SHOT_BYTES = 30*1024;       // снимок: сторона в пикселях и предел веса JPEG
 const NB_SHOT_Q = [0.72, 0.58, 0.44, 0.30];            // качество JPEG по убыванию, пока не уложится в предел
 const NB_SLIDE_S = 0.18, NB_PEEK_S = 1.2, NB_SWIPE = 40;   // выезд листа, показ «сама», свайп (CSS px)
+const NB_QUIET_S = 2.5;                                // показ «сама» — не раньше, чем через столько после подачи или загрузки
 const NB_PAPER = "#e8dcc0", NB_INK = "#3a2c1e", NB_COVER = "#b5563f", NB_BRASS = "#d9a441";
 
 function nbFresh(){ return { v:NB_V, cur:false, peeked:false, evenings:[] }; }
@@ -24,6 +25,7 @@ let nbEvents = [];                   // журнал тетради: храни�
 // Живёт только в кадре: открыта ли (0 нет, 1 — открыла рука, 2 — приоткрылась сама), выезд листа 0…1,
 // остаток показа, страница, палец на листе, пальцы на экране (сама она не открывается под пальцем).
 let nbMode = 0, nbAnim = 0, nbPeek = 0, nbPage = 0, nbDrag = null, nbOpenAt = 0;
+let nbQuiet = NB_QUIET_S;            // сколько ещё ждать до показа «сама»: заводится подачей и загрузкой страницы
 const nbTouches = new Set();
 const nbPics = new Map();            // data URL → Image
 
@@ -46,9 +48,12 @@ function nbLoad(){
   NB = { v:NB_V, cur:!!s.cur && evenings.length > 0, peeked:!!s.peeked, evenings };
   if(Array.isArray(s.events)) nbEvents = s.events.slice(-60);
 }
-function nbLog(event, extra){
+// quiet — листание: строка остаётся в журнале тетради (уйдёт в сохранение со следующим событием), но
+// не переписывает всё сохранение со снимками на каждый свайп и не вытесняет замеры из общего журнала.
+function nbLog(event, extra, quiet){
   const row = { event, ...(extra || {}), ts:new Date().toISOString() };
   nbEvents.push(row); if(nbEvents.length > 60) nbEvents.shift();
+  if(quiet) return;
   gestures.push({ ...measurementContext(), kind:"notebook", ...row });
   if(gestures.length > 200) gestures.shift();
   try{ localStorage.setItem("dough_gestures", JSON.stringify(gestures)); }catch(e){}
@@ -58,8 +63,26 @@ function nbLog(event, extra){
 function nbPages(){ return NB.cur ? NB.evenings : NB.evenings.concat([{ snaps:[] }]); }
 
 // ─────────────────────────── снимок поданного роти
-// Вид сверху, без наклона стола: те же грани и тот же цвет прожарки, что на стенде (drawDishFaces),
-// в отдельный маленький холст. Зовётся из eveningServed() ДО сброса стенда — роти ещё цел.
+// Вид сверху, без наклона стола: те же грани, что на стенде (drawDishFaces), в отдельный маленький
+// холст. Зовётся из eveningServed() ДО сброса стенда — роти ещё цел.
+// Цвет — жареной стороны: сверху у конверта клапаны, а жарится низ, и по виду сверху прожарку было
+// не различить (замер сборки 76). На время снимка каждому участку листа ставится большая из его двух
+// сторон, но не меньше средней прожарки стороны, лежавшей на таве; после снимка всё возвращается.
+function nbFriedSide(draw){
+  const T = dish.thermal, keep = [];
+  if(!Array.isArray(T)) return draw();
+  let m = 0;
+  try{ m = Math.max(dishSideMean("cook", "contactWeights"), dishSideMean("cook", "topWeights")) || 0; }catch(e){ m = 0; }
+  try{
+    for(const t of T){
+      if(!t || !Array.isArray(t.cook)) continue;
+      keep.push([t, t.cook]);
+      const v = Math.max(+t.cook[0] || 0, +t.cook[1] || 0, m);
+      t.cook = [v, v];
+    }
+    return draw();
+  } finally { for(const [t, c] of keep) t.cook = c; }
+}
 function nbShot(){
   if(typeof dish === "undefined" || !dish || !dish.faces || !dish.faces.length) return null;
   const c = document.createElement("canvas"); c.width = c.height = NB_SHOT_PX;
@@ -68,7 +91,7 @@ function nbShot(){
   const cx = (b.left + b.right)/2, cy = (b.top + b.bottom)/2, zk = k/ROTI_R_MM*0.6;
   g.fillStyle = "#3a2c1e"; g.fillRect(0, 0, NB_SHOT_PX, NB_SHOT_PX);
   const screen = p => ({ x:NB_SHOT_PX/2 + (p.x - cx)*k, y:NB_SHOT_PX*0.52 + (p.y - cy)*k });
-  drawDishFaces(g, dish.faces, screen, stackHeights(dish.faces), zk, true, pieceShiftLive(dish.faces));
+  nbFriedSide(() => drawDishFaces(g, dish.faces, screen, stackHeights(dish.faces), zk, true, pieceShiftLive(dish.faces)));
   if(typeof c.toDataURL !== "function") return null;
   for(const q of NB_SHOT_Q){
     const url = c.toDataURL("image/jpeg", q);
@@ -88,6 +111,7 @@ function notebookSnap(to){
   if(to === "som" && typeof GST !== "undefined" && GST.answers.length) step = Math.max(step, GST.answers[GST.answers.length - 1].step || 0);
   ev.snaps.push({ to:to === "som" ? "som" : "counter", img, crisp:+(+dishCrisp || 0).toFixed(1), step, ts:new Date().toISOString() });
   while(ev.snaps.length > NB_PER_EVENING) ev.snaps.shift();
+  nbQuiet = NB_QUIET_S;
   nbLog("snap", { to:to === "som" ? "som" : "counter", kb:nbKb(img), n:ev.snaps.length });
 }
 // Снимки этого вечера (для ночного кадра, шаг 4).
@@ -97,7 +121,7 @@ function notebookEvening(){ return NB.cur ? NB.evenings[NB.evenings.length - 1].
 function notebookNewEvening(from, wasOver){
   if(NB.cur && !wasOver && from === "radio") NB.evenings.pop();
   NB.cur = false; NB.peeked = false;
-  nbMode = 0; nbAnim = 0; nbPeek = 0; nbDrag = null; nbPage = nbPages().length - 1;
+  nbMode = 0; nbAnim = 0; nbPeek = 0; nbDrag = null; nbPage = nbPages().length - 1; nbQuiet = NB_QUIET_S;
 }
 
 // ─────────────────────────── открыть и закрыть
@@ -118,15 +142,21 @@ function nbClose(how){
 function nbTurn(d){
   const n = nbPages().length, to = Math.max(0, Math.min(n - 1, nbPage + d));
   if(to === nbPage) return false;
-  nbPage = to; nbLog("page", { page:to, of:n });
+  nbPage = to; nbLog("page", { page:to, of:n }, true);
   return true;
 }
 function notebookUpdate(dt){
   if(eveDev){ if(nbMode){ nbMode = 0; nbDrag = null; } nbAnim = 0; return; }
   nbAnim = Math.max(0, Math.min(1, nbAnim + (nbMode ? dt : -dt)/NB_SLIDE_S));
   if(nbMode === 2){ nbPeek -= dt; if(nbPeek <= 0) nbClose("auto"); return; }
-  // Сама — один раз за вечер: Сом ответила в первый раз, ответ отстоял, на экране нет пальцев.
-  if(!nbMode && !NB.peeked && NB.cur && EVE.lamp && !EVE.lid && !EVE.over && nbTouches.size === 0
+  // Сама — один раз за вечер: Сом ответила в первый раз, ответ отстоял, прошло 2,5 с после подачи (или
+  // после загрузки страницы: ответ Сом перезагрузку не переживает, и без этой паузы лист выезжал на первом
+  // кадре), на экране нет пальцев, меню радио закрыто, стол свободен. Взяла следующий шарик раньше —
+  // показ ждёт следующей подачи, а не выезжает на тесто посреди работы.
+  if(nbMode || NB.peeked || !NB.cur) return;
+  if(nbQuiet > 0){ nbQuiet -= dt; return; }
+  const radio = eveEl("radioSheet");
+  if(EVE.lamp && !EVE.lid && !EVE.over && !EVE.ball && nbTouches.size === 0 && (!radio || radio.hidden)
     && typeof GST !== "undefined" && GST.answers.length >= 1 && gAnswer <= 0) nbOpen("peek");
 }
 
@@ -176,7 +206,11 @@ function notebookDown(id, cx, cy){
     }
     return true;
   }
+  // Второй палец посреди жеста тетрадь не открывает: крышка в руке, тесто или роти под пальцем —
+  // иначе лист съедал движение первого пальца, а несомый роти подавался из-под открытой тетради.
   if(typeof eveDrag !== "undefined" && eveDrag) return false;
+  if(nbTouches.size > 1 || (typeof dishGesture !== "undefined" && dishGesture)
+    || (typeof action !== "undefined" && action && action.state !== "RESTING")) return false;
   if(nbItemHit(G, p)){ nbOpen("touch"); return true; }
   return false;
 }
