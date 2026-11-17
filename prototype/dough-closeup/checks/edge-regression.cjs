@@ -30,7 +30,7 @@ const assert = require('node:assert/strict');
 const quiet = console.log; console.log = () => {};
 const H = require('./model-regression.cjs');
 console.log = quiet;
-const { boot, press, pull } = H;
+const { boot, press, pull, slap } = H;
 const args = process.argv.slice(3);
 const only = (() => { const i = args.indexOf('--only'); return i >= 0 && args[i + 1] ? new Set(args[i + 1].split(',')) : null; })();
 const results = [];
@@ -179,11 +179,11 @@ function sample(w = 390, hh = 844) {
 const line = (name, b, a) => `${name}: len/fit ${b.lenOverFit}→${a.lenOverFit}, turns ${b.turns}→${a.turns}, sharp ${b.sharp}→${a.sharp}, dev ${b.devPctCell}→${a.devPctCell} % of a cell`;
 // Limits. A closed unfolded outline must read as one smooth loop; a folded one keeps the kinks
 // where a rim crosses a crease, so there the staircase (sharp turns, excess length) must go.
-function judgeLoop(name, b, a, bad, stair = false) {
+function judgeLoop(name, b, a, bad, stair = false, corner = 0) {
   if (a.chains !== 1 || a.closed !== 1) bad.push(`${name}: the outline is not one closed loop (${a.chains} chains)`);
   if (!(a.lenOverFit <= 1.02)) bad.push(`${name}: len/fit ${a.lenOverFit} > 1.02`);
   if (!(a.turns <= 1.6)) bad.push(`${name}: ${a.turns} turns > 1.6`);
-  if (a.sharp !== 0) bad.push(`${name}: ${a.sharp} sharp vertices`);
+  if (a.sharp > corner || (a.sharp && !(a.maxTurnDeg <= 45))) bad.push(`${name}: ${a.sharp} sharp vertices, the sharpest ${a.maxTurnDeg}°`);
   if (!(a.turns <= b.turns && a.lenOverFit <= b.lenOverFit && a.devPctCell <= b.devPctCell)) bad.push(`${name}: the smoothed outline is not smoother than the physics rim`);
   if (stair && !(b.lenOverFit >= 1.08 && b.sharp >= 40)) bad.push(`${name}: the «before» outline is not a staircase (len/fit ${b.lenOverFit}, sharp ${b.sharp}) — the check measures nothing`);
 }
@@ -207,7 +207,10 @@ for (const [id, w, hh] of [['G1', 390, 844], ['G2', 844, 390]]) {
     };
     each('table', () => {}, () => { const p = drawnQuads(h); assert.equal(p.length, quads, 'every cell is drawn once'); return p; }, () => cell, judgeLoop);
     each('in hand', () => h.run('{const c=centerOfSheet();xf={cx:c.x,cy:c.y,ox:targetR*0.5,oy:-targetR*0.2,th:0.6,lift:targetR*0.3};}'),
-      () => { const p = drawnQuads(h); assert.equal(p.length, quads, 'every cell is drawn once in the hand'); return p; }, () => cell, judgeLoop);
+      () => { const p = drawnQuads(h); assert.equal(p.length, quads, 'every cell is drawn once in the hand'); return p; }, () => cell,
+      // The squeezed cells at the corner tips of the stretched sheet are no longer drawn collapsed (G6), so the
+      // corner keeps its real turn; in the turned, lifted view two of the tips turn a little over 30° (as in physics).
+      (name, b, a, bad) => judgeLoop(name, b, a, bad, false, 2));
     const dishCell = () => h.run('targetR') * cell / h.run('targetR') * 1;   // faces keep the cell size: the tava pose scale is targetR
     each('tava', () => toPan(h), () => dishPolys(h), dishCell, judgeLoop);
     each('rect', () => { toPan(h); assert.ok(foldSide(h, 0) && foldSide(h, 1), 'two opposite folds'); }, () => dishPolys(h), dishCell, judgeFolded);
@@ -272,6 +275,43 @@ test('G4', 'a torn rim is not smoothed over: nodes of a torn rim cell and their 
     let moved=0;for(let i=0;i<n;i++)if(at(i)>0)moved++;return {n,raw:[9,10,11,12].map(at),far:at(40)>0||at(41)>0||at(42)>0,moved};})())`));
   const out = { sameAfterHole, ...st, summary: `inner hole: rim unchanged ${sameAfterHole}; torn rim cell: its nodes and the next ones drawn ${st.raw.map(r3).join('/')} off physics (0 = as in physics), ${st.moved}/${st.n} rim nodes still smoothed` };
   if (!sameAfterHole || st.raw[1] !== 0 || st.raw[2] !== 0 || st.raw[0] !== 0 || st.raw[3] !== 0 || !st.far) failWith(out, out.summary);
+  return out;
+});
+
+// How the drawn sheet differs from the physics sheet, cell by cell: rim shift in mean cell sides,
+// cells drawn inside out (area sign flipped) or collapsed (under 15 % of the physics area), the
+// smallest drawn/physics area ratio, and the turning of the drawn rim loop.
+const CELLS = `JSON.stringify((()=>{rimDraw();let s=0,n=0;for(const [a,b,d,e] of quads)for(const [u,v] of [[a,b],[b,d],[d,e],[e,a]]){s+=Math.hypot(px[u]-px[v],py[u]-py[v]);n++;}const cell=s/n;
+  let mx=0,sm=0;for(const i of rimLoop){const d=Math.hypot(dX[i]-px[i],dY[i]-py[i]);sm+=d;if(d>mx)mx=d;}
+  let flipped=0,collapsed=0,minRatio=9;for(let q=0;q<quads.length;q++){const ids=quads[q];const ar=(X,Y)=>{let a=0;for(let k=0;k<4;k++){const i=ids[k],j=ids[(k+1)%4];a+=X[i]*Y[j]-X[j]*Y[i];}return a/2;};
+    const ap=ar(px,py),ad=ar(dX,dY);if(ap===0)continue;if(ap*ad<0)flipped++;else if(Math.abs(ad)<0.15*Math.abs(ap))collapsed++;minRatio=Math.min(minRatio,ad/ap);}
+  let sharp=0,turn=0;const L=rimLoop,m=L.length;for(let i=0;i<m;i++){const a=L[(i+m-1)%m],b=L[i],c=L[(i+1)%m];const ux=dX[b]-dX[a],uy=dY[b]-dY[a],vx=dX[c]-dX[b],vy=dY[c]-dY[b];
+    const t=Math.abs(Math.atan2(ux*vy-uy*vx,ux*vx+uy*vy));turn+=t;if(t>Math.PI/6)sharp++;}
+  return {shiftMax:mx/cell,shiftMean:sm/rimLoop.length/cell,flipped,collapsed,minRatio,turns:turn/2/Math.PI,sharp,broken:cons.filter(c=>c.broken).length};})())`;
+test('G6', 'the smoothing never collapses or flips a cell and never draws a rim node far from physics: flattened, 16 pulls, then 4 slaps (squeezed corner cells), with and without the limits', () => {
+  const h = boot(TUNE, 390, 844); press(h);
+  const rows = {}, bad = [];
+  const own = JSON.parse(h.run('JSON.stringify({cap:RIM_CAP,area:RIM_AREA})'));
+  const rec = name => {
+    h.run('RIM_CAP=0;RIM_AREA=0'); const off = JSON.parse(h.run(CELLS));
+    h.run(`RIM_CAP=${own.cap};RIM_AREA=${own.area}`); const on = JSON.parse(h.run(CELLS));
+    h.run('RIM_K_OWN=RIM_K;RIM_K=0'); const phys = JSON.parse(h.run(CELLS)); h.run('RIM_K=RIM_K_OWN');
+    rows[name] = { unlimited: off, limited: on, physics: { turns: phys.turns, sharp: phys.sharp } };
+    if (on.flipped || on.collapsed) bad.push(`${name}: ${on.flipped} cells drawn inside out, ${on.collapsed} collapsed`);
+    if (!(on.minRatio >= own.area - 1e-6)) bad.push(`${name}: a cell is drawn at ${r3(on.minRatio)} of its physics area (< ${own.area})`);
+    if (!(on.shiftMax < 0.75)) bad.push(`${name}: a rim node is drawn ${r3(on.shiftMax)} cells off its place`);
+    if (!(on.turns <= phys.turns && on.sharp <= phys.sharp)) bad.push(`${name}: the limited outline (turns ${r3(on.turns)}, sharp ${on.sharp}) is rougher than the physics rim (${r3(phys.turns)}, ${phys.sharp})`);
+    if (on.broken) bad.push(`${name}: the sheet is torn (${on.broken}) — the state is not the one this check is about`);
+  };
+  rec('flattened');
+  for (let round = 0; round < 2; round++) for (const off of [0, Math.PI / 4]) for (let k = 0; k < 4; k++) pull(h, off + k * Math.PI / 2, 0.8, 1.5);
+  h.tick(120); rec('16 pulls');
+  for (let i = 0; i < 4; i++) slap(h, i, 2.3);
+  h.tick(200); rec('16 pulls + 4 slaps');
+  const f = v => `shift max ${r3(v.shiftMax)} mean ${r3(v.shiftMean)} of a cell, flipped ${v.flipped}, collapsed ${v.collapsed}, min drawn/physics area ${r3(v.minRatio)}, turns ${r3(v.turns)}, sharp ${v.sharp}`;
+  const out = { limits: own, rows, bad, summary: Object.entries(rows).map(([k, v]) => `${k}: no limits — ${f(v.unlimited)}\n       with limits (cap ${own.cap}, area ${own.area}) — ${f(v.limited)}; physics rim: turns ${r3(v.physics.turns)}, sharp ${v.physics.sharp}`).join('\n     ') };
+  if (!Object.values(rows).some(v => v.unlimited.flipped + v.unlimited.collapsed > 0)) bad.push('no state collapses a cell without the limits — the check measures nothing');
+  if (bad.length) failWith(out, bad.join('; '));
   return out;
 });
 
