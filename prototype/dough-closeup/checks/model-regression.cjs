@@ -115,7 +115,7 @@ function makeAudioMock(clock) {
 //   Без opts поведение прежнее: AudioContext отсутствует, слушатели окна только копятся.
 function boot(tune, width=1000, height=600, opts={}) {
   let time=1000, seed=123456789;
-  const storage = new Map([...(tune ? [['dough_tune',JSON.stringify(tune)]] : []), ...(opts.storage||[])]);   // opts.storage — заранее записанное хранилище
+  const storage = new Map([...(tune ? [['dough_tune',JSON.stringify(tune)]] : []), ...(opts.audio ? [['roti_sound','on']] : []), ...(opts.storage||[])]);   // звук со сборки 73 выключен по умолчанию: аудио-проверки его включают   // opts.storage — заранее записанное хранилище
   const drawCalls=[];
   const canvas = Object.fromEntries(['fillRect','beginPath','ellipse','fill','moveTo','lineTo','closePath','drawImage','stroke','setLineDash','clearRect','save','restore','clip','translate','rotate','scale','arc','strokeRect','fillText','quadraticCurveTo','bezierCurveTo','arcTo','rect','setTransform','resetTransform','strokeText','putImageData','fillRect'].map(k=>[k,()=>{}]));
   canvas.closePath=()=>drawCalls.push({kind:'closedPath',fillStyle:canvas.fillStyle});

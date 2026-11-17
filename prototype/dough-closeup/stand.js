@@ -11,7 +11,7 @@
 // до 400%+ и лист «рвётся» в середине от любого движения. Замер это обнаружил сразу.
 // Число узлов сохранено (1 060 после обрезки по кругу; прежняя оценка «~1150» была на глаз,
 // пересчитано 07.09.2026), однородность рёбер восстановлена.
-const BUILD = "2026-11-17 · конверт: четыре стороны к середине, ровные складки, мах наружу — переворот · 72";
+const BUILD = "2026-11-17 · звук по умолчанию выключен, кнопка «звук» · 73";
 const GRID = 38;                   // 38x38, в круг попадает 1 060 узлов (посчитано, не оценка)
 let SUBSTEPS = 8;                  // T2: 8–10 подшагов, 1 итерация
 let DAMP = 0.986;
@@ -4759,8 +4759,22 @@ function measureThickness(){
 let AC=null, master=null, tenseGain=null, tenseFilt=null, noiseBuf=null;
 let sizzleGain=null, sizzleFilt=null, crackleNext=0;
 let pressGain=null, pressFilt=null, pressCrunchNext=0;   // прижим: свой голос, шипение не трогает
+// Звук по умолчанию выключен (владелица 17.11: «звук мешает… по умолчанию выключай»). Кнопка «звук»
+// включает его, выбор помнится на этом устройстве (localStorage "roti_sound"). Пока звук выключен,
+// AudioContext не создаётся вовсе: стенд молчит и в браузере проверок.
+let soundOn = (()=>{ try{ return localStorage.getItem("roti_sound")==="on"; }catch(e){ return false; } })();
+function audioWake(){ if(!soundOn) return; audioInit(); if(AC && AC.state==="suspended") AC.resume(); }
+function soundLabel(){
+  const b=typeof document!=="undefined" && document.getElementById("sound");
+  if(b){ b.textContent=soundOn ? "звук: вкл" : "звук: выкл"; if(b.classList) b.classList.toggle("on",soundOn); }
+}
+function setSound(on){
+  soundOn=!!on; try{ localStorage.setItem("roti_sound", soundOn ? "on" : "off"); }catch(e){}
+  if(soundOn) audioWake(); else if(AC && AC.state==="running") AC.suspend();
+  soundLabel();
+}
 function audioInit(){
-  if(AC) return;
+  if(AC || !soundOn) return;
   const Ctx = window.AudioContext || window.webkitAudioContext;
   if(!Ctx) return;                       // без звука стенд работает дальше
   AC = new Ctx({ latencyHint:"interactive" });
@@ -5109,7 +5123,7 @@ function onDown(id, cx, cy, t){
   dbgDown++;
   // iOS усыпляет AudioContext в фоне. Касание блюда тоже будит звук, иначе после
   // возврата шипение на таве молчало бы до «заново».
-  if(dish){ audioInit(); if(AC && AC.state==="suspended") AC.resume();
+  if(dish){ audioWake();
             const p=toLocal(cx,cy);
             if(id[0]==="t") dishTouches.set(id,p);
             if(dishTwist) return;                              // третий палец поворот не меняет
@@ -5142,7 +5156,7 @@ function onDown(id, cx, cy, t){
   if(action.state === "BACK"){ xf = null; clearAction(); }   // и возврата листа на место тоже: узлы не трогались
   if(action.state !== "RESTING") return;             // остальные фазы доигрывают автономно
   const tDown = performance.now();
-  audioInit(); if(AC && AC.state==="suspended") AC.resume();
+  audioWake();
   if(AC){
     const lat = (AC.baseLatency||0)*1000 + (AC.outputLatency||0)*1000 + (performance.now()-tDown);
     latencies.push(lat); if(latencies.length>60) latencies.shift();
@@ -5367,6 +5381,9 @@ addEventListener("keydown", e=>{
 // Предсказание разрыва осталось в модели и на пробеле — им пользуется протокол замера, а не игрок.
 { const b = document.getElementById("tear"); if(b) b.addEventListener("click", pressNow); }
 document.getElementById("reset").addEventListener("click", restartRun);
+{ const sb=document.getElementById("sound"); if(sb){ sb.addEventListener("click",()=>setSound(!soundOn)); soundLabel(); } }
+// Chrome даёт звуку проснуться только по отпусканию пальца (touchend/click), не по касанию: будим и там.
+addEventListener("touchend", audioWake, {passive:true}); addEventListener("click", audioWake);
 // Техническое снятие — тот же перелёт на стол, что и у жеста.
 document.getElementById("cutMode").addEventListener("click", ()=>startRemoval());
 document.getElementById("undoDish").addEventListener("click", undoDish);
@@ -5375,7 +5392,7 @@ document.getElementById("nextRoti").addEventListener("click", nextRoti);
 // Технический вход переворота (как «к нарезке»): лист уходит от игрока и ложится обратно.
 document.getElementById("flipDish").addEventListener("click", ()=>startFlip({x:0,y:-1},{x:0,y:0}));
 document.getElementById("foldSample").addEventListener("click", ()=>{
-  audioInit(); if(AC && AC.state==="suspended") AC.resume();
+  audioWake();
   stepNo=3; reset();
   const c=centerOfSheet(); xf={cx:c.x,cy:c.y};
   bakeTransform(panC.x-c.x,panC.y-c.y,0); xf=null; phase="PAN";
