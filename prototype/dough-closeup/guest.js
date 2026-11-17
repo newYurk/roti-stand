@@ -117,6 +117,7 @@ function guestUpdate(dt){
   if(eveDev){ panKnock = 0; return; }
   if(EVE.over || !EVE.lamp){ if(GST.here) guestLeave("evening-over"); panKnock = 0; return; }
   if(EVE.lid){ panKnock = 0; return; }                     // тава под крышкой: стук не идёт (картинка 1), счёт стоит и пойдёт с того же места
+  if(typeof notebookOpen === "function" && notebookOpen()){ panKnock = 0; return; }   // тетрадь открыта (notebook.js): та же пауза
   const ballNo = guestBallNo();
   if(ballNo !== gBall){ gBall = ballNo; gStep = 0; gBest = 0; }   // новый шарик — ступени жарки считаются заново
   if(guestFrying()) gBest = Math.max(gBest, guestCookStep());     // наибольшая ступень этого роти — по ней ответ
