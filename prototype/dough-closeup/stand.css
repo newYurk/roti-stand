@@ -72,6 +72,10 @@
   html:not(.dev) #topbar{ right:96px; }
   /* В игре сверху одна строка (#live): вместе с мелкой подсказкой текст на 375×667 ложился на радио и стойку. */
   html:not(.dev) #hint{ display:none; }
+  /* Гостья у стойки (шаг 2 v0, guest.js ставит html.guest): её картинка начинается в 34 px от верха,
+     поэтому служебная строка мельче и прижата к верху — две строки кончаются над её головой. */
+  html.guest:not(.dev) #topbar{ top:4px; }
+  html.guest:not(.dev) #live{ margin-top:0; font-size:12px; line-height:1.15; }
   #radioSheet{ position:absolute; inset:0; z-index:7; display:flex; align-items:center;
     justify-content:center; background:rgba(15,12,9,.78); }
   #radioBox{ display:flex; flex-direction:column; gap:10px; min-width:230px; padding:16px;

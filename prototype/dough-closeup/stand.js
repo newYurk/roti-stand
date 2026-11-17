@@ -11,7 +11,7 @@
 // до 400%+ и лист «рвётся» в середине от любого движения. Замер это обнаружил сразу.
 // Число узлов сохранено (1 060 после обрезки по кругу; прежняя оценка «~1150» была на глаз,
 // пересчитано 07.09.2026), однородность рёбер восстановлена.
-const BUILD = "2026-11-17 · рамка вечера: лампа, миска на три шарика, крышка, радио · 74";
+const BUILD = "2026-11-17 · тётя Сом: первый гость, стук, кивок или хруст, подарок на полке · 75";
 const GRID = 38;                   // 38x38, в круг попадает 1 060 узлов (посчитано, не оценка)
 let SUBSTEPS = 8;                  // T2: 8–10 подшагов, 1 итерация
 let DAMP = 0.986;
@@ -319,6 +319,8 @@ let dish = null, dishGesture = null;
 // typeof: без evening.js (проверки в Node, ?dev=1) стенд работает как раньше.
 // sheetHidden — стол свободен, шарика на нём нет; fryHold — тава под крышкой, жарка стоит.
 let sheetHidden = false, fryHold = false;
+// panKnock — стук гостя (guest.js, шаг 2 v0): тава с листом вздрагивает на столько пикселей холста; 0 — стоит.
+let panKnock = 0;
 const eveningOn = ()=> typeof eveningActive==="function" && eveningActive();
 // Жарка как действие (срез 17.09): прижим пальцем, купола и жир — модификаторы тепла по месту.
 // Живут вне dish.thermal (его целиком сравнивают проверки) и вне dish (его снимки — история):
@@ -5786,7 +5788,12 @@ function draw(){
   drawTable(g, sx, sy);
   if(typeof eveningDraw==="function") eveningDraw(g, sx, sy, 0);   // небо, стойка, радио, миска — под тестом
 
-  if(dish) drawDish(g,sx,sy);
+  if(dish){
+    const kn = panKnock && phase==="PAN" && dish.mode==="fold";   // лист на таве вздрагивает вместе с ней
+    if(kn){ g.save(); g.translate(0, panKnock*sy); }
+    drawDish(g,sx,sy);
+    if(kn) g.restore();
+  }
   else if(!sheetHidden){   // режим «только звук», в котором поле не рисовалось вовсе, снят 08.09.2026
     // ячейки решётки; порванные и просвеченные насквозь — дырки
     // порванные ячейки: пометить их узлы, чтобы подсветить рваный край у соседей
@@ -5956,6 +5963,7 @@ function drawTable(g, sx, sy){   // пикселизация делается н
   }
 
   // Тава (กระทะโรตี): толстая плоская круглая плита, в центре лужица маргарина. Рисуется в координатах стола той же проекцией, что мишень.
+  if(panKnock){ g.save(); g.translate(0, D_(panKnock)); }   // стук гостя: вздрагивает тава, стол стоит
   const pcx = R_(prX(panC.x, panC.y)), pcy = D_(prY(panC.x, panC.y));
   const ell = (r, fill, dy)=>{
     g.fillStyle = fill; g.beginPath();
@@ -5968,6 +5976,7 @@ function drawTable(g, sx, sy){   // пикселизация делается н
   ell(PAN_R*0.30, "#6b5a2a");               // лужица маргарина в центре
   ell(PAN_R*0.16, "#8a7436", -PAN_R*0.02);  // блик на масле
   drawFatAndButter(g, sx, sy);
+  if(panKnock) g.restore();
   drawPanGlow(g, sx, sy);
   drawStretchTarget(g, sx, sy);
 }
