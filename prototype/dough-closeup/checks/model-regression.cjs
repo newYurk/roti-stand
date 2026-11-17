@@ -262,7 +262,9 @@ function slap(h, index, impulse=2.3, {hz=120}={}) {
     if(lifted<0 && h.run('action.state')==='LIFTING') lifted=k;
   }
   assert.ok(lifted>0,'native straight swipe reaches LIFTING');
-  assert.match(h.run('action.state'),/^(LIFTING|FLYING)$/,'the lift ends by itself only into the flight');
+  // build 68: the flight is shortened by the time the stroke was already seen, so at a slow event
+  // cadence the impact may land before the two extra events — still "only into the flight", never a carry.
+  assert.match(h.run('action.state'),/^(LIFTING|FLYING|IMPACT|SETTLING)$/,'the lift ends by itself only into the flight');
   const actualImpulse=h.run('action.impulse');
   assert.ok(Math.abs(actualImpulse-impulse)<=0.02*impulse,`requested impulse ${impulse}; actual ${actualImpulse}`);
   h.run(`releaseAction(${h.getTime()});`);h.tick(60);

@@ -1,8 +1,12 @@
 #!/usr/bin/env node
 'use strict';
-// Slice 1 of the square stretch (build 67, #91): pull + slap, rounded-square target,
+// Slice 1 of the square stretch (build 67–68, #91): pull + slap, rounded-square target,
 // frame-rate-independent classification. Acceptance checks T1–T9e of
 // runs/square-stretch-spec-2026-11-16.md §6 (T9f is model-regression.cjs itself).
+// Build 68 (review of 17.11): T1b live-finger profiles (deceleration, dash–stop–release, no hold),
+// T9d also covers blur, T9g star/cross and the corner notes, T9h oblique pulls; T9 judges the
+// shape by rim/target sectors and compares thickness at equal area. The rim is measured from the
+// target centre (targetC), as the player sees it against the dashes.
 // Pure Node/vm, same mocks as model-regression.cjs: this checks the model and the gesture
 // state machine through the stand's real touch handlers, not a browser and not the feel.
 //   node prototype/dough-closeup/checks/square-stretch-regression.cjs path/to/stand.js [--only T1,T2] [--full]
@@ -46,23 +50,23 @@ function fresh(w = 390, hh = 844, { tune = TUNE, frame = null } = {}) {
 function snap(h) {
   h.run(`globalThis.__snap={px:px.slice(),py:py.slice(),prx:prx.slice(),pry:pry.slice(),vx:vx.slice(),vy:vy.slice(),thick:thick.slice(),pinned:pinned.slice(),conDeg:conDeg.slice(),
     rest:cons.map(c=>c.rest),broken:cons.map(c=>c.broken),quadRest:quadRest?quadRest.slice():null,stepNo,tornAt,sameSlapN,lastSlapDir,
-    pullN:typeof pullN==='undefined'?0:pullN,corner:typeof cornerDone==='undefined'?null:cornerDone.slice(),gl:gestures.length,tossTry,tossOk};`);
+    pullN:typeof pullN==='undefined'?0:pullN,corner:typeof cornerDone==='undefined'?null:cornerDone.slice(),sqC:typeof sqC==='undefined'||!sqC?null:{...sqC},gl:gestures.length,tossTry,tossOk};`);
 }
 function back(h) {
   h.run(`{const s=__snap;if(dish)throw new Error('snapshot: the sheet became a dish');
     px.set(s.px);py.set(s.py);prx.set(s.prx);pry.set(s.pry);vx.set(s.vx);vy.set(s.vy);thick.set(s.thick);pinned.set(s.pinned);conDeg.set(s.conDeg);
     cons.forEach((c,i)=>{c.rest=s.rest[i];c.broken=s.broken[i];});if(s.quadRest)quadRest.set(s.quadRest);
     stepNo=s.stepNo;tornAt=s.tornAt;sameSlapN=s.sameSlapN;lastSlapDir=s.lastSlapDir;plasticT=0;phase='TABLE';xf=null;
-    if(typeof pullN!=='undefined')pullN=s.pullN;if(s.corner)cornerDone=s.corner.slice();
+    if(typeof pullN!=='undefined')pullN=s.pullN;if(s.corner)cornerDone=s.corner.slice();if(typeof sqC!=='undefined')sqC=s.sqC?{...s.sqC}:null;
     gestures.length=s.gl;tossTry=s.tossTry;tossOk=s.tossOk;clearAction();}`);
 }
-const shape = h => JSON.parse(h.run(`(()=>{const c=centerOfSheet();rimProfile(c);const at=a=>rimAt(a)/targetR;
+const shape = h => JSON.parse(h.run(`(()=>{const c=typeof targetC==='function'?targetC():centerOfSheet();rimProfile(c);const at=a=>rimAt(a)/targetR;
   const side=[0,1,2,3].map(k=>at(k*Math.PI/2)), corner=[0,1,2,3].map(k=>at(Math.PI/4+k*Math.PI/2));
   const ratio=[];for(let b=0;b<RIM_BINS;b++)ratio.push(rimProf[b]/targetAt((b+0.5)/RIM_BINS*2*Math.PI-Math.PI));
   const m=metrics();
   return JSON.stringify({step:stepNo,phase,fill:sheetFill(),squareness:squareness(),side,corner,sideMax:Math.max(...side),cornerMax:Math.max(...corner),
     binMin:Math.min(...ratio),binMax:Math.max(...ratio),areaOverDisc:m.area/(Math.PI*targetR*targetR),inverted:m.invertedQuads,holes:m.holeQuads,broken:m.broken,
-    minThickness:m.minThickness,medianThickness:m.medianThickness,finite:m.finite,corners:cornerDone.reduce((a,b)=>a+b,0)})})()`));
+    minThickness:m.minThickness,medianThickness:m.medianThickness,finite:m.finite,corners:cornerDone.reduce((a,b)=>a+b,0),chord:!!readyBlinkAt})})()`));
 const r3 = x => Math.round(x * 1000) / 1000;
 const restSum = h => h.run('cons.reduce((s,c)=>s+c.rest,0)');
 const count = (rows, key) => rows.reduce((m, r) => (m[r[key]] = (m[r[key]] || 0) + 1, m), {});
@@ -97,6 +101,46 @@ test('T1', 'straight 1.5 gs stroke: pull below the threshold, slap above, the sa
   const out = { V_SLAP, runsPerSpeed: rows.length / speeds.length, table, wrong: wrong.length, mismatchesAcrossCadences: mismatches.length,
     summary: `${rows.length} strokes, ${rows.length / speeds.length} per speed (8 directions × 2 phases × jitter 0/±1.5 px × 4 cadences): wrong ${wrong.length}, differing across cadences ${mismatches.length}` };
   if (wrong.length || mismatches.length) failWith({ ...out, wrongRows: wrong.slice(0, 40), mismatches: mismatches.slice(0, 40) }, out.summary);
+  return out;
+});
+// ── T1b: a live finger does not move at constant speed ─────────────────────────────────────────
+// Review of 17.11 (P1, P2): T1–T6 drove constant-speed strokes released on the move; a real finger
+// brakes at the end of a swipe, often stops before lifting, and often swipes right from the touch
+// with no hold. Profiles: easeOut (fast start, braking to zero), sCurve (slow–fast–slow), dash
+// (constant speed, then the finger stands still for `stop` ms and lifts). Fast set: mean speed
+// ≥ 1.3·V_SLAP → slap. Slow set: peak speed ≤ 0.8·V_SLAP → pull. Physics frames run (a stopped
+// finger is noticed by the frame loop), events at 60/120/240 Hz, ±1.5 px jitter, hold 0 and 300 ms.
+function profilePoints(h, { angle = 0, hold = 300, hz = 60, dur, distAt, stop = 0, jitter = 0, seed = 1 }) {
+  const st = JSON.parse(h.run(`(()=>{const c=centerOfSheet();rimProfile(c);return JSON.stringify({c,r:rimProf[rimBin(${angle})],gcss:gsCss()})})()`));
+  const p0 = h.toClient(st.c.x + Math.cos(angle) * st.r, st.c.y + Math.sin(angle) * st.r), p1 = h.toClient(st.c.x + Math.cos(angle) * st.r * 1.3, st.c.y + Math.sin(angle) * st.r * 1.3);
+  let dx = p1.x - p0.x, dy = p1.y - p0.y; const l = Math.hypot(dx, dy); dx /= l; dy /= l;
+  const rnd = lcg(seed), dt = 1000 / hz, out = [{ ...p0, t: 0 }];
+  const at = t => { const d = distAt(Math.min(t, dur)) * st.gcss; return { x: p0.x + dx * d + 2 * jitter * rnd(), y: p0.y + dy * d + 2 * jitter * rnd() }; };
+  for (let t = dt * 0.5; t < dur; t += dt) out.push({ ...at(t), t: hold + t });
+  out.push({ ...at(dur), t: hold + dur + stop, up: true });
+  return out;
+}
+const PROFILES = { easeOut: (T, D) => t => D * (1 - (1 - t / T) ** 2), sCurve: (T, D) => t => { const u = t / T; return D * u * u * (3 - 2 * u); }, dash: (T, D) => t => D * t / T };
+test('T1b', 'live-finger profiles: braking swipe, dash–stop–release, swipe right from the touch — slap when fast, pull when slow', () => {
+  const h = fresh(); snap(h); const rows = [];
+  const cases = [];
+  // fast: [profile, T ms, D gs, stop ms] — mean speed D/T ≥ 1.3·V_SLAP
+  for (const [T, D] of [[120, 1.0], [200, 1.5], [300, 2.0]]) for (const name of ['easeOut', 'sCurve']) cases.push({ name, T, D, stop: 0, want: 'slap' });
+  for (const [v, D] of [[8, 1.0], [12, 1.0], [8, 2.0]]) for (const stop of [30, 80, 150, 400]) cases.push({ name: 'dash', T: D / v * 1000, D, stop, want: 'slap' });
+  // slow: peak speed ≤ 0.8·V_SLAP (easeOut peaks at 2·D/T, sCurve at 1.5·D/T)
+  for (const [T, D] of [[400, 0.4 * V_SLAP * 0.4], [600, 0.4 * V_SLAP * 0.6]]) cases.push({ name: 'easeOut', T, D, stop: 0, want: 'pull' });
+  for (const [T, D] of [[400, 0.8 * V_SLAP / 1.5 * 0.4], [600, 0.8 * V_SLAP / 1.5 * 0.6]]) cases.push({ name: 'sCurve', T, D, stop: 0, want: 'pull' });
+  for (const stop of [30, 80, 150, 400]) cases.push({ name: 'dash', T: 1.0 / (0.8 * V_SLAP) * 1000, D: 1.0, stop, want: 'pull' });
+  let k = 0;
+  for (const c of cases) for (const hz of [60, 120, 240]) for (const hold of [0, 300]) for (const jitter of [0, 1.5]) {
+    back(h); k++;
+    const r = drive(h, profilePoints(h, { angle: (k % 8) * Math.PI / 4, hold, hz, dur: c.T, distAt: PROFILES[c.name](c.T, c.D), stop: c.stop, jitter, seed: 300 + k }), { frames: true, settle: true });
+    rows.push({ ...c, T: Math.round(c.T), D: r3(c.D), hz, hold, jitter, angle: k % 8, kind: r.phase === 'PAN' ? 'toss' : r.kind, decision: r.atRelease.decision });
+  }
+  const wrong = rows.filter(r => r.kind !== r.want), by = w => count(rows.filter(r => r.want === w), 'kind');
+  const out = { cases: cases.length, strokes: rows.length, fast: by('slap'), slow: by('pull'), wrong: wrong.length,
+    summary: `${rows.length} strokes (${cases.length} profiles × 3 cadences × hold 0/300 ms × jitter 0/±1.5 px): fast ${JSON.stringify(by('slap'))}, slow ${JSON.stringify(by('pull'))}, wrong ${wrong.length}` };
+  if (wrong.length) failWith({ ...out, wrongRows: wrong.slice(0, 40) }, out.summary);
   return out;
 });
 // ── T2: slow pulls never become slaps ─────────────────────────────────────────────────────────
@@ -273,16 +317,22 @@ function squareRun(w, hh) {
   h.tick(60); return { ...shape(h), invertedAfterSlaps: afterSlaps, invertedFromPulls: fromPulls, pullsCommitted: real };
 }
 test('T9', 'square: 4 slaps + 12 corner pulls, portrait and landscape', () => {
-  const ref = fresh(); untilReady(ref, i => midSlap(ref, i), 14); const band = shape(ref).medianThickness;
+  // Median thickness is compared at EQUAL AREA (review 17.11, P8): a square that fills the target is
+  // larger than the disc that fills it, hence thinner; thickness × area is what must agree.
+  const ref = fresh(); untilReady(ref, i => midSlap(ref, i), 14); const rs = shape(ref), band = rs.medianThickness, refArea = rs.areaOverDisc;
   const rows = { portrait: squareRun(390, 844), landscape: squareRun(844, 390) }, bad = [];
   for (const [name, s] of Object.entries(rows)) {
     if (!(s.fill >= 0.92)) bad.push(`${name}: fill ${r3(s.fill)}`);
-    if (!(s.squareness >= 1.30 && s.squareness <= 1.50)) bad.push(`${name}: corner/side ${r3(s.squareness)}`);
+    // the target itself (superellipse n=5) has corner/side 1.11/0.90 = 1.23; the spec's 1.30–1.50
+    // rewarded corners sharper than the target, i.e. a pillow with concave sides (review 17.11, P5)
+    if (!(s.squareness >= 1.15 && s.squareness <= 1.30)) bad.push(`${name}: corner/side ${r3(s.squareness)}`);
+    if (!(s.binMin >= 0.85 && s.binMax <= 1.14)) bad.push(`${name}: rim/target over 48 sectors ${r3(s.binMin)}…${r3(s.binMax)}`);
+    if (!(Math.min(...s.side) / 0.9 >= 0.92)) bad.push(`${name}: shortest side mid-point ${r3(Math.min(...s.side) / 0.9)} of the target`);
     if (s.invertedFromPulls) bad.push(`${name}: inverted from pulls ${s.invertedFromPulls}`);
-    if (!(Math.abs(s.medianThickness / band - 1) <= 0.10)) bad.push(`${name}: median thickness ${r3(s.medianThickness)} vs ready-by-slaps ${r3(band)}`);
+    if (!(Math.abs(s.medianThickness * s.areaOverDisc / (band * refArea) - 1) <= 0.10)) bad.push(`${name}: median thickness ${r3(s.medianThickness)} × area ratio ${r3(s.areaOverDisc / refArea)} vs ready-by-slaps ${r3(band)}`);
     if (!s.finite) bad.push(`${name}: not finite`);
   }
-  const f = s => `fill ${r3(s.fill)}, corner/side ${r3(s.squareness)}, inverted: ${s.invertedAfterSlaps} after the slaps, +${s.invertedFromPulls} from pulls, holes ${s.holes}, median thickness ${r3(s.medianThickness)}, pulls committed ${s.pullsCommitted}/12, corners ticked ${s.corners}`;
+  const f = s => `fill ${r3(s.fill)}, corner/side ${r3(s.squareness)}, inverted: ${s.invertedAfterSlaps} after the slaps, +${s.invertedFromPulls} from pulls, holes ${s.holes}, sectors ${r3(s.binMin)}…${r3(s.binMax)}, median thickness ${r3(s.medianThickness)} (× area ${r3(s.medianThickness * s.areaOverDisc / refArea)}), pulls committed ${s.pullsCommitted}/12, corners ticked ${s.corners}`;
   const out = { readyBySlapsMedianThickness: band, ...rows, summary: `portrait: ${f(rows.portrait)}; landscape: ${f(rows.landscape)}; ready-by-slaps median thickness ${r3(band)}` + (bad.length ? ` — ${bad.join('; ')}` : '') };
   if (bad.length) failWith(out, out.summary);
   return out;
@@ -339,8 +389,17 @@ test('T9d', 'short pull and touch cancel restore the mesh and the rest lengths b
     const pulling = h.run('action.state'), displaced = h.run('px.some((v,i)=>v!==__snap.px[i])');
     h.touch('cancel', 't1', pts.at(-2).x, pts.at(-2).y);
     rows.push({ what: 'touchcancel during a 0.5 gs pull', state: pulling, displaced, moved: h.run('action.state'), same: same(), gestures: h.run('gestures.length-__snap.gl') }); }
-  const out = { rows, summary: rows.map(r => `${r.what}: ${r.state} → ${r.moved}, bit-for-bit ${r.same}`).join('; ') };
-  if (rows.some(r => !r.same || r.gestures !== 0 || r.moved !== 'RESTING') || rows[2].state !== 'PULLING' || !rows[2].displaced) failWith(out, out.summary);
+  // Losing focus in the middle of a pull is the same cancel (review 17.11, P3: the stand hung in
+  // PULLING until «заново» — physics stands still there and a new touch is refused).
+  { const pts = strokePoints(h, { angle: 4, speed: 1.5, dist: 0.5, hz: 60 });
+    drive(h, pts, { frames: false, settle: false, release: false });
+    const pulling = h.run('action.state'), displaced = h.run('px.some((v,i)=>v!==__snap.px[i])');
+    h.fire('blur', { target: h.context }); h.tick(120);
+    const after = h.run('action.state'), ok = same(), g = h.run('gestures.length-__snap.gl');
+    const next = stroke(h, { angle: 1, speed: 1.5, dist: 0.5, hz: 60 }, { settle: true, id: 't2' });
+    rows.push({ what: 'blur during a 0.5 gs pull', state: pulling, displaced, moved: after, same: ok, gestures: g, next: next.kind }); }
+  const out = { rows, summary: rows.map(r => `${r.what}: ${r.state} → ${r.moved}, bit-for-bit ${r.same}` + (r.next ? `, next gesture ${r.next}` : '')).join('; ') };
+  if (rows.some(r => !r.same || r.gestures !== 0 || r.moved !== 'RESTING') || rows.slice(2).some(r => r.state !== 'PULLING' || !r.displaced) || rows[3].next !== 'pull') failWith(out, out.summary);
   return out;
 });
 test('T9e', 'thick rim: after pulls only the outer 10 % of the radius is thicker than the sheet mean', () => {
@@ -349,6 +408,43 @@ test('T9e', 'thick rim: after pulls only the outer 10 % of the radius is thicker
   const t = JSON.parse(h.run(`(()=>{const c=centerOfSheet();rimProfile(c);let so=0,no=0,s=0,n=0;for(let i=0;i<N;i++){if(conDeg[i]<=0)continue;const dx=px[i]-c.x,dy=py[i]-c.y,r=Math.hypot(dx,dy),rim=rimProf[rimBin(Math.atan2(dy,dx))];s+=thick[i];n++;if(r>=0.9*rim){so+=thick[i];no++;}}return JSON.stringify({outer:so/no,mean:s/n,outerNodes:no})})()`));
   const out = { pulls: n, ...t, summary: `${n} pulls: outer 10 % mean thickness ${r3(t.outer)} (${t.outerNodes} nodes) vs sheet mean ${r3(t.mean)}` };
   if (!(t.outer > t.mean)) failWith(out, out.summary);
+  return out;
+});
+
+// ── T9g: pulls alone do not build a star or a cross, and the notes do not lie ─────────────────
+// Review 17.11, P4: twelve corner pulls on a fresh sheet gave corner/side 2.18 at fill 0.61 with all
+// four corner notes, the chord and the tava blink; twelve side pulls gave a cross (0.54).
+test('T9g', 'pulls only at the corners / only at the sides: no star, no cross; corner notes need the sides, the chord needs a ready sheet', () => {
+  const rows = [];
+  for (const [name, a0] of [['corners', D], ['sides', 0]]) {
+    const h = fresh(); let chordEarly = false, cornerEarly = false;
+    for (let k = 0; k < 12 && h.run('phase') === 'TABLE'; k++) {
+      stroke(h, { angle: a0 + (k % 4) * 2 * D, speed: 1.5, dist: 1.4, hz: 60 }, { settle: true });
+      const s = shape(h);
+      if (s.chord && s.fill < 0.92) chordEarly = true;
+      if (s.corners && s.squareness > 1.40) cornerEarly = true;   // a note on a spike, not on a corner
+    }
+    h.tick(60); rows.push({ name, ...shape(h), chordEarly, cornerEarly });
+  }
+  const f = s => `${s.name}: corner/side ${r3(s.squareness)}, fill ${r3(s.fill)}, sectors ${r3(s.binMin)}…${r3(s.binMax)}, corners ticked ${s.corners}, chord ${s.chord}, inverted ${s.inverted}`;
+  const out = { rows, summary: rows.map(f).join('; ') };
+  if (rows.some(s => s.squareness > 1.35 || s.squareness < 0.85 || s.chordEarly || s.cornerEarly || s.inverted || (s.chord && s.fill < 0.92))) failWith(out, out.summary);
+  return out;
+});
+// ── T9h: an oblique pull does not drag the neighbours past the dashes ─────────────────────────
+// Review 17.11, P6: six pulls from a side mid-point after four slaps, the finger going 40° / 60°
+// off the radius (screen angle): a sector at 1.21 of the target; 44 inverted cells and a false corner note.
+test('T9h', 'oblique pulls from a side mid-point (0 / 20 / 40 / 60° off the radius): nothing past the dashes, no inverted cells, no false corner note', () => {
+  const rows = [];
+  for (const offDeg of [0, 20, 40, 60, -40]) {
+    const h = fresh(); for (let i = 0; i < 4; i++) midSlap(h, i);
+    const s0 = shape(h), inv0 = inverted(h), kinds = [];
+    for (let i = 0; i < 6; i++) kinds.push(stroke(h, { angle: 0, speed: 1.5, dist: 1.2, off: offDeg * Math.PI / 180, hz: 60 }, { settle: true }).kind[0]);
+    h.tick(60); const s1 = shape(h);
+    rows.push({ offDeg, kinds: kinds.join(''), binMaxBefore: r3(s0.binMax), binMax: r3(s1.binMax), inverted: inverted(h) - inv0, corners: s1.corners });
+  }
+  const out = { rows, summary: rows.map(r => `${r.offDeg}°: ${r.kinds}, sectors max ${r.binMaxBefore} → ${r.binMax}, inverted +${r.inverted}, corners ${r.corners}`).join('; ') };
+  if (rows.some(r => r.binMax > 1.08 || r.inverted > 0 || r.corners > 0) || !/p/.test(rows[0].kinds)) failWith(out, out.summary);
   return out;
 });
 
