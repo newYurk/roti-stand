@@ -187,7 +187,20 @@ test('N1', 'every serve leaves a snapshot with who ate it; it is in the evening 
   const h = nb(); light(h);
   assert.deepEqual(h.NB(), { v: 1, cur: false, peeked: false, evenings: [] });
   fakeShots(h, q => q >= 0.7 ? 41 : q >= 0.5 ? 29.5 : 12);
-  onPan(h); arrive(h); finish(h); serve(h, h.gs().som);
+  onPan(h); arrive(h); finish(h);
+  // the shot is drawn by the fried side: while it is drawn every patch of the sheet carries the larger of its
+  // two sides and not less than the mean of the side that lay on the tava; afterwards (and after a throw)
+  // the stand's numbers are back
+  const fr = h.J(`(()=>{const snap=()=>JSON.stringify(dish.thermal.map(t=>t&&t.cook)),before=snap();let inside=null,threw=false;
+    nbFriedSide(()=>{inside=dish.thermal.filter(Boolean).map(t=>t.cook.slice())});
+    const back=snap()===before; try{nbFriedSide(()=>{throw new Error("x")})}catch(e){threw=true}
+    return {back,threw,back2:snap()===before,n:inside.length,eq:inside.every(c=>c[0]===c[1]),min:Math.min(...inside.map(c=>c[0])),
+      m:Math.max(dishSideMean("cook","contactWeights"),dishSideMean("cook","topWeights")),
+      own:dish.thermal.filter(Boolean).every((t,i)=>inside[i][0]>=Math.max(t.cook[0],t.cook[1]))}})()`);
+  assert.ok(fr.n > 0 && fr.eq && fr.own, 'both sides of every patch show the more fried one');
+  assert.ok(fr.m > 0 && fr.min >= fr.m - 1e-9, `no patch is paler than the fried side's mean (${fr.min.toFixed(3)} vs ${fr.m.toFixed(3)})`);
+  assert.ok(fr.back && fr.threw && fr.back2, 'the stand\'s frying numbers are restored, also after a throw');
+  serve(h, h.gs().som);
   let N = h.NB();
   assert.equal(N.cur, true); assert.equal(N.evenings.length, 1);
   assert.equal(N.evenings[0].snaps.length, 1); assert.equal(N.evenings[0].snaps[0].to, 'som');
@@ -219,7 +232,7 @@ test('N1', 'every serve leaves a snapshot with who ate it; it is in the evening 
   assert.deepEqual(p.errors, []);
   // the stand mode has no notebook
   const d = nb({ search: '?dev=1' }); tap(d, d.n().item); assert.equal(d.n().open, 0);
-  return { summary: `shot qualities tried ${h.context.__shots.slice(0, 2).join(', ')} → ${kb} KB kept; events ${h.nev().join(' ')}` };
+  return { summary: `shot qualities tried ${h.context.__shots.slice(0, 2).join(', ')} → ${kb} KB kept; shot by the fried side: mean ${fr.m.toFixed(3)}, palest patch ${fr.min.toFixed(3)} of ${fr.n}; events ${h.nev().join(' ')}` };
 });
 
 test('N2', 'a touch on the notebook opens the sheet, a touch anywhere closes it; while open the lamp, bowl and table are silent; the radio keeps its own spot', () => {
@@ -256,10 +269,25 @@ test('N2', 'a touch on the notebook opens the sheet, a touch anywhere closes it;
   h.touch('end', 't1', E.work.x, E.work.y); h.frames(3);
   assert.equal(h.n().open, 0, 'that touch closed it');
   assert.equal(h.run('gestures.filter(g=>g.kind!=="notebook").length'), n0);
+  // a second finger in the middle of a gesture does not open it: the dough under the first finger goes on
+  h.touch('start', 't1', E.work.x, E.work.y); h.frames(3);
+  assert.notEqual(h.run('action.state'), 'RESTING', 'the first finger works the dough');
+  h.touch('start', 't2', S.item.x, S.item.y); h.frames(3);
+  assert.equal(h.n().open, 0, 'a second finger on the notebook does not open it');
+  h.touch('end', 't2', S.item.x, S.item.y); h.touch('end', 't1', E.work.x, E.work.y); h.frames(30);
+  assert.equal(h.n().open, 0); assert.equal(h.run('action.state'), 'RESTING');
+  tap(h, S.item); assert.equal(h.n().open, 1, 'alone it opens as before'); tap(h, E.work); assert.equal(h.n().open, 0);
   // drawing: closed, sliding, open — without errors
   tap(h, S.item); h.tick(2, 1 / 60, true); h.frames(20); h.tick(2, 1 / 60, true);
   assert.equal(h.run('loopErrs'), 0); assert.deepEqual(h.errors, []);
   assert.deepEqual(h.nev().slice(0, 4), ['open:touch', 'close:touch', 'open:touch', 'close:touch']);
+  // a lid in the hand or a finger resting on the free table: the notebook stays shut under a second finger
+  const k = nb(); light(k); k.run('EVE.ball=false;EVE.ballsLeft=1;eveFreshLump();sheetHidden=true;eveSave();');   // script shortcut: the table is free
+  const kw = k.spots().work;
+  k.touch('start', 't1', kw.x, kw.y); k.frames(3); k.touch('start', 't2', k.n().item.x, k.n().item.y); k.frames(3);
+  assert.equal(k.n().open, 0, 'two fingers: not opened');
+  k.touch('end', 't2', k.n().item.x, k.n().item.y); k.touch('end', 't1', kw.x, kw.y); k.frames(3);
+  tap(k, k.n().item); assert.equal(k.n().open, 1);
   assert.equal(typeof h.J('gestures.filter(g=>g.kind==="notebook"&&g.event==="close")[0].seconds'), 'number');
   assert.equal(h.saved().notebook.events.length, h.nev().length, 'the notebook journal is in the save');
   return { summary: `item at ${Math.round(S.item.x)},${Math.round(S.item.y)} (radio ${Math.round(E.radio.x)}); sheet top ${Math.round(sheet.y0)}, height ${Math.round(sheet.h)}; events ${h.nev().join(' ')}` };
@@ -325,19 +353,45 @@ test('N4', 'it opens by itself once per evening: after Som\'s first answer, for 
   tap(p, p.spots().bowl);
   assert.equal(p.n().open, 0); assert.equal(p.eve().ball, true, 'the peek does not eat the touch');
   assert.deepEqual(p.nev(), ['snap:som', 'open:peek', 'close:pass']);
-  // a finger on the screen holds the peek back; it comes when the finger is lifted
+  // a finger on the screen (on the free table) holds the peek back; it comes when the finger is lifted
   const f = nb(); light(f); onPan(f); arrive(f); finish(f); serve(f, f.gs().som);
-  nextBall(f); const w = f.spots().work;
+  const w = f.spots().work;
   f.touch('start', 't1', w.x, w.y); sec(f, 5);
   assert.equal(f.n().open, 0, 'not under a finger');
   f.touch('end', 't1', w.x, w.y); f.frames(3);
   assert.equal(f.n().open, 2);
+  // the next ball taken before the peek: it does not slide over the dough in work, it waits for the next serve
+  const b = nb(); light(b); onPan(b); arrive(b); finish(b); serve(b, b.gs().som);
+  nextBall(b); sec(b, 6);
+  assert.equal(b.n().open, 0, 'not over a ball in work'); assert.equal(b.NB().peeked, false);
+  onPan(b); sec(b, 3); assert.equal(b.n().open, 0, 'not over the tava either');
+  finish(b); serve(b, b.spots().counter);
+  assert.equal(b.n().open, 0, 'not at the very moment of the serve');
+  let bw = 0; while (!b.n().open && bw < 400) { b.frames(1); bw++; }
+  assert.equal(b.n().open, 2, 'it comes after the next serve'); assert.ok(bw > 60 && bw < 160, `about 2.5 s after it (${bw} frames)`);
+  assert.deepEqual(b.nev(), ['snap:som', 'snap:counter', 'open:peek']);
+  // not under the radio menu: the peek waits until the menu is closed
+  const m4 = nb(); light(m4); onPan(m4); arrive(m4); finish(m4); serve(m4, m4.gs().som);
+  tap(m4, m4.spots().radio); assert.equal(m4.nodes.get('radioSheet').hidden, false);
+  sec(m4, 6); assert.equal(m4.n().open, 0, 'not under the radio menu'); assert.equal(m4.NB().peeked, false);
+  m4.nodes.get('evClose').fire('click'); m4.frames(3);
+  assert.equal(m4.n().open, 2, 'it comes when the menu is closed');
+  // a reload while Som is still answering: not on the first frame — 2.5 s after the load
+  const a4 = nb(); light(a4); onPan(a4); arrive(a4); finish(a4); serve(a4, a4.gs().som);
+  assert.ok(a4.run('gAnswer') > 1, 'she is still answering');
+  const ar = reloadN(a4); ar.frames(6);
+  assert.equal(ar.n().open, 0, 'not on the first frames after the reload');
+  let aw = 6; while (!ar.n().open && aw < 400) { ar.frames(1); aw++; }
+  assert.equal(ar.n().open, 2); assert.ok(Math.abs(aw / 60 - 2.5) < 0.1, `2.5 s after the load (${(aw / 60).toFixed(2)} s)`);
+  // a reload with a ball in work: no peek over the dough
+  const a5 = nb(); light(a5); onPan(a5); arrive(a5); finish(a5); serve(a5, a5.gs().som); nextBall(a5);
+  const ar5 = reloadN(a5); sec(ar5, 6); assert.equal(ar5.eve().ball, true); assert.equal(ar5.n().open, 0);
   // a roti put on the counter (Som did not get it) does not open it
   const c = nb(); light(c); ball(c); sec(c, 6);
   assert.deepEqual(c.nev(), ['snap:counter']);
   // the next evening it may open once again
   assert.equal(h.run('(notebookNewEvening("lump",true),NB.peeked)'), false);
-  return { summary: `peek ${(n / 60).toFixed(2)} s after the serve, open ${(m / 60).toFixed(2)} s; events ${h.nev().join(' ')}` };
+  return { summary: `peek ${(n / 60).toFixed(2)} s after the serve, open ${(m / 60).toFixed(2)} s; ball taken first: ${(bw / 60).toFixed(2)} s after the next serve; reload in her answer: ${(aw / 60).toFixed(2)} s after the load; events ${h.nev().join(' ')}` };
 });
 
 test('N5', 'paging: arrows and swipes between evenings, an arrow only where there is an evening; the eighth evening pushes the first out', () => {
@@ -364,7 +418,15 @@ test('N5', 'paging: arrows and swipes between evenings, an arrow only where ther
   drive(h, line({ x: 200, y }, { x: 205, y: y + 90 }, { v: 500, hold: 30 }), { settle: 5 }); assert.equal(h.n().open, 0);
   tap(h, h.n().item); assert.equal(h.n().page, 3, 'it opens on this evening again');
   tap(h, { x: 200, y: 60 });
-  assert.deepEqual(h.nev().filter(e => e === 'page').length, 5);
+  assert.equal(h.J('nbEvents.filter(e=>e.event==="page").length'), 5, 'page turns are in the notebook journal');
+  assert.equal(h.nev().filter(e => e === 'page').length, 0, 'but not in the shared gesture log');
+  // a page turn does not rewrite the save; the rows go out with the next save
+  tap(h, h.n().item); h.frames(20);
+  const sv = h.storage.get('roti_evening'), gl = h.storage.get('dough_gestures');
+  tap(h, h.n().prev); assert.equal(h.n().page, 2);
+  assert.equal(h.storage.get('roti_evening'), sv, 'the save is not rewritten by a page turn'); assert.equal(h.storage.get('dough_gestures'), gl);
+  tap(h, { x: 200, y: 60 });
+  assert.equal(h.saved().notebook.events.filter(e => e.event === 'page').length, 6, 'the page rows are saved with the close');
   h.tick(2, 1 / 60, true); assert.equal(h.run('loopErrs'), 0);
   // seven past evenings in the save; one roti tonight → the oldest is gone
   const e = nb({ storage: saveWith([1, 2, 3, 4, 5, 6, 7].map(i => pastEvening(i))) });
@@ -443,6 +505,15 @@ test('N7', 'screen wake lock: asked when the lamp is lit, asked again after the 
   // a reload with the lamp lit asks at once
   const r = reloadN(h, {}); assert.equal(r.eve().lamp, true);
   const W2 = mock(r); r.run('eveSave()'); assert.deepEqual(W2.asked, ['screen']);
+  // the phone is left with the lamp lit: after 5 minutes without a touch the lock is released; a touch asks again
+  const i7 = nb(); const WI = mock(i7); light(i7); stretched(i7);
+  assert.equal(WI.asked.length, 1); assert.equal(i7.run('!!eveWake'), true);
+  i7.advance(4 * 60 * 1000); i7.frames(2); assert.equal(WI.released, 0, 'held for 4 minutes');
+  i7.advance(61 * 1000); i7.frames(2);
+  assert.equal(WI.released, 1, 'released after 5 minutes without a touch'); assert.equal(i7.run('!!eveWake'), false);
+  i7.frames(120); assert.equal(WI.asked.length, 1, 'not asked again while nobody touches');
+  i7.touch('start', 't1', 20, 400); i7.frames(2); i7.touch('end', 't1', 20, 400); i7.frames(2);
+  assert.equal(WI.asked.length, 2, 'the first touch asks again'); assert.equal(i7.run('!!eveWake'), true);
   // the stand mode does not hold the screen
   const d = nb({ search: '?dev=1' }); const W3 = mock(d); d.run('EVE.lamp=true;eveSave()'); assert.deepEqual(W3.asked, []);
   // no wakeLock at all (the mock navigator is {}), a refusal, a throw: nothing breaks
