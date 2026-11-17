@@ -11,7 +11,7 @@
 // до 400%+ и лист «рвётся» в середине от любого движения. Замер это обнаружил сразу.
 // Число узлов сохранено (1 060 после обрезки по кругу; прежняя оценка «~1150» была на глаз,
 // пересчитано 07.09.2026), однородность рёбер восстановлена.
-const BUILD = "2026-11-17 · перенос в руке: лист на таву и роти на стол · 71";
+const BUILD = "2026-11-17 · конверт: четыре стороны к середине, ровные складки, мах наружу — переворот · 72";
 const GRID = 38;                   // 38x38, в круг попадает 1 060 узлов (посчитано, не оценка)
 let SUBSTEPS = 8;                  // T2: 8–10 подшагов, 1 итерация
 let DAMP = 0.986;
@@ -418,7 +418,7 @@ function startDish(){
   dish.flips=0; dish.panTime=0; dish.sessions=[{flip:0,start:0,gold:null}];
   fryStageNow = 1; fryJumpAt = 0;
   dish.holes=quadCons.filter(cs=>cs.some(c=>c.broken)).length;   // рваные ячейки листа при посадке
-  rebuildDishContact(); dish.hull=dishHull(); syncDishUI();
+  rebuildDishContact(); dish.hull=dishHull(); dish.env=envelopeFrame(); syncDishUI();
 }
 // Heat belongs to material, not to a geometry snapshot. Undo never rewinds cooking.
 function pointInFace(points,x,y){
@@ -1086,6 +1086,58 @@ function dishCookColor(f,side,through=true){
   return lerp3(own, cookColor(base, bot), w);
 }
 
+// ─── Конверт (срез 3, сборка 72). Лист ложится на таву ровно к столу (посадка кратна 90°), и у него
+// четыре стороны. Рамка конверта привязана к МАТЕРИАЛУ, не к экрану: середина листа c, две оси u и v
+// и полуразмеры h — расстояние от середины до края по каждой из четырёх сторон (+u, −u, +v, −v).
+// Поворот и переворот преобразуют рамку вместе с гранями, «отменить» возвращает её из истории.
+// Штрих от стороны к середине, не дальше FOLD_SNAP_ANG от оси (угол — в экранной мерке: вид из-за
+// прилавка сжимает вертикаль в TILT раз), ставит складку РОВНО: сгиб параллелен стороне и проходит
+// на половине пути до середины, кромка клапана ложится на среднюю линию. Две стороны — прямоугольник,
+// четыре — квадрат в четверть листа, швы крестом. Штрих наискось, слишком мелкий или слишком глубокий
+// (вне FOLD_SNAP_MIN…MAX от расстояния до средней линии) и повтор по уже завёрнутой стороне дают
+// свободную складку, как раньше. Верхняя граница 1,5 — середина между «к середине» (палец прошёл 1)
+// и «пополам» (палец прошёл 2): на телефоне полстороны по вертикали — около 55 px, и палец легко
+// проскакивает среднюю линию (живая проверка сборки 72: при границе 1,25 мах в 105 px дал косую
+// свободную складку). Штриху быстрее FOLD_FAST_CSS глубина не важна: мах пальцем её не выбирает.
+// Числа — стартовые, не замер.
+const FOLD_SNAP_COS = Math.cos(35*Math.PI/180), FOLD_SNAP_MIN = 0.35, FOLD_SNAP_MAX = 1.5, FOLD_SNAP_FROM = 0.6, FOLD_FAST_CSS = 500;
+function envelopeFrame(){
+  const b=dishBounds();
+  return {c:{x:(b.left+b.right)/2,y:(b.top+b.bottom)/2},u:{x:1,y:0},v:{x:0,y:1},
+    h:[(b.right-b.left)/2,(b.right-b.left)/2,(b.bottom-b.top)/2,(b.bottom-b.top)/2],done:[0,0,0,0]};
+}
+function envSide(E,k){ const a=k<2 ? E.u : E.v, s=k%2 ? -1 : 1; return {x:a.x*s,y:a.y*s}; }
+function envDoneCount(){ return dish && dish.env ? dish.env.done.reduce((s,d)=>s+(d?1:0),0) : 0; }
+function envelopeDone(){ return envDoneCount()===4; }
+// point — как едет точка, vec — как едет направление (поворот или зеркало без сдвига)
+function envMoved(E,point,vec){ return E ? {...E,c:point(E.c),u:vec(E.u),v:vec(E.v)} : E; }
+function snapFold(g,fast){
+  const E=dish.env; if(!E || !g.target || !g.anchor) return null;
+  const wx=g.target.x-g.anchor.x, wy=g.target.y-g.anchor.y, wl=Math.hypot(wx,wy*TILT);
+  if(wl<1e-9) return null;
+  let best=null;
+  for(let k=0;k<4;k++){
+    if(E.done[k]) continue;
+    const d=envSide(E,k), h=E.h[k], from=(g.anchor.x-E.c.x)*d.x+(g.anchor.y-E.c.y)*d.y;
+    if(!(h>1e-6) || from<FOLD_SNAP_FROM*h) continue;             // штрих начат не с этой стороны
+    const cos=-(wx*d.x+wy*d.y*TILT*TILT)/(wl*Math.hypot(d.x,d.y*TILT));   // угол к оси на экране
+    if(cos<FOLD_SNAP_COS) continue;
+    const depth=-(wx*d.x+wy*d.y)/from;                           // доля пути от кромки до средней линии
+    if(!fast && (depth<FOLD_SNAP_MIN || depth>FOLD_SNAP_MAX)) continue;
+    if(!best || cos>best.cos) best={k,d,h,cos};
+  }
+  if(!best) return null;
+  // Вдоль стороны точка остаётся там, где палец: сгиб от этого не зависит, а лопатка рисуется под рукой.
+  const t={x:-best.d.y,y:best.d.x}, along=(g.anchor.x-E.c.x)*t.x+(g.anchor.y-E.c.y)*t.y;
+  const base={x:E.c.x+t.x*along,y:E.c.y+t.y*along};
+  return {side:best.k,anchor:{x:base.x+best.d.x*best.h,y:base.y+best.d.y*best.h},target:base};
+}
+// Что складывать: ровная складка конверта, если штрих на неё похож, иначе — как провела.
+function foldPlan(g,fast){
+  if(!g.target || !inwardFold(g)) return null;
+  const s=snapFold(g,fast);
+  return s || {side:-1,anchor:g.anchor,target:g.target};
+}
 function foldGeometry(anchor,end){
   const dx=anchor.x-end.x, dy=anchor.y-end.y, length=Math.hypot(dx,dy);
   if(length<.12) return null;
@@ -1110,7 +1162,7 @@ function foldGeometry(anchor,end){
   return {faces:fixed.concat(moving.reverse()),crease:{nx,ny,offset},slot:slot<0 ? fixed.length : slot};
 }
 function rememberDish(){
-  pushHistory({faces:dish.faces,folds:dish.folds,cuts:dish.cuts,flips:dish.flips||0,
+  pushHistory({faces:dish.faces,folds:dish.folds,cuts:dish.cuts,flips:dish.flips||0,env:dish.env,
     filling:(dish.filling||[]).map(f=>({...f}))});
 }
 // До 20 шагов назад; шаг «вернуть на таву» (toPan) не выпадает никогда — иначе после 20 действий
@@ -1121,7 +1173,7 @@ function pushHistory(entry){
     if(dish.history[0].toPan) dish.history.splice(1,1); else dish.history.shift();
   }
 }
-function foldDish(anchor,end,yank){
+function foldDish(anchor,end,yank,side=-1){
   const next=foldGeometry(anchor,end); if(!next) return false;
   panPress=[]; popAllDomes();
   rememberDish();
@@ -1130,7 +1182,14 @@ function foldDish(anchor,end,yank){
   dish.faces=restampFillings(next.faces, tokens, next.slot);
   dish.filling=tokens;
   dish.folds++; dish.hull=dishHull(); rebuildDishContact();
-  dish.message=`Складок: ${dish.folds} · можно сложить ещё`;
+  if(side>=0 && dish.env){ const done=dish.env.done.slice(); done[side]=1; dish.env={...dish.env,done}; }   // новая рамка: прежняя живёт в истории
+  const n=envDoneCount();
+  // dishNote, а не dish.message: строка стадии жарки затирала подпись в том же кадре (живая проверка сборки 72).
+  dishNote(side<0 ? `Складок: ${dish.folds} · можно сложить ещё`
+    : n===4 ? "Конверт готов · мах от края — перевернуть · за середину — на стол"
+    : n===2 && dish.env.done[0]===dish.env.done[1] ? "Прямоугольник · заверни две другие стороны"
+    : `Сторона завёрнута: ${n} из 4`);
+  if(side>=0 && n===4) audioReady();
   syncDishUI(); return true;
 }
 // ─── Подача (решение владелицы 16.09): техническая кнопка «подать» → карточка → «следующий роти».
@@ -1177,7 +1236,7 @@ function startCutting(){
   const b=dishBounds(); dish.cutBounds=b; dish.cutCenter={x:(b.left+b.right)/2,y:(b.top+b.bottom)/2};
   // Первая отмена на столе возвращает лист на таву вместе с историей складок: случайное
   // снятие обратимо (находка проверки 16.09).
-  dish.history=[{faces:dish.faces,folds:dish.folds,cuts:dish.cuts,flips:dish.flips||0,
+  dish.history=[{faces:dish.faces,folds:dish.folds,cuts:dish.cuts,flips:dish.flips||0,env:dish.env,
     filling:(dish.filling||[]).map(f=>({...f})),toPan:{history:dish.history}}];
   dish.mode="cut"; phase="CUT";
   dish.message="Проведи через конверт · длину и направление выбираешь сама";
@@ -1280,7 +1339,8 @@ function flipGeometry(dir,landing={x:0,y:0}){
     faces.push({...f,turned:!f.turned,points:f.points.map(mirror)});
   }
   const filling=(dish.filling||[]).map(t=>{ const q=mirror({x:t.x,y:t.y}); return {...t,x:q.x,y:q.y}; });
-  return {faces:restampFillings(faces, filling, slot),filling,axis:{nx,ny,c},from:c,to:{x:tx,y:ty}};
+  const env=envMoved(dish.env, p=>mirror({x:p.x,y:p.y}), w=>{ const d=w.x*nx+w.y*ny; return {x:w.x-2*d*nx,y:w.y-2*d*ny}; });
+  return {faces:restampFillings(faces, filling, slot),filling,env,axis:{nx,ny,c},from:c,to:{x:tx,y:ty}};
 }
 function startPanSession(){
   // Если на сталь легла уже золотая сторона, «0 с» засоряло бы замер бюджета: пишем «уже».
@@ -1290,8 +1350,9 @@ function startPanSession(){
 function commitFlip(next){
   panPress=[];                                   // лист перевернулся: пятна прижима остались на прежнем месте
   rememberDish(); dish.faces=next.faces; if(next.filling) dish.filling=next.filling; dish.flips=(dish.flips||0)+1;
+  if(next.env) dish.env=next.env;
   dish.hull=dishHull(); rebuildDishContact(); startPanSession();
-  dish.message=`Перевёрнуто: ${dish.flips} · жарится другая сторона`;
+  dishNote(`Перевёрнуто: ${dish.flips} · жарится другая сторона`);
   syncDishUI();
 }
 // Технический и жестовый вход одинаковы: полёт 0,45 с, посадка — шлепок и волна шипения.
@@ -1359,7 +1420,7 @@ function rotateDish(angle,pivot=twistPivot()){
   const filling=(dish.filling||[]).map(t=>{ const q=R(t); return {...t,x:q.x,y:q.y}; });
   if(dish.mode==="cut"){
     // Отмена поворота на столе возвращает и рамку масштаба.
-    pushHistory({faces:dish.faces,folds:dish.folds,cuts:dish.cuts,flips:dish.flips||0,cutBounds:dish.cutBounds,cutCenter:dish.cutCenter,
+    pushHistory({faces:dish.faces,folds:dish.folds,cuts:dish.cuts,flips:dish.flips||0,cutBounds:dish.cutBounds,cutCenter:dish.cutCenter,env:dish.env,
       filling:(dish.filling||[]).map(f=>({...f}))});
     dish.faces=faces; dish.cuts=dish.cuts.map(c=>({...c,a:R(c.a),b:R(c.b)}));
     // Середина раскладки — середина повёрнутых границ: так же, как в предпросмотре (иначе
@@ -1370,6 +1431,7 @@ function rotateDish(angle,pivot=twistPivot()){
     rememberDish(); dish.faces=faces; rebuildDishContact();
   }
   dish.filling=filling;
+  dish.env=envMoved(dish.env, R, w=>({x:w.x*cs-w.y*sn,y:w.x*sn+w.y*cs}));
   dish.hull=dishHull();
   if (typeof drizzleRotate === "function") drizzleRotate(angle, pivot);
   const deg=Math.round(angle*180/Math.PI);
@@ -1442,11 +1504,12 @@ function syncDishUI(){
   const served=!!dish && dish.mode==="served";
   for(const id of ["flipDish","cutMode","undoDish"]){ const b=document.getElementById(id); if(b) b.hidden=served; }
   if(dish) hintEl.textContent=dish.mode==="fold"
-    ? (dish.folds ? "край: внутрь — складка · мах — переворот · за середину — унести на стол · держи — прижим · "+TWIST_HINT
+    ? (envelopeDone() ? "конверт готов · мах от края — переворот · за середину — унести на стол · держи — прижим"
+       : dish.folds ? "от стороны к середине — складка · мах наружу или вбок — переворот · за середину — унести на стол · держи — прижим · "+TWIST_HINT
        : (dish.filling && dish.filling.length
-         ? (fillingUnderSheet() ? "начинка под листом · мах — перевернуть обратно · край внутрь — складка"
-           : "начинка на листе · край внутрь — складка")
-         : "положи банан и яйцо на середину, потом заверни края"))
+         ? (fillingUnderSheet() ? "начинка под листом · мах наружу — перевернуть обратно · от стороны к середине — складка"
+           : "начинка на листе · веди от каждой стороны к середине — четыре складки дают конверт")
+         : "положи банан и яйцо в пунктирный квадрат, потом заверни четыре стороны к середине"))
     : dish.mode==="served" ? "Подано · «следующий роти» — новый кусочек"
     : "Нарезка: проведи через конверт · "+TWIST_HINT;
   const ban=document.getElementById("bananaMode");
@@ -1463,10 +1526,10 @@ function syncDishUI(){
 // Складка — только ВНУТРЬ листа. Раньше линия сгиба строилась по любому сдвигу длиннее
 // 0,12, и сдвиг пальца вдоль кромки на 10 CSS px складывал полсписта (портрет: сгиб
 // поперёк движения проходил через середину листа). Теперь сдвиг меряется вдоль
-// внутренней нормали кромки и должен смотреть внутрь не дальше 60° от неё.
+// внутренней нормали кромки и должен смотреть внутрь не дальше 70° от неё.
 // До 10 CSS px от точки касания жест не читается вовсе: это дрожание пальца
 // (iOS allowableMovement 10 pt, Android touch slop 8 dp). Числа — для пробы, не замер.
-const FOLD_MIN_DEPTH = 0.12, FOLD_MAX_ANGLE_COS = Math.cos(60*Math.PI/180), TOUCH_SLOP_CSS = 10;
+const FOLD_MIN_DEPTH = 0.12, FOLD_MAX_ANGLE_COS = Math.cos(70*Math.PI/180), TOUCH_SLOP_CSS = 10;   // сборка 72: 60° → 70°, и угол теперь экранный (inwardFold)
 function beginDishGesture(id,p,client,time){
   if(dishGesture || dishTwist || dishFlight || dishMove || dish.mode==="served") return;
   const start=dishLocal(p), at=client || {x:0,y:0}, t0=Number.isFinite(time) ? time : performance.now();
@@ -1524,11 +1587,14 @@ function beginDishGesture(id,p,client,time){
     stroke:{start:null,path:0,lastMoveT:t0,lastT:t0,pos:{x:at.x,y:at.y}}};
   audioScrape();                              // ответ инструмента: лопатка коснулась стали у края
 }
+// Угол конуса меряется так, как его видит рука, — на экране: вид из-за прилавка сжимает вертикаль в
+// TILT раз, и в координатах блюда штрих под 45° на экране у боковых кромок уходил за 60° (6 «ничего»
+// из 160, runs/fix91-diagnosis), а у ближней и дальней конус был шире заявленного. Сборка 72.
 function inwardFold(g){
-  const vx=g.target.x-g.anchor.x, vy=g.target.y-g.anchor.y, len=Math.hypot(vx,vy);
+  const vx=g.target.x-g.anchor.x, vy=g.target.y-g.anchor.y, len=Math.hypot(vx,vy*TILT);
   return (g.inwards || [g.inward]).some(n=>{
     const depth=vx*n.x+vy*n.y;
-    return depth>=FOLD_MIN_DEPTH && depth>=len*FOLD_MAX_ANGLE_COS;
+    return depth>=FOLD_MIN_DEPTH && vx*n.x+vy*n.y*TILT*TILT>=len*Math.hypot(n.x,n.y*TILT)*FOLD_MAX_ANGLE_COS;
   });
 }
 // Штрих — непрерывное движение пальца. Пауза длиннее STROKE_PAUSE_MS начинает новый штрих:
@@ -1588,11 +1654,15 @@ function moveDishGesture(p,client,time){
     if(!g.moved){ g.target=null; g.preview=null; return; }
     // Сохраняем смещение пальца от выбранной кромки, чтобы лист не прыгал к нему.
     g.target={x:g.anchor.x+g.end.x-g.start.x,y:g.anchor.y+g.end.y-g.start.y};
-    // Первые 110 мс быстрого штриха складку не показываем: это может быть мах, и
-    // полсписта не должно мелькать перед переворотом.
+    // Штрих внутрь — складка при любой скорости (сборка 72), поэтому предпросмотр виден сразу: мах-переворот
+    // идёт наружу или вбок и складку не показывает. У готового конверта быстрый штрих внутрь — тоже
+    // переворот, и его первые 110 мс клапан не мелькает.
+    const vNow=client ? velocityOf(g,t).speed : 0;
+    if(vNow>=FOLD_FAST_CSS) g.fastSeen=true;
     const fresh=client && g.stroke && g.stroke.start!==null && t-g.stroke.start<FOLD_PREVIEW_DELAY_MS;
-    const fast=fresh && velocityOf(g,t).speed>=FLICK_MIN_CSS;
-    g.preview=!fast && inwardFold(g) ? foldGeometry(g.anchor,g.target) : null;
+    const flicking=envelopeDone() && fresh && vNow>=FLICK_MIN_CSS;
+    g.plan=flicking ? null : foldPlan(g,!!g.fastSeen);
+    g.preview=g.plan ? foldGeometry(g.plan.anchor,g.plan.target) : null;
     if(g.preview && dish.filling && dish.filling.length){
       const tok=scootFillings(dish.filling, g.preview.crease.nx, g.preview.crease.ny, g.preview.crease.offset, foldYank(g));
       clampFillings(tok, g.preview.faces);
@@ -1708,7 +1778,12 @@ function endDishGesture(time){
   }
   const last=g.samples[g.samples.length-1], f=flickOf(g,tUp), extra=pressExtra(g,tUp);
   if(g.press && !g.moved){ logPanGesture("press",f,extra); return; }
-  if(f.ok){
+  // Сборка 72: штрих ВНУТРЬ листа — складка при любой скорости (быстрая складка 100–130 px за
+  // 100–200 мс превышала порог маха и переворачивала лист: 8 из 19, runs/fix91-diagnosis). Переворот —
+  // мах наружу или вбок. У готового конверта (четыре стороны завёрнуты) складывать нечего, и там
+  // быстрый мах от края переворачивает в любую сторону.
+  const inward=!!g.target && inwardFold(g);
+  if(f.ok && !(inward && !envelopeDone())){
     // Лист уходит по направлению маха: направление переводим из экрана в координаты блюда.
     const a=dishLocal(toLocal(last.x-f.vx*.05,last.y-f.vy*.05)), b=dishLocal(toLocal(last.x,last.y));
     const len=Math.hypot(b.x-a.x,b.y-a.y);
@@ -1720,7 +1795,9 @@ function endDishGesture(time){
       if(ok) return;
     }
   }
-  const ok=g.target&&inwardFold(g)&&foldDish(g.anchor,g.target,foldYank(g));
+  const plan=foldPlan(g, !!g.fastSeen || (f.speed>=FOLD_FAST_CSS && f.stale<=dishStaleMs(g)));
+  const ok=!!plan && foldDish(plan.anchor,plan.target,foldYank(g),plan.side);
+  if(ok){ extra.snap=plan.side>=0; extra.side=plan.side; extra.env=envDoneCount(); audioScrape(); }
   // Повела от кромки на стол — прежний жест снятия: подсказываем новый (взять за середину).
   if(!ok && g.moved && slideEndsOnTable(last)) dishNote(dish.folds ? "На стол — возьми роти за середину и неси" : "Сначала сверни края — потом на стол");
   logPanGesture(ok ? "fold" : "none",f,extra);
@@ -2995,6 +3072,22 @@ function drawPressDents(g,screen,H,zk,pose,sx,sy){
     }
   }
 }
+// Бледная разметка конверта: середина листа в половину его размера — сюда кладётся начинка и сюда
+// ложатся кромки клапанов. Сторона, которая уже завёрнута, свою линию теряет; у готового конверта
+// разметки нет.
+function drawFoldGuide(g,screen,sx){
+  const E=dish.env; if(!E || envelopeDone() || phase!=="PAN") return;
+  const at=(a,b)=>screen({x:E.c.x+E.u.x*a+E.v.x*b,y:E.c.y+E.u.y*a+E.v.y*b});
+  const x1=E.h[0]/2, x0=-E.h[1]/2, y1=E.h[2]/2, y0=-E.h[3]/2;
+  const lines=[[x1,y0,x1,y1],[x0,y0,x0,y1],[x0,y1,x1,y1],[x0,y0,x1,y0]];   // сгибы сторон +u, −u, +v, −v
+  g.save(); g.strokeStyle="rgba(255,246,222,.42)"; g.lineWidth=Math.max(1,1.5*sx); g.setLineDash([5*sx,5*sx]);
+  for(let k=0;k<4;k++){
+    if(E.done[k]) continue;
+    const a=at(lines[k][0],lines[k][1]), b=at(lines[k][2],lines[k][3]);
+    g.beginPath(); g.moveTo(a.x,a.y); g.lineTo(b.x,b.y); g.stroke();
+  }
+  g.restore();
+}
 function drawDish(g,sx,sy){
   let pose=dishPose(), moving=false;
   if(dishFlight){ drawDishFlight(g,sx,sy,pose); return; }
@@ -3025,12 +3118,13 @@ function drawDish(g,sx,sy){
     // change. During a drag the existing flat preview remains immediate.
     if(!moving&&(dish.folds||dish.cuts.length)&&!(dishGesture&&dishGesture.preview)) drawDishSections(g,screen,faces,sx,sy,zk,H);
   }
+  if(dish.mode==="fold" && !moving && !slide) drawFoldGuide(g,screen,sx);
   if(dish.mode==="fold" && !(dishGesture && dishGesture.preview)) drawDomes(g,screen,H,zk);
   if(dish.mode==="fold") drawPressDents(g,screen,H,zk,pose,sx,sy);
   if(dishGesture && !slide && dishGesture.zone!=="middle" && !(dishGesture.press && !dishGesture.moved)){
     const d=dishGesture, o=d.cutShift||{x:0,y:0}, up=dish.mode==="cut" ? tableLiftCanvas()*sy : 0;
     const sh=q=>{ const a=screen({x:q.x+o.x,y:q.y+o.y}); return {x:a.x,y:a.y-up}; };
-    const a=sh(d.anchor||d.start),b=sh(d.target||d.end);
+    const a=sh((d.plan&&d.plan.anchor)||d.anchor||d.start),b=sh((d.plan&&d.plan.target)||d.target||d.end);
     g.strokeStyle=dish.mode==="fold" ? "#eab562" : "#f5ead6";g.lineWidth=Math.max(1,2*sx);
     g.beginPath();g.moveTo(a.x,a.y);g.lineTo(b.x,b.y);g.stroke();
     // Короткое лезвие остаётся под пальцем во время реза.
