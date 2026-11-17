@@ -182,8 +182,18 @@ test('V3', 'a whole ball by touches: flatten → stretch → tava → envelope �
   const h = evening(); light(h);
   const holds = flatten(h), pulls = stretch(h);
   assert.equal(h.saved().stage, 'step3', 'the step change is saved');
-  toPan(h); envelope(h); toTable(h);
-  // before the first cut a stroke from the middle is a cut, not a carry
+  toPan(h);
+  // the stand's wording about buttons the game does not have is replaced by plain words
+  const words = h.J(`["Положи банан и яйцо, потом заверни края","Банан · клади дальше, лей яйцо или заверни края","Банан на месте · яйцо или заверни края",
+    "На столе · режь прямым движением","Разрезов: 1 · режь дальше или «заново»","порвался без предсказания — жми «сейчас порвётся», пока тянешь",
+    "лист уже порван — предсказывать нечего, жми «заново»"].map(m=>eveningLive(m))`);
+  for (const w of words) assert.ok(typeof w === 'string' && w.length && !/яйц|заново|жми|сейчас порвётся/.test(w), `plain words instead of stand wording: ${w}`);
+  assert.equal(h.run('eveningLive("сырое · подсыхает")'), null, 'other stand lines pass through');
+  envelope(h); toTable(h);
+  // an uncut roti led from its middle to the counter is neither a cut nor a serve
+  serve(h);
+  assert.equal(h.run('dish.cuts.length'), 0, 'no cut by a carry to the counter'); assert.equal(h.eve().rotiDone, 0);
+  assert.match(h.run('dish.message'), /Сначала разрежь/);
   cut(h);
   serve(h, { short: true });
   assert.equal(h.run('!!dish'), true, 'released over the tava: the roti stays on the table');
@@ -198,6 +208,10 @@ test('V3', 'a whole ball by touches: flatten → stretch → tava → envelope �
   assert.deepEqual(h.events(), ['lamp', 'ball', 'serve']);
   // free table: the dough does not answer, the bowl gives the next ball
   const S = h.spots(); tap(h, S.work); assert.equal(h.run('action.state'), 'RESTING');
+  // the bowl hint waits for 6 s of standing still; a touch anywhere starts the wait again
+  assert.equal(h.run('eveningLive("")'), '');
+  h.frames(420); assert.equal(h.run('eveningLive("")'), 'следующий шарик — в миске');
+  tap(h, S.work); assert.equal(h.run('eveningLive("")'), '', 'touching the screen is not idling');
   afterOne = [...h.storage];
   tap(h, S.bowl);
   assert.equal(h.eve().ballsLeft, 1); assert.equal(h.eve().ball, true); assert.equal(h.run('sheetHidden'), false);
@@ -239,13 +253,17 @@ test('V5', 'three roti → lid; lid onto the tava → evening over; touching the
   let S = h.spots();
   assert.equal(h.eve().ballsLeft, 0); assert.equal(S.lidHome, true, 'the lid appears');
   tap(h, S.bowl); assert.equal(h.eve().ball, false, 'the empty bowl gives nothing');
+  // nothing fries at the end of the evening: a hidden page or a reload does not put the lid on the tava
+  h.visibility(true); h.visibility(false);
+  assert.equal(h.eve().lid, false); assert.equal(h.spots().lidHome, true, 'the lid still waits on the table');
+  { const r0 = reload(h); assert.equal(r0.eve().lid, false); assert.equal(r0.spots().lidHome, true); assert.equal(r0.run('fryHold'), false); }
   // the lid dropped short of the tava goes back
   drive(h, line(S.lid, { x: S.lid.x + 30, y: S.lid.y - 20 }, { v: 300 }));
   assert.equal(h.eve().over, false);
   drive(h, line(S.lid, S.pan, { v: 300 }));
   let e = h.eve();
   assert.equal(e.over, true); assert.equal(e.lid, true); assert.equal(e.lamp, false);
-  assert.equal(h.run('eveningLive()'), 'вечер окончен · три роти');
+  assert.equal(h.run('eveningLive("")'), 'вечер окончен · три роти');
   assert.deepEqual(h.events().slice(-2), ['serve', 'lid-end']);
   const r = reload(h); assert.equal(r.eve().over, true, 'the finished evening survives a reload');
   S = h.spots(); tap(h, S.pan); assert.equal(h.eve().over, true, 'only the lump starts the next evening');
@@ -258,7 +276,11 @@ test('V5', 'three roti → lid; lid onto the tava → evening over; touching the
 });
 
 test('V6', 'visibilitychange hidden → lid on the tava, frying stands for 10 s; lid carried off → frying goes on', () => {
-  const h = evening(); light(h); stretched(h); toPan(h);
+  const h = evening(); light(h); stretched(h);
+  // dough on the table, nothing on the tava: a hidden page lays no lid
+  h.visibility(true); h.visibility(false);
+  assert.equal(h.eve().lid, false); assert.equal(h.run('fryHold'), false);
+  toPan(h);
   h.frames(60);
   // the stand's automatic filling: a touch in the middle of the open sheet lays banana slices
   tap(h, h.spots().pan); const slices = h.run('dish.filling.length');
@@ -278,8 +300,8 @@ test('V6', 'visibilitychange hidden → lid on the tava, frying stands for 10 s;
   tap(h, S.work); tap(h, S.bowl); tap(h, S.pan);
   assert.equal(h.run('gestures.length'), n0); assert.equal(h.run('dishGesture'), null);
   assert.equal(h.run('dish.filling.length'), slices, 'no banana is laid through the lid');
-  // a reload keeps the lid on
-  const r = reload(h); assert.equal(r.eve().lid, true); assert.equal(r.run('fryHold'), true);
+  // a reload restarts the ball as a lump on the table: nothing fries, so the lid is not on
+  const r = reload(h); assert.equal(r.run('phase'), 'TABLE'); assert.equal(r.eve().lid, false); assert.equal(r.run('fryHold'), false);
   // a short move leaves the lid on; carried to the side it comes off
   drive(h, line(S.lid, { x: S.lid.x + 20, y: S.lid.y + 10 }, { v: 300 }));
   assert.equal(h.eve().lid, true, 'a short move keeps the lid on');
