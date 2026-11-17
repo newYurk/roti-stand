@@ -92,6 +92,7 @@ function nbShot(){
   g.fillStyle = "#3a2c1e"; g.fillRect(0, 0, NB_SHOT_PX, NB_SHOT_PX);
   const screen = p => ({ x:NB_SHOT_PX/2 + (p.x - cx)*k, y:NB_SHOT_PX*0.52 + (p.y - cy)*k });
   nbFriedSide(() => drawDishFaces(g, dish.faces, screen, stackHeights(dish.faces), zk, true, pieceShiftLive(dish.faces)));
+  if(typeof drizzlePaint === "function") drizzlePaint(g, screen, k);   // полоса варенья (шаг 5) видна и на снимке
   if(typeof c.toDataURL !== "function") return null;
   for(const q of NB_SHOT_Q){
     const url = c.toDataURL("image/jpeg", q);
@@ -117,6 +118,8 @@ function notebookSnap(to){
 }
 // Снимки этого вечера (для ночного кадра, шаг 4).
 function notebookEvening(){ return NB.cur ? NB.evenings[NB.evenings.length - 1].snaps : []; }
+// Снимки прошлого вечера (для ночного кадра второго вечера, шаг 5).
+function notebookYesterday(){ return NB.cur && NB.evenings.length >= 2 ? NB.evenings[NB.evenings.length - 2].snaps : []; }
 // evening.js зовёт это из eveNewEvening. «Начать вечер заново» посреди вечера — тот же вечер с начала:
 // его снимки стираются. Оконченный вечер остаётся страницей; следующий начнётся с новой.
 function notebookNewEvening(from, wasOver){
