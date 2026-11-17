@@ -11,7 +11,7 @@
 // до 400%+ и лист «рвётся» в середине от любого движения. Замер это обнаружил сразу.
 // Число узлов сохранено (1 060 после обрезки по кругу; прежняя оценка «~1150» была на глаз,
 // пересчитано 07.09.2026), однородность рёбер восстановлена.
-const BUILD = "2026-11-17 · тётя Сом: первый гость, стук, кивок или хруст, подарок на полке · 75";
+const BUILD = "2026-11-17 · ровный край листа, шлепок у пунктира; вечер и тётя Сом · 77";
 const GRID = 38;                   // 38x38, в круг попадает 1 060 узлов (посчитано, не оценка)
 let SUBSTEPS = 8;                  // T2: 8–10 подшагов, 1 итерация
 let DAMP = 0.986;
@@ -75,6 +75,7 @@ let startArea = 1;                 // площадь листа при рожд�
 let gestures = [];                 // журнал шлепков (audit §6.6)
 let cons = null;                             // {a,b,rest,broken}
 let edgeNodes = [];                          // граничные узлы — за них берут лист
+let rimLoop = [], rimLoopQuad = [];          // кромка по порядку обхода (рёбра ячеек с одной ячейкой) и ячейка каждого её ребра — для рисования
 let rimRing = [];                            // те же узлы по кругу, соседи по кромке (для оплывания)
 // Разрыв — не провал и не перезапуск (решение владельца 22.08.2026): дырка остаётся
 // в листе рваным узором, симуляция не останавливается, тесто не переделывается.
@@ -402,9 +403,10 @@ function startDish(){
   if(dish) return; // раскладка начинки ровно одна на посадку
   panPress=[]; domes=[]; domeState={session:-1,left:0,next:0}; dishCrisp=0;   // жир на таве остаётся: он принадлежит сковороде
   const faces=[];
+  rimDraw();   // грани блюда берут ту же сглаженную кромку, что и рисунок листа (сборка 74)
   for(let q=0;q<quads.length;q++){
     if(quadCons[q].some(c=>c.broken)) continue;
-    const ids=quads[q], points=ids.map(i=>({x:(px[i]-panC.x)/targetR,y:(py[i]-panC.y)/targetR}));
+    const ids=quads[q], points=ids.map(i=>({x:(dX[i]-panC.x)/targetR,y:(dY[i]-panC.y)/targetR}));
     const tone=ids.reduce((s,i)=>s+thick[i],0)/4;
     // Внутренняя диагональ сохраняет вогнутые квады при выпуклом отсечении.
     for(const p of materialTriangles(points)){
@@ -3248,6 +3250,7 @@ function build(){
   quadPrev = new Float32Array(quads.length).fill(1);
   quadSm = new Float32Array(quads.length).fill(1);
   quadRest = null;
+  buildRimLoop();
   conDeg = new Int32Array(N);
   for(const cc of c){ conDeg[cc.a]++; conDeg[cc.b]++; }
 
@@ -3325,6 +3328,120 @@ function build(){
   runStart = performance.now();
 }
 
+// ─────────────────────────── кромка для рисования (сборка 74)
+// Лист — решётка 38×38, обрезанная по кругу: его граница — рёбра ячеек, то есть лесенка из
+// шагов в одну ячейку. Лесенка топологическая: как лист ни тяни, край остаётся ступенчатым,
+// и таким же он уходил в грани блюда (startDish), в полёт и на таву. Физика тут ни при чём —
+// ступени есть только в картинке. Поэтому сглаживается только картинка, в одном месте:
+// rimDraw() отдаёт координаты узлов для рисования (dX, dY), где узлы кромки стоят на
+// сглаженной вдоль обхода линии (треугольное окно ±RIM_K узлов), а все остальные — как в
+// физике. px/py не меняются; дыры, складки, начинка и рез считаются как раньше.
+// У рваного края (порванная ячейка кромки, оторванный узел) сглаживания нет: окно узла
+// обрывается на первом таком соседе, так что разрыв остаётся разрывом.
+// Два предела (правка после ревью сборки 74): узел кромки сдвигается не дальше RIM_CAP своей
+// кратчайшей соседней стороны кромки, и ни одна ячейка не рисуется меньше RIM_AREA своей
+// физической площади — иначе в сжатом углу листа ячейки схлопывались и выворачивались.
+let RIM_K = 4;                               // 0 — рисовать кромку как в физике (так её меряет checks/edge-regression.cjs «до»)
+let RIM_CAP = 0.8, RIM_AREA = 0.3, RIM_RAMP = 0.2, RIM_STEP = 0.75, RIM_STEPS = 8;   // пределы сглаживания: сдвиг узла в долях соседней стороны кромки; нарисованная площадь ячейки в долях физической
+let dX = null, dY = null, rimRaw = null, rimF = null, rimCells = [];
+function buildRimLoop(){
+  rimLoop = []; rimLoopQuad = []; rimCells = [];
+  const key = (a,b)=> a<b ? a*65536+b : b*65536+a;
+  const uses = new Map();
+  const sides = (q)=>{ const [a,b,d,e] = quads[q]; return [[a,b],[b,d],[d,e],[e,a]]; };
+  for(let q=0;q<quads.length;q++) for(const [u,v] of sides(q)){ const k = key(u,v); uses.set(k, (uses.get(k)||0)+1); }
+  const next = new Map(); let start = -1;
+  for(let q=0;q<quads.length;q++) for(const [u,v] of sides(q)){
+    if(uses.get(key(u,v)) !== 1) continue;
+    if(next.has(u)) return;                    // узел-перемычка: одной петли нет — рисуем как есть
+    next.set(u, {v, q}); if(start < 0) start = u;
+  }
+  if(start < 0) return;
+  const loop = [], lq = []; let n = start;
+  do { const e = next.get(n); if(!e) return; loop.push(n); lq.push(e.q); n = e.v; } while(n !== start && loop.length <= next.size);
+  if(n !== start || loop.length !== next.size) return;
+  rimLoop = loop; rimLoopQuad = lq;
+  const onRim = new Uint8Array(N); for(const i of loop) onRim[i] = 1;
+  for(let q=0;q<quads.length;q++){ const s = quads[q]; if(onRim[s[0]] || onRim[s[1]] || onRim[s[2]] || onRim[s[3]]) rimCells.push(q); }
+}
+function rimDraw(){
+  if(!dX || dX.length !== N){ dX = new Float32Array(N); dY = new Float32Array(N); }
+  dX.set(px); dY.set(py);
+  const L = rimLoop, n = L.length;
+  if(RIM_K < 1 || n < 4*RIM_K) return;
+  if(!rimRaw || rimRaw.length !== n) rimRaw = new Uint8Array(n);
+  rimRaw.fill(0);
+  let anyRaw = false;
+  for(let i=0;i<n;i++){
+    if(conDeg && conDeg[L[i]] <= 0){ rimRaw[i] = 1; anyRaw = true; }
+    const qc = quadCons[rimLoopQuad[i]];
+    if(qc[0].broken || (qc[1]&&qc[1].broken) || (qc[2]&&qc[2].broken) || (qc[3]&&qc[3].broken)){ rimRaw[i] = rimRaw[(i+1)%n] = 1; anyRaw = true; }
+  }
+  for(let i=0;i<n;i++){
+    let m = RIM_K;
+    if(anyRaw){
+      if(rimRaw[i]) continue;
+      m = 0;
+      while(m < RIM_K && !rimRaw[(i+m+1)%n] && !rimRaw[(i-m-1+2*n)%n]) m++;
+      if(!m) continue;
+    }
+    let sx = 0, sy = 0, sw = 0;
+    for(let j=-m;j<=m;j++){
+      const w = m+1-(j<0?-j:j), id = L[(i+j+n)%n];
+      sx += w*px[id]; sy += w*py[id]; sw += w;
+    }
+    dX[L[i]] = sx/sw; dY[L[i]] = sy/sw;
+  }
+  // Предел сдвига: узел кромки рисуется не дальше RIM_CAP от своей кратчайшей соседней стороны
+  // кромки. Где ячейки сжаты (угол листа после тяг и шлепков), окно в ±RIM_K узлов длиннее
+  // самого угла и утягивало узел внутрь на целую ячейку.
+  if(RIM_CAP > 0) for(let i=0;i<n;i++){
+    const id = L[i], ex = dX[id]-px[id], ey = dY[id]-py[id], e2 = ex*ex+ey*ey;
+    if(e2 === 0) continue;
+    const a = L[(i+n-1)%n], b = L[(i+1)%n];
+    const la = Math.hypot(px[a]-px[id], py[a]-py[id]), lb = Math.hypot(px[b]-px[id], py[b]-py[id]);
+    const lim = RIM_CAP*(la < lb ? la : lb);
+    if(e2 > lim*lim){ const k = lim/Math.sqrt(e2); dX[id] = px[id]+ex*k; dY[id] = py[id]+ey*k; }
+  }
+  // Ячейка не должна схлопнуться или вывернуться в рисунке: если её нарисованная площадь меньше
+  // RIM_AREA от физической, сглаживание её узлов кромки убавляется (доля rimF: ×RIM_STEP за шаг, на
+  // последнем из RIM_STEPS — ноль), а доля соседей по обходу подтягивается ступенями по RIM_RAMP, чтобы
+  // переход от сглаженной кромки к физической не был изломом.
+  if(RIM_AREA > 0){
+    if(!rimF || rimF.length !== N) rimF = new Float32Array(N);
+    let touched = false;
+    const guard = ()=>{
+      let changed = false;
+      for(const q of rimCells){
+        const ids = quads[q], a = ids[0], b = ids[1], d = ids[2], e = ids[3];
+        const ap = (px[d]-px[a])*(py[e]-py[b]) - (px[e]-px[b])*(py[d]-py[a]);
+        if(ap === 0) continue;
+        for(let t=0;t<RIM_STEPS;t++){
+          const ad = (dX[d]-dX[a])*(dY[e]-dY[b]) - (dX[e]-dX[b])*(dY[d]-dY[a]);
+          if(ad/ap >= RIM_AREA) break;
+          if(!touched){ for(const id of L) rimF[id] = 1; touched = true; }
+          for(const id of ids){
+            if(dX[id] === px[id] && dY[id] === py[id]) continue;
+            const k = t < RIM_STEPS-1 ? RIM_STEP : 0;
+            rimF[id] *= k; dX[id] = px[id]+(dX[id]-px[id])*k; dY[id] = py[id]+(dY[id]-py[id])*k;
+          }
+          changed = true;
+        }
+      }
+      return changed;
+    };
+    for(let round=0; round<3 && guard(); round++){
+      // подтянуть доли соседей: вперёд и назад по обходу, не больше RIM_RAMP на узел
+      for(let dir=0;dir<2;dir++) for(let c=0;c<2*n;c++){
+        const i = dir ? (2*n-1-c)%n : c%n, id = L[i], prev = L[dir ? (i+1)%n : (i+n-1)%n];
+        const cap = rimF[prev] + RIM_RAMP;
+        if(rimF[id] > cap){ const k = cap/rimF[id]; rimF[id] = cap; dX[id] = px[id]+(dX[id]-px[id])*k; dY[id] = py[id]+(dY[id]-py[id])*k; }
+      }
+    }
+    if(touched) guard();
+  }
+}
+
 // ─────────────────────────── XPBD
 function step(dt){
   // В руке и в полёте узлы заморожены: перенос — движение картинки, запекаемое при посадке.
@@ -3378,12 +3495,16 @@ function step(dt){
   // «на таву» вручную ПЕРЕСОБИРАЛО лист — растянутый своими руками уходил в мусор,
   // и на таву летел свежий. Это спорило с «как порвал, так и пожаришь»: дырки,
   // заработанные при растяжке, до тавы не доезжали (замечание владельца 08.09.2026).
-  if(stepNo===2 && sheetReadyToPan()){
+  updateAction(dt);
+  // Сборка 75: готовность судится по листу в покое — после updateAction, только в RESTING и когда
+  // узлы встали (средняя скорость ниже READY_STILL·targetR в секунду; после шлепка это ~0,3 с,
+  // после тяги сразу). Раньше шаг менялся на лету шлепка: разлёт узлов на миг давал 0,92, лист
+  // оседал до 0,91 с самым коротким сектором 0,847 при норме 0,85 (Node 17.11, серии 7006 и 7008).
+  if(stepNo===2 && action.state==="RESTING" && sheetReadyToPan() && sheetSpeed() < READY_STILL*targetR){
     stepNo = 3; advancedAt = performance.now();
     try{ localStorage.setItem("dough_step","3"); }catch(e){}
     syncStepButtons();
   }
-  updateAction(dt);
   creep(dt);
   if(action.state === "SETTLING") relaxRim(dt);
   measureThickness();
@@ -3816,7 +3937,7 @@ const PULL_SIGMA = 1.0;           // рад: угловая ширина пол�
 const PULL_OUT_COS = Math.cos(65*Math.PI/180);   // конус тяги уже конуса шлепка: вбок край не тащим
 const PULL_SKEW = 25*Math.PI/180; // край идёт за пальцем не дальше этого угла от радиуса хвата
 const PULL_NEIGH = 1.25;          // тянутый участок — не дальше стольких радиусов соседей (±30°): ни звезды, ни креста
-const PULL_OVER = 0.03;           // тяга ведёт кромку до пунктира и на столько за него; дальше — только шлепки (SQ_OVER)
+const PULL_OVER = 0.03;           // тяга ведёт кромку до пунктира и на столько за него; шлепок встаёт у пунктира (SLAP_CAP)
 const PULL_FAST_BAND = 0.25;      // доля V_SLAP над порогом, за которую язык укорачивается до PULL_FAST_CAP
 const PULL_MIN = 0.25;            // gs: короче — тесто возвращается
 const PULL_CAP_GS = 1.4, PULL_CAP_R = 0.55;   // предел хода: в gs и в радиусах листа
@@ -4465,6 +4586,7 @@ function impactAction(){
   action.state = "IMPACT";
   action.pull = null;               // язык отпущен: узлы остаются где были, длины покоя не тронуты
   const c = centerOfSheet();
+  slapRoom(action.impulse, action.direction, c);   // доли роста по секторам: до пунктира и не дальше
   applySlapImpulse(action.impulse * gestureScale, action.direction, c);
   // Сработал стоп-сигнал audit §6.6: скоростной импульс в одиночку не растил площадь —
   // жёсткий решатель гасил растяжение раньше, чем пластичность его захватывала
@@ -4484,7 +4606,7 @@ function impactAction(){
   // хороший, опасный результат»).
   if(action.impulse >= TEAR_I){
     let tmin = 1; for(let i=0;i<N;i++) if(thick[i]<tmin) tmin = thick[i];
-    if(tmin < TEAR_THIN) punchHole(action.direction);
+    if(tmin < TEAR_THIN && slapShareMean() >= SLAP_TEAR_SHARE) punchHole(action.direction);
   }
   audioSlap(action.impulse);
   plasticT = 0.15;
@@ -4502,7 +4624,10 @@ function slapWeight(x, y, direction, center, sr, t){
   // 19.10.2026: пол 0,45 и гладкий профиль без излома на боках — при изломе бока
   // от сдвига выворачивались (Node: 13–16 ячеек против 5–7). Сила SLAP_GROW подобрана
   // под сборки 2–41: её четыре маха дают ~0,85 мишени, готов за 5 шлепков.
-  const axis = 0.45 + 0.55 * Math.pow((1 + along) * 0.5, 1.5);
+  // max(0, …): у узла точно напротив маха along из-за округления бывает −1,0000000000000002,
+  // степень 1,5 от отрицательного — NaN, и за кадр NaN расходился по всему листу (сборка 75:
+  // серия 7155 из T9b --full, первый же шлепок; на сборке 74 то же).
+  const axis = 0.45 + 0.55 * Math.pow(Math.max(0, (1 + along) * 0.5), 1.5);
   const edge = Math.max(0, Math.min(1, dl/sr));
   const harden = 0.32 + 0.68 * Math.max(0, Math.min(1, t));
   return axis * (0.28 + 0.72*edge*edge) * harden;
@@ -4511,20 +4636,20 @@ function slapWeight(x, y, direction, center, sr, t){
 // ─── Мишень шага 2 — квадрат со скруглёнными углами (16.11.2026) ───
 // Владелица: роти квадратный; на кадрах бангкокских продавцов края тянут руками в почти квадрат
 // (docs/sources). Мишень — суперэллипс по осям стола: полусторона SQ_SIDE·targetR, угол на 1,11·targetR.
-// Рост режется ПО УГЛУ: сторона, дошедшая до пунктира, затухает к контуру × (1+SQ_OVER) и встаёт,
-// углы ещё растут — «тяни там, где до пунктира далеко». Раньше был один общий стоп по радиусу листа.
-// У углов запас меньше, чем у сторон (SQ_OVER_CORNER): с общим запасом 0,12 углы уходили на 1,24
-// мишени при сторонах 0,92 — готовый лист был «подушкой» с вогнутыми сторонами (ревью 17.11, P5).
-const SQ_N = 5, SQ_SIDE = 0.90, SQ_OVER = 0.12, SQ_OVER_CORNER = 0.05, RIM_BINS = 48;
+// Рост режется ПО УГЛУ: сторона, дошедшая до пунктира, встаёт, остальные ещё растут — «тяни там,
+// где до пунктира далеко». Раньше был один общий стоп по радиусу листа. Сборки 67–74 гасили рост
+// шлепка только ЗА пунктиром (до × 1,12 у сторон и × 1,05 у углов) — сборка 75 останавливает его
+// у пунктира заранее, см. «Шлепок уважает квадрат» ниже.
+const SQ_N = 5, SQ_SIDE = 0.90, RIM_BINS = 48;
 const READY_FILL = 0.92;          // sheetFill() с этого значения — лист готов к таве
+const READY_STILL = 0.02;         // …и лист при этом стоит: средняя скорость узлов, доля targetR в секунду
 const FILL_WORST = 0.85;          // готовый лист ни в одном секторе не короче этой доли мишени
-const CORNER_TICK = 0.93;         // кромка/мишень на диагонали: угол дотянут — нота и вспышка
+const CORNER_TICK = 0.97;         // кромка/мишень на диагонали: угол дотянут — нота и вспышка (до сборки 76 — 0,93:
+                                  // шлепки доводят углы до 0,92–0,96, и ноты играли без единой тяги; тяга даёт 0,98–1,00)
 const CORNER_SIDE = 0.80;         // …и соседние стороны (±30° от диагонали) дотянуты хотя бы настолько
 let rimProf = new Float32Array(RIM_BINS), rimSrc = new Float32Array(RIM_BINS), fillBuf = new Float32Array(RIM_BINS);
 const pullS = new Float32Array(RIM_BINS), pullS2 = new Float32Array(RIM_BINS);   // доли хода тяги по секторам (pullTo)
 function targetAt(th){ const c=Math.abs(Math.cos(th)), s=Math.abs(Math.sin(th)); return targetR*SQ_SIDE/Math.pow(Math.pow(c,SQ_N)+Math.pow(s,SQ_N), 1/SQ_N); }
-// Запас за пунктиром по направлению: SQ_OVER на серединах сторон, SQ_OVER_CORNER на диагоналях.
-function sqOver(th){ const c = Math.cos(2*th); return SQ_OVER_CORNER + (SQ_OVER - SQ_OVER_CORNER)*c*c; }
 // Центр мишени — место на столе, а не центр масс листа: пунктир не ездит за тестом и не прыгает
 // на отпускании (ревью 17.11, P12: 0,06 gs после двух тяг). Ставится по центру листа на входе в
 // шаг 2 и заново после любого переноса листа целиком (ресайз, возврат из руки на стол, «заново»).
@@ -4568,11 +4693,15 @@ function cornerAngle(k){ return -Math.PI*3/4 + k*Math.PI/2; }
 function resetCorners(){ cornerDone = [0,0,0,0]; cornerFlash = [0,0,0,0]; readyBlinkAt = 0; sqC = null; }
 // Угол засчитывается, только если дотянуты и соседние стороны: одни тяги за углы давали звезду
 // (угол/сторона 2,18, заполнение 0,61), а стенд играл четыре ноты и «готово» (ревью 17.11, P4).
-// Аккорд и мигание борта — когда отмечены все четыре угла И лист готов (sheetFill ≥ READY_FILL).
+// Аккорд и мигание борта — когда отмечены все четыре угла И лист готов: шаг 3 (лист в покое,
+// сборка 76 — раньше аккорд мог сыграть на лету шлепка до шага 3) и sheetFill ≥ READY_FILL.
 function checkCorners(){
   if(phase !== "TABLE" || stepNo < 2 || xf) return;
   let left = 0; for(let k=0;k<4;k++) if(!cornerDone[k]) left++;
   if(!left && readyBlinkAt) return;
+  // Углы судятся по стоящему листу (как готовность) или под пальцем во время тяги: на лету шлепка
+  // разлёт узлов на миг давал углу 0,97, лист оседал на 0,94, а нота уже сыграла (живая проба 17.11).
+  if(action.state !== "PULLING" && sheetSpeed() >= READY_STILL*targetR) return;
   rimProfile();
   const rat = a => rimProf[rimBin(a)]/targetAt(a);
   for(let k=0;k<4;k++){
@@ -4583,38 +4712,111 @@ function checkCorners(){
     cornerDone[k] = 1; cornerFlash[k] = performance.now(); left--;
     audioCornerTick(4 - left);
   }
-  if(!left && !readyBlinkAt && sheetFill() >= READY_FILL){ audioReady(); readyBlinkAt = performance.now(); }
+  if(!left && !readyBlinkAt && stepNo === 3 && sheetFill() >= READY_FILL){ audioReady(); readyBlinkAt = performance.now(); }
 }
-// Доля роста в точке (x, y): 1 до пунктира, затухает к контуру × (1+over) и там 0.
-// Профиль кромки и угол — от центра мишени (rimProfile() уже посчитан вызывающим).
-function growEase(x, y){
-  const tc = targetC(), th = Math.atan2(y - tc.y, x - tc.x);
-  const over = rimProf[rimBin(th)]/targetAt(th);
-  return over > 1.0 ? Math.max(0, 1 - (over-1.0)/sqOver(th)) : 1;
-}
-function plasticStretch(I, direction, center){
+// ─── Шлепок уважает квадрат (сборка 75, 17.11.2026) ───
+// Сборки 67–74 гасили рост шлепка только ЗА пунктиром: сторона на 0,95 мишени получала полный
+// шлепок и за один удар уходила на 1,25 (Node, серия 7005: 1,04 → 1,26; случайные серии T9b —
+// кромка 1,19–1,31 мишени). Теперь шлепок до удара считает, куда уедет кромка в каждом из
+// 48 секторов, и берёт от сектора не больше, чем осталось до пунктира:
+//   кромка′ ≈ кромка · (1 + SLAP_REACH · SLAP_GROW · I · w̄),  w̄ — средний вес шлепка вдоль луча
+//   сектора (узлы взвешены 1/r: среднее по лучу, а не по площади);
+//   доля сектора slapS = запас до пунктира × slapCap / прогноз, 0…1, сглажена по соседям.
+// Пока запаса хватает всем секторам (slapS = 1 везде), шлепок прежний, бит в бит: длины покоя
+// растут одинаково во все стороны по весу slapWeight.
+// Как только хоть один сектор упёрся, одной доли на связь мало: соседние секторы, растущие во все
+// стороны, раздвигают и поднимают упёршийся (замер Node: сторона 1,02 → 1,07 за шлепок при своей
+// доле 0). Поэтому общая часть (наименьшая доля slapMin) растит лист по-старому, а остаток даётся
+// полем смещений, как у тяги: каждый узел едет наружу ПО СВОЕМУ ЛУЧУ, кромка сектора — на
+// slapG = (slapS − slapMin) · прогноз, внутри луча — по профилю 0,28 + 0,24·(r/кромка)², и связи
+// принимают длину сдвинутой сетки. Такое поле ничего не раздвигает вбок: упёршийся сектор стоит.
+// Той же долей гаснет рывок скоростей (до SLAP_KICK_FLOOR): его разлёт закрепляет текучесть.
+// Углы: на диагоналях шлепок ведёт кромку только до пунктира × SLAP_CAP_CORNER — лист от одних
+// шлепков выходит скруглённым квадратом, острый угол дотягивает тяга. Провал узкий (sin¹⁶ 2θ):
+// ниже READY_FILL остаются 8 секторов из 48, и лист от одних шлепков готов за те же 7 шлепков.
+// SLAP_REACH 1,3 — поправка прогноза: при росте во все стороны кромка уходит дальше среднего по
+// лучу (первый шлепок: прогноз +29 %, по замеру Node +37 %).
+let SLAP_CAP = 1.0, SLAP_CAP_CORNER = 0.92, SLAP_REACH = 1.3, SLAP_KICK_FLOOR = 0.25;
+const slapS = new Float32Array(RIM_BINS), slapG = new Float32Array(RIM_BINS), slapW = new Float32Array(RIM_BINS), slapD = new Float32Array(RIM_BINS);
+let slapMin = 1, slapQx = null, slapQy = null;
+function slapCap(th){ const q = Math.sin(2*th), q2 = q*q, q4 = q2*q2, q8 = q4*q4; return SLAP_CAP + (SLAP_CAP_CORNER - SLAP_CAP)*q8*q8; }
+function slapRoom(I, direction, center){
   rimProfile();
-  const sr = Math.max(1, sheetRadius());
+  const tc = targetC(), sr = Math.max(1, sheetRadius()), rMin = sr*0.08;
+  slapW.fill(0); slapD.fill(0);
+  for(let i=0;i<N;i++){
+    if(conDeg && conDeg[i] <= 0) continue;
+    const dx = px[i]-tc.x, dy = py[i]-tc.y, r = Math.hypot(dx, dy);
+    if(r < rMin) continue;
+    const b = rimBin(Math.atan2(dy, dx)), k = 1/r;
+    slapW[b] += slapWeight(px[i], py[i], direction, center, sr, thick[i]||1) * k; slapD[b] += k;
+  }
+  for(let b=0;b<RIM_BINS;b++){
+    const th = (b+0.5)/RIM_BINS*2*Math.PI - Math.PI;
+    const grow = SLAP_REACH * SLAP_GROW * I * (slapD[b] > 0 ? slapW[b]/slapD[b] : 0);
+    const room = targetAt(th)*slapCap(th)/Math.max(1e-6, rimProf[b]) - 1;
+    slapS[b] = room <= 0 ? 0 : grow > room ? room/grow : 1;
+    slapG[b] = grow;
+  }
+  // гладко по углу и не больше себя: сосед дотянутой стороны не тащит её дальше
+  const s = slapD; s.set(slapS); slapMin = 1;
+  for(let b=0;b<RIM_BINS;b++){
+    const l = s[(b-1+RIM_BINS)%RIM_BINS], r = s[(b+1)%RIM_BINS];
+    slapS[b] = Math.min(s[b], (l + 2*s[b] + r)*0.25);
+    if(slapS[b] < slapMin) slapMin = slapS[b];
+  }
+  for(let b=0;b<RIM_BINS;b++) slapG[b] *= slapS[b] - slapMin;   // ход кромки сверх общей доли, в долях её радиуса
+}
+// Величина сектора в точке: линейно между серединами секторов (slapRoom() уже посчитан).
+function slapAt(arr, th){
+  const f = (th + Math.PI)/(2*Math.PI)*RIM_BINS - 0.5, b0 = Math.floor(f), t = f - b0;
+  return arr[((b0%RIM_BINS)+RIM_BINS)%RIM_BINS]*(1-t) + arr[(((b0+1)%RIM_BINS)+RIM_BINS)%RIM_BINS]*t;
+}
+// Средняя доля шлепка по секторам (slapRoom() уже посчитан): сколько от удара лист ещё берёт.
+// Ниже SLAP_TEAR_SHARE шлепок лист уже не растит и не утончает — и дырку не пробивает: у листа,
+// дошедшего до пунктира, дыра читалась как штраф ни за что (ревью сборки 75: 148 рваных ячеек
+// за 8 шлепков на потолке силы по готовому квадрату при той же площади и толщине). Порог по доле
+// в точке дырки не годится: к толщине 0,10 сторона по маху уже стоит у пунктира (доля 0), и
+// шлепок не рвал бы никогда (Node 17.11: пятый шлепок на потолке — средняя доля 0,25, дальше ≤ 0,04).
+const SLAP_TEAR_SHARE = 0.10;
+function slapShareMean(){ let m = 0; for(let b=0;b<RIM_BINS;b++) m += slapS[b]; return m/RIM_BINS; }
+function slapEase(x, y){ const tc = targetC(); return slapAt(slapS, Math.atan2(y - tc.y, x - tc.x)); }
+function plasticStretch(I, direction, center){
+  const sr = Math.max(1, sheetRadius()), limited = slapMin < 1;
+  if(limited){
+    // поле смещений «сверх общей доли»: узел едет по своему лучу, кромка — на slapG своего сектора
+    const tc = targetC();
+    if(!slapQx || slapQx.length !== N){ slapQx = new Float32Array(N); slapQy = new Float32Array(N); }
+    for(let i=0;i<N;i++){
+      const dx = px[i]-tc.x, dy = py[i]-tc.y, r = Math.hypot(dx, dy);
+      if(r < 1e-6){ slapQx[i] = px[i]; slapQy[i] = py[i]; continue; }
+      const th = Math.atan2(dy, dx), rim = slapAt(rimProf, th), e = rim > 0 ? Math.min(1.15, r/rim) : 1;
+      const u = slapAt(slapG, th) * (0.28 + 0.24*e*e)/0.52;       // u_r/r для профиля роста 0,28 + 0,72·e²
+      slapQx[i] = px[i] + dx*u; slapQy[i] = py[i] + dy*u;
+    }
+  }
   for(let k2=0;k2<cons.length;k2++){
     const c2 = cons[k2]; if(c2.broken) continue;
     const mx = (px[c2.a]+px[c2.b])*0.5, my = (py[c2.a]+py[c2.b])*0.5;
     const t = ((thick[c2.a]||1)+(thick[c2.b]||1))*0.5;
     const w = slapWeight(mx, my, direction, center, sr, t);
-    c2.rest *= 1 + SLAP_GROW * I * w * growEase(mx, my);
+    c2.rest *= 1 + SLAP_GROW * I * w * slapMin;
+    if(limited){
+      const d0 = Math.hypot(px[c2.b]-px[c2.a], py[c2.b]-py[c2.a]);
+      if(d0 > 1e-6) c2.rest *= Math.hypot(slapQx[c2.b]-slapQx[c2.a], slapQy[c2.b]-slapQy[c2.a])/d0;
+    }
   }
 }
 
-// Рывок скоростей тоже гаснет у дотянутой стороны (до SLAP_KICK_FLOOR): иначе разлёт узлов
+// Рывок скоростей гаснет той же долей сектора (до SLAP_KICK_FLOOR): иначе разлёт узлов
 // закреплялся текучестью, и сторона уходила за пунктир на 15 % при любом предохранителе длин
 // покоя (Node 17.11: девять сильных шлепков — сторона 1,16 мишени, площадь 1,63 круга).
-const SLAP_KICK_FLOOR = 0.25;
 function applySlapImpulse(I, direction, center){
   const sr = Math.max(1, sheetRadius());
-  rimProfile();
   for(let i=0;i<N;i++){
     const loose = conDeg ? Math.min(1, conDeg[i]/3) : 1;
     const ddx = px[i]-center.x, ddy = py[i]-center.y;
-    const kick = SLAP_KICK_FLOOR + (1-SLAP_KICK_FLOOR) * growEase(px[i], py[i]);
+    const kick = SLAP_KICK_FLOOR + (1-SLAP_KICK_FLOOR) * slapEase(px[i], py[i]);
     const w = slapWeight(px[i], py[i], direction, center, sr, thick[i]||1) * loose * kick;
     const dl = Math.hypot(ddx,ddy) || 1;
     vx[i] += (ddx/dl*0.78 + direction.x*0.22) * I * w;
@@ -5727,8 +5929,9 @@ function viewX(){
   const c = Math.cos(xf.th), s = Math.sin(xf.th);
   // Укладка (LAY): у каждого узла свой подъём — ближний край уже на стали, дальний ещё в руке.
   const S = xf.layS, u = xf.layU || 0, H = xf.layH || 0, L0 = xf.lift0 || 0, ramp = Math.min(1, u/LAY_TOUCH);
+  rimDraw();
   for(let i=0;i<N;i++){
-    const dx = px[i]-xf.cx, dy = py[i]-xf.cy;
+    const dx = dX[i]-xf.cx, dy = dY[i]-xf.cy;
     let lift = xf.lift;
     if(S){ const tau = layTouchAt(S[i]); lift = u >= tau ? 0 : (L0 + H*S[i]*ramp)*(1 - u/tau); }
     vxBuf[i] = xf.cx + xf.ox + dx*c - dy*s;
@@ -5746,8 +5949,8 @@ function pathSheetOutline(g, sx, ox, sy, oy, extraY){
     if(conDeg && conDeg[i]<=0) continue;
     let b = Math.floor((Math.atan2(py[i]-c.y, px[i]-c.x)+Math.PI)/(2*Math.PI)*bins);
     if(b<0) b=0; else if(b>=bins) b=bins-1;
-    xs[b]+=prX(px[i],py[i])*sx+ox;
-    ys[b]+=prY(px[i],py[i])*sy+oy+(extraY||0);
+    xs[b]+=prX(dX[i],dY[i])*sx+ox;          // та же сглаженная кромка, что у ячеек (draw зовёт rimDraw раньше)
+    ys[b]+=prY(dX[i],dY[i])*sy+oy+(extraY||0);
     cn[b]++;
   }
   const P=[];
@@ -5812,7 +6015,8 @@ function draw(){
     const bodyC = centerOfSheet(), bodyR2 = Math.pow(sheetRadius()*0.96, 2);
     // В руке и в полёте лист рисуется со сдвигом, поворотом и подъёмом, а под ним — тень:
     // так видно, что он оторвался от доски и летит, хотя узлы физики стоят.
-    const X = xf ? viewX() : px, Y = xf ? viewY() : py;
+    if(!xf) rimDraw();
+    const X = xf ? viewX() : dX, Y = xf ? viewY() : dY;
     if(xf){
       const gx = xf.cx + xf.ox, gy = xf.cy + xf.oy, gr = sheetRadius()*1.03;
       g.fillStyle = "rgba(6,3,1,0.42)";
@@ -5922,7 +6126,7 @@ function draw(){
         g.fillStyle="#d98b3a";
         const S2 = pixelated ? 2 : 6;
         for(const n of action.gripIds)
-          g.fillRect(prX(px[n],py[n])*sx-S2/2, prY(px[n],py[n])*sy-S2/2, S2, S2);
+          g.fillRect(prX(X[n],Y[n])*sx-S2/2, prY(X[n],Y[n])*sy-S2/2, S2, S2);
         const rr = pixelated ? 4 : 14;
         g.beginPath();
         g.ellipse(prX(action.last.x,action.last.y)*sx, prY(action.last.x,action.last.y)*sy,
@@ -6127,7 +6331,9 @@ function loop(now){
   // заполнение мишени нужно только листу на столе с шага 2 (на таве и на шаге 1 его не показывают)
   const fillNow = phase==="TABLE" && stepNo>=2 && !dish ? sheetFill() : 0, pct = Math.round(fillNow*100);
   const ragged = tornAt ? " · рваный узор" : "";
-  const ready = fillNow >= READY_FILL ? " ✓ готов · неси на таву →" : "";
+  // «готов» — только когда шаг 3 защёлкнулся (лист встал): по одному заполнению строка опережала
+  // шаг на 11–31 кадр, и бросок в этом окне оставался шлепком (ревью сборки 75)
+  const ready = stepNo===3 && phase==="TABLE" && !dish ? " ✓ готов · неси на таву →" : "";
   const banner = advancedAt && performance.now()-advancedAt < 2600;
   const mc = meanCook(), md = meanDry();
   const verdictAge = verdictAt ? performance.now() - verdictAt : Infinity;

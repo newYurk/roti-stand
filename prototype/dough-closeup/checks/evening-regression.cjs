@@ -323,7 +323,7 @@ test('V7', 'radio: the sheet opens by touch; sound is off by default and toggles
   assert.equal(h.run('soundOn'), false, 'sound is off by default');
   tap(h, h.spots().radio);
   assert.equal(sheet.hidden, false, 'the radio opens the sheet');
-  assert.match(h.nodes.get('evBuild').textContent, /сборка 75/);
+  assert.match(h.nodes.get('evBuild').textContent, new RegExp('сборка ' + h.run('BUILD').match(/(\d+)$/)[1]));
   // while the sheet is open the field does not answer
   tap(h, h.spots().bowl); assert.equal(h.eve().ballsLeft, 2);
   h.nodes.get('sound').fire('click'); assert.equal(h.run('soundOn'), true); assert.equal(h.nodes.get('sound').textContent, 'звук: вкл');
