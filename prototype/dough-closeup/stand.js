@@ -838,7 +838,7 @@ function updatePanPress(dt){
 // хруст 5 (замер — MECHANICS «Жарка, сборка 78»). Кусок убывает с каждым мазком (butterLeft).
 const FAT_N = 32, FAT_GAIN = 0.10/1.05, FAT_TAU = 2.6, FAT_BRUSH = .07, FAT_SEEP = .06;
 const FAT_SPREAD = 1.1;                  // растекание: клеток² в секунду
-let CRISP_GAIN = 40;                     // множитель роста хруста от жира под краем
+let CRISP_GAIN = 55;                     // множитель роста хруста от жира под краем
 const BUTTER_MIN = 0.3, BUTTER_PER_STAMP = 0.0006;
 let butterLeft = 1;                      // доля куска: 1 — целый; меньше BUTTER_MIN не тает (ресурсом он не стал)
 let fatGesture = null, fatUnder = 0, dishCrisp = 0, smearSoundAt = 0;
@@ -1094,11 +1094,11 @@ let flipLearned = false;   // переворот махом хоть раз уд
 function fryHint(){
   if(!envelopeDone()) return null;
   const bc=dishSideMean("cook","contactWeights"), tc=dishSideMean("cook","topWeights"), b=fryStep(bc), t=fryStep(tc);
-  const v=fryVerdict(bc,tc,+dishCrisp.toFixed(1)), how=flipLearned ? "" : " · мах от края";
+  const v=fryVerdict(bc,tc,+dishCrisp.toFixed(1));
   if(b>=4) return "край чёрный — горит";
   if(v==="crunch") return "поджарилось — за середину и на стол";
   if(v==="burnt") return "";                               // верх уже чёрный: это видно и без слов
-  if(b>=2 && t<2) return "край румяный — переверни"+how;
+  if(b>=2 && t<2) return flipLearned ? "край румяный — переверни" : "край румяный — мах от края";   // одна короткая строка: на 375 px длиннее не влезает
   return flipLearned ? "" : "мах от края — перевернуть";
 }
 // Среднее по сторонам с весами: contactWeights — то, что лежит на стали (звук и «низ»),
@@ -1297,7 +1297,7 @@ function foldDish(anchor,end,yank,side=-1){
   const n=envDoneCount();
   // dishNote, а не dish.message: строка стадии жарки затирала подпись в том же кадре (живая проверка сборки 72).
   dishNote(side<0 ? `Складок: ${dish.folds} · можно сложить ещё`
-    : n===4 ? "Конверт готов · мах от края — перевернуть · за середину — на стол"
+    : n===4 ? "конверт готов"
     : n===2 && dish.env.done[0]===dish.env.done[1] ? "Прямоугольник · заверни две другие стороны"
     : `Сторона завёрнута: ${n} из 4`);
   if(side>=0 && n===4) audioReady();

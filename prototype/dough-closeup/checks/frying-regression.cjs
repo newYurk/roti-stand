@@ -241,7 +241,7 @@ test('F2', 'one ladder and plain words: the line says nothing about frying until
   h.frames(160); note();
   assert.equal(h.run('fryHint()'), 'мах от края — перевернуть', 'the way to flip stays in the line until a flip succeeds');
   until(h, 'fryStep(meanCook())>=2'); h.frames(2); note();
-  assert.equal(live(h), 'край румяный — переверни · мах от края');
+  assert.equal(live(h), 'край румяный — мах от края');
   edgeStroke(h, { v: 700 }); for (let i = 0; i < 40; i++) { h.frames(1); note(); }
   assert.equal(h.run('flipLearned'), true);
   let ready = null, n = 0;
@@ -254,7 +254,7 @@ test('F2', 'one ladder and plain words: the line says nothing about frying until
   assert.equal(live(h), 'край чёрный — горит');
   const all = [...seen];
   for (const m of all) assert.ok(!/можно начинку|→|сырое|подсыхает|дальше темнеть/.test(m), `no old frying words: ${m}`);
-  for (const m of all.filter(m => /край|поджарилось|мах от края — перевернуть/.test(m))) assert.ok(m.length <= 44, `one short line: ${m} (${m.length})`);
+  for (const m of all.filter(m => /край|поджарилось|мах от края — перевернуть/.test(m))) assert.ok(m.length <= 36, `one short line (36 characters fit one line at 375 px with the guest): ${m} (${m.length})`);
   // the ladder is one
   assert.deepEqual(h.J('[0,0.079,0.08,0.279,0.28,0.549,0.55,1.099,1.1,1.4].map(c=>cookWord(c)+"/"+guestStepOf(c))'),
     ['сырое/0', 'сырое/0', 'бледное/1', 'бледное/1', 'приготовленное/2', 'приготовленное/2', 'зажаренное/3', 'зажаренное/3', 'горелое/4', 'горелое/4']);
