@@ -11,9 +11,17 @@
    маленьком телефоне она вместе со строкой ложилась на радио и стойку.
    Гость (guest.js, шаг 2 v0) грузится после этого файла; отсюда его зовут под typeof: guestUpdate,
    guestDraw, guestDrawOver, guestServe, guestLive, guestReset, guestState, guestExport, guestTook. Без него вечер
-   идёт как в шаге 1. */
+   идёт как в шаге 1.
+   Тетрадь (notebook.js, шаг 3 v0) грузится после гостя; её зовут так же под typeof: notebookDown / Move / Up,
+   notebookUpdate, notebookDrawItem, notebookDraw, notebookSnap, notebookNewEvening, notebookOpen,
+   notebookState, notebookExport. Её снимки лежат в том же сохранении (roti_evening.notebook) и вечер
+   заново не стирает прошлые вечера. Экран не гаснет, пока лампа горит (eveWakeSync, внизу файла).
+   Пёс и ночной кадр (night.js, шаг 4 v0) грузятся последними; их зовут под typeof: nightDogHit, nightServe, nightLive,
+   nightTook, nightUpdate, nightDrawUnder, nightDrawOver, nightDraw, nightReset, nightState, nightExport.
+   С ним строка «вечер окончен» пустая: конец вечера показывает ночной кадр. */
 
 const EVE_KEY = "roti_evening", EVE_VERSION = 1, EVE_BALLS = 3;
+const EVE_WAKE_IDLE_MS = 5*60*1000; // экран держится включённым столько после последнего касания или события вечера
 const EVE_IDLE_HINT_MS = 6000;      // подсказка «шарик в миске» / «накрой крышкой» — только если она стоит
 const EVE_LID_ON = 0.6;             // крышка легла, если её середина ближе этой доли радиуса тавы к центру
 const EVE_SKY = ["#5b4a55", "#40384a", "#292838", "#14141d"];   // сумерки → вечер → поздний вечер → ночь
@@ -26,6 +34,8 @@ let eveDev = false;                 // режим стенда: панель в�
 let eveDrag = null;                 // крышка в руке: {id, x, y, dx, dy} в пикселях холста
 let eveIdleAt = 0, eveStage = "", eveRestartArmed = 0;
 let eveGuestRaw = null;             // сохранённый гость, пока guest.js ещё не загрузился (он читает это при запуске)
+let eveNbRaw = null;                // сохранённая тетрадь, пока notebook.js ещё не загрузился
+let eveNightRaw = null;             // сохранённые пёс и ночной кадр, пока night.js ещё не загрузился
 let eveServePt = null;              // где отпущен роти (client px): гость смотрит, над ним ли
 const eveRoot = document.documentElement || document.body;
 const eveEl = id => document.getElementById(id);
@@ -42,6 +52,8 @@ function eveLoad(){
       lid:!!s.lid, over:!!s.over, ball:!!s.ball };
     if(Array.isArray(s.events)) eveEvents = s.events.slice(-80);
     if(s.guest && typeof s.guest === "object") eveGuestRaw = s.guest;
+    if(s.notebook && typeof s.notebook === "object") eveNbRaw = s.notebook;
+    if(s.night && typeof s.night === "object") eveNightRaw = s.night;
   }catch(e){}
 }
 function eveStageNow(){
@@ -52,7 +64,10 @@ function eveStageNow(){
 function eveSave(){
   eveStage = eveStageNow();
   const guest = typeof guestState === "function" ? guestState() : eveGuestRaw || undefined;
-  try{ localStorage.setItem(EVE_KEY, JSON.stringify({ ...EVE, stage:eveStage, events:eveEvents, guest, ts:new Date().toISOString() })); }catch(e){}
+  const notebook = typeof notebookState === "function" ? notebookState() : eveNbRaw || undefined;
+  const night = typeof nightState === "function" ? nightState() : eveNightRaw || undefined;
+  try{ localStorage.setItem(EVE_KEY, JSON.stringify({ ...EVE, stage:eveStage, events:eveEvents, guest, notebook, night, ts:new Date().toISOString() })); }catch(e){}
+  eveWakeSync();
 }
 function eveLog(event, extra){
   const row = { event, ballsLeft:EVE.ballsLeft, rotiDone:EVE.rotiDone, ...(extra || {}), ts:new Date().toISOString() };
@@ -63,7 +78,9 @@ function eveLog(event, extra){
   eveIdleAt = performance.now();
   eveSave();
 }
-function eveningExport(){ return { state:{ ...EVE, stage:eveStageNow() }, events:eveEvents, guest:typeof guestExport === "function" ? guestExport() : undefined }; }
+function eveningExport(){ return { state:{ ...EVE, stage:eveStageNow() }, events:eveEvents, guest:typeof guestExport === "function" ? guestExport() : undefined,
+  notebook:typeof notebookExport === "function" ? notebookExport() : undefined,
+  night:typeof nightExport === "function" ? nightExport() : undefined }; }
 
 // ─────────────────────────── стенд под рамкой
 // Свежий комок на столе (шаг 1). Журнал пробы не трогаем — это не «заново» стенда.
@@ -110,7 +127,9 @@ function eveTakeBall(){
 // Стенд зовёт это, когда нарезанный роти отпущен над стойкой (после своего serveDish()).
 function eveningServed(){
   // Гость смотрит первым, до сброса стенда: ему нужен хруст поданного роти и место, где его отпустили.
-  const to = typeof guestServe === "function" ? guestServe(eveServePt) : null;
+  // Не ей — может быть, псу (night.js): роти отпущен над ним, внизу экрана.
+  const to = (typeof guestServe === "function" ? guestServe(eveServePt) : null) || (typeof nightServe === "function" ? nightServe(eveServePt) : null);
+  if(typeof notebookSnap === "function") notebookSnap(to || "counter");   // снимок в тетрадь — тоже до сброса: роти ещё цел
   EVE.rotiDone = Math.min(EVE_BALLS, EVE.rotiDone + 1); EVE.ball = false;
   eveFreshLump(); sheetHidden = true;
   eveLog("serve", to ? { to } : undefined); eveHintRefresh();
@@ -134,9 +153,12 @@ function eveLidOff(){
   eveLog("lid-off"); eveHintRefresh();
 }
 function eveNewEvening(from){
+  const wasOver = EVE.over;
+  if(typeof notebookNewEvening === "function") notebookNewEvening(from, wasOver);
   EVE = eveFresh();
-  eveGuestRaw = null;
+  eveGuestRaw = null; eveNightRaw = null;
   if(typeof guestReset === "function") guestReset();
+  if(typeof nightReset === "function") nightReset();
   eveLog("restart", { from });
   eveApply();
 }
@@ -174,8 +196,12 @@ function eveLidAt(G){
   return null;
 }
 function eveOverPan(G, p){ return eveInEllipse(p, G.pan, PAN_R*EVE_LID_ON, PAN_R*TILT*EVE_LID_ON); }
-// Стойка: роти подан, если палец отпущен выше нижнего края стойки.
-function eveningCounterHit(client){ eveServePt = client; return !eveDev && evePt(client.x, client.y).y <= eveGeo().counter.y1; }
+// Стойка: роти подан, если палец отпущен выше нижнего края стойки — или над псом (night.js), когда он берёт.
+function eveningCounterHit(client){
+  eveServePt = client;
+  if(eveDev) return false;
+  return evePt(client.x, client.y).y <= eveGeo().counter.y1 || (typeof nightDogHit === "function" && nightDogHit(client));
+}
 // Где что лежит, в CSS px окна — для проверок касаниями.
 function eveningSpots(){
   const G = eveGeo(), r = cv.getBoundingClientRect(), k = r.width/cv.width, ky = r.height/cv.height;
@@ -190,8 +216,10 @@ function eveningSpots(){
 function eveningDown(id, cx, cy, t){
   if(eveDev) return false;
   eveIdleAt = performance.now();                           // трогает экран — значит, не стоит: подсказка простоя ждёт
+  if(!eveWake) eveWakeSync();                              // вернулась после долгого простоя — экран снова держится
   const sheet = eveEl("radioSheet");
   if(sheet && !sheet.hidden) return true;
+  if(typeof notebookDown === "function" && notebookDown(id, cx, cy)) return true;   // тетрадь: открыта — забирает всё; закрыта — своё место рядом с радио
   const G = eveGeo(), p = evePt(cx, cy);
   if(Math.hypot(p.x - G.radio.x, p.y - G.radio.y) <= G.radio.hit){ eveRadio(true); return true; }
   if(EVE.over){
@@ -215,12 +243,14 @@ function eveningDown(id, cx, cy, t){
   return false;                                            // шарик в работе: жесты — стенду, миска молчит
 }
 function eveningMove(id, cx, cy, t){
+  if(typeof notebookMove === "function" && notebookMove(id, cx, cy)) return true;
   if(!eveDrag || eveDrag.id !== id) return false;
   const p = evePt(cx, cy);
   eveDrag.x = p.x + eveDrag.dx; eveDrag.y = p.y + eveDrag.dy;
   return true;
 }
 function eveningUp(id, cx, cy, t, cancel){
+  if(typeof notebookUp === "function" && notebookUp(id, cx, cy, cancel)) return true;
   if(!eveDrag || eveDrag.id !== id) return false;
   if(Number.isFinite(cx) && Number.isFinite(cy)){ const p = evePt(cx, cy); eveDrag.x = p.x + eveDrag.dx; eveDrag.y = p.y + eveDrag.dy; }
   const G = eveGeo(), on = eveOverPan(G, eveDrag), wasOn = EVE.lid;
@@ -275,13 +305,15 @@ const EVE_WORDS = [
 ];
 function eveningLive(cur){
   if(eveDev) return null;
-  if(EVE.over) return `вечер окончен · ${EVE_COUNT[EVE.rotiDone] || EVE.rotiDone} роти`;
+  if(typeof notebookOpen === "function" && notebookOpen()) return "";   // в тетради слов нет
+  if(EVE.over) return typeof nightDraw === "function" ? "" : `вечер окончен · ${EVE_COUNT[EVE.rotiDone] || EVE.rotiDone} роти`;   // с night.js конец вечера — ночной кадр, без слов
   if(!EVE.lamp) return "";
   if(EVE.lid) return (typeof guestLive === "function" && guestLive(null)) || "тава под крышкой — сними крышку в сторону, и жарка пойдёт дальше";
   const idle = performance.now() - eveIdleAt > EVE_IDLE_HINT_MS;
   if(!EVE.ball) return !idle ? "" : EVE.ballsLeft > 0 ? "следующий шарик — в миске" : "накрой таву крышкой";
   const m = typeof cur === "string" ? cur : "";
   if(typeof guestLive === "function"){ const s = guestLive(m); if(s) return s; }
+  if(typeof nightLive === "function"){ const s = nightLive(m); if(s) return s; }   // роти берёт и пёс: без «на стойку»
   for(const [from, to] of EVE_WORDS) if(m.startsWith(from)) return to;
   return null;
 }
@@ -292,6 +324,9 @@ function eveningUpdate(dt){
   if(frameOn) setFrame("");                                // рамы-картинки — прибор стенда; вечер идёт на своём столе
   if(eveStageNow() !== eveStage) eveSave();                // шаг сменился — сохранить
   if(typeof guestUpdate === "function") guestUpdate(dt);
+  if(typeof notebookUpdate === "function") notebookUpdate(dt);
+  if(typeof nightUpdate === "function") nightUpdate(dt);
+  if(eveWake && !eveWakeWanted()) eveWakeSync();           // телефон оставлен на 5 минут — экран отпускается
 }
 function eveningDraw(g, sx, sy, layer){
   if(eveDev) return;
@@ -308,7 +343,7 @@ function eveningDraw(g, sx, sy, layer){
     box(C.x0, C.y0, C.x1 - C.x0, Math.max(1, 2*u), "#4a3a24");
     box(C.x0, C.y1 - Math.max(1, 2*u), C.x1 - C.x0, Math.max(1, 2*u), "#1d150e");
     const cm = { x:(C.x0 + C.x1)/2, y:(C.y0 + C.y1)/2 }, ry = Math.min(11*u, (C.y1 - C.y0)*0.32);
-    const onCounter = EVE.rotiDone - (typeof guestTook === "function" ? guestTook() : 0);   // отданные гостю на стойке не лежат
+    const onCounter = EVE.rotiDone - (typeof guestTook === "function" ? guestTook() : 0) - (typeof nightTook === "function" ? nightTook() : 0);   // отданные гостю и псу на стойке не лежат
     for(let i=0;i<onCounter;i++) ell({ x:cm.x + (i - 1)*66*u, y:cm.y }, 25*u, ry, "#c9a15a");
     // радио
     const R = G.radio;
@@ -316,14 +351,17 @@ function eveningDraw(g, sx, sy, layer){
     box(R.x0, R.y0, R.w, R.h, "#4b4338");
     ell({ x:R.x0 + R.w*0.30, y:R.y }, R.h*0.30, R.h*0.30, "#2a2622");
     box(R.x0 + R.w*0.58, R.y0 + R.h*0.30, R.w*0.30, R.h*0.16, "#d98b3a");
+    if(typeof notebookDrawItem === "function") notebookDrawItem(g, sx, sy, G);   // тетрадь рядом с радио
     // миска: сколько шариков осталось
     const B = G.bowl;
     ell(B, B.rx, B.ry, "#8b7f6e");
     ell({ x:B.x, y:B.y - 2*u }, B.rx*0.88, B.ry*0.80, "#1d150e");
     for(let i=0;i<EVE.ballsLeft;i++) ell({ x:B.x + (i - 1)*30*u, y:B.y - 4*u }, 13*u, 12*u, "#f0e0b0");
+    if(typeof nightDrawUnder === "function") nightDrawUnder(g, sx, sy, G);   // пёс под тележкой, слева от миски
     return;
   }
   if(typeof guestDrawOver === "function") guestDrawOver(g, sx, sy, G);   // роти несут гостье: она видна поверх него
+  if(typeof nightDrawOver === "function") nightDrawOver(g, sx, sy, G);   // и пёс тоже
   // крышка: дома на столе (конец вечера), в руке или на таве
   const lid = eveLidAt(G);
   if(lid){
@@ -344,11 +382,43 @@ function eveningDraw(g, sx, sy, layer){
   ell({ x:L.x, y:L.y + s*0.42 }, s*0.5, s*0.5, EVE.lamp ? "#f0c674" : "#4b4338");
   // вечер окончен: ком теста на столе — касание начинает следующий вечер
   if(EVE.over) ell(G.lump, G.lump.r, G.lump.r*0.8, "#f0e0b0");
+  if(typeof nightDraw === "function") nightDraw(g, sx, sy, G);         // ночной кадр: снимки вечера над стойкой
+  if(typeof notebookDraw === "function") notebookDraw(g, sx, sy, G);   // открытая тетрадь — поверх всей сцены
+}
+
+// ─────────────────────────── экран не гаснет (Screen Wake Lock)
+// Жарка — минуты без касаний, телефон заблокировался бы раньше. Пока лампа горит и страница видна,
+// стенд держит экран включённым; свернули — система отпускает сама, вернулись — просим снова;
+// вечер окончен — отпускаем. Оставила телефон с зажжённой лампой — через 5 минут без касаний отпускаем
+// тоже (жарка одного роти короче); первое касание просит снова.
+// Где navigator.wakeLock нет или в нём отказано — ничего не происходит.
+let eveWake = null, eveWakeAsk = false;
+function eveWakeWanted(){ return !eveDev && EVE.lamp && !EVE.over && !document.hidden && performance.now() - eveIdleAt < EVE_WAKE_IDLE_MS; }
+function eveWakeSync(){
+  if(!eveWakeWanted()){
+    if(eveWake){ const w = eveWake; eveWake = null; try{ w.release(); }catch(e){} }
+    return;
+  }
+  if(eveWake || eveWakeAsk) return;
+  const wl = typeof navigator !== "undefined" && navigator ? navigator.wakeLock : null;
+  if(!wl || typeof wl.request !== "function") return;
+  try{
+    const p = wl.request("screen");
+    if(!p || typeof p.then !== "function") return;
+    eveWakeAsk = true;
+    p.then(lock => {
+      eveWakeAsk = false;
+      if(!lock) return;
+      if(!eveWakeWanted()){ try{ lock.release(); }catch(e){} return; }
+      eveWake = lock;
+      if(typeof lock.addEventListener === "function") lock.addEventListener("release", () => { if(eveWake === lock) eveWake = null; });
+    }, () => { eveWakeAsk = false; });
+  }catch(e){ eveWakeAsk = false; }
 }
 
 // ─────────────────────────── запуск
 // Свернула приложение или позвонили — крышка сама ложится на таву, жарка стоит.
-document.addEventListener("visibilitychange", () => { if(document.hidden) eveLidPause(); });
+document.addEventListener("visibilitychange", () => { if(document.hidden) eveLidPause(); eveWakeSync(); });
 { const s = eveEl("radioSheet"); if(s) s.hidden = true; }
 eveLoad();
 eveSetDev(/[?&]dev=1(&|$)/.test(String((typeof location !== "undefined" && location.search) || "")));
