@@ -11,7 +11,7 @@
 // до 400%+ и лист «рвётся» в середине от любого движения. Замер это обнаружил сразу.
 // Число узлов сохранено (1 060 после обрезки по кругу; прежняя оценка «~1150» была на глаз,
 // пересчитано 07.09.2026), однородность рёбер восстановлена.
-const BUILD = "2026-11-17 · шлепок встаёт у пунктира, углы дотягивает тяга · 75";
+const BUILD = "2026-11-17 · шлепок у пунктира: ноты углов только от тяг, без дыр ни за что · 76";
 const GRID = 38;                   // 38x38, в круг попадает 1 060 узлов (посчитано, не оценка)
 let SUBSTEPS = 8;                  // T2: 8–10 подшагов, 1 итерация
 let DAMP = 0.986;
@@ -4567,7 +4567,7 @@ function impactAction(){
   // хороший, опасный результат»).
   if(action.impulse >= TEAR_I){
     let tmin = 1; for(let i=0;i<N;i++) if(thick[i]<tmin) tmin = thick[i];
-    if(tmin < TEAR_THIN) punchHole(action.direction);
+    if(tmin < TEAR_THIN && slapShareMean() >= SLAP_TEAR_SHARE) punchHole(action.direction);
   }
   audioSlap(action.impulse);
   plasticT = 0.15;
@@ -4605,7 +4605,8 @@ const SQ_N = 5, SQ_SIDE = 0.90, RIM_BINS = 48;
 const READY_FILL = 0.92;          // sheetFill() с этого значения — лист готов к таве
 const READY_STILL = 0.02;         // …и лист при этом стоит: средняя скорость узлов, доля targetR в секунду
 const FILL_WORST = 0.85;          // готовый лист ни в одном секторе не короче этой доли мишени
-const CORNER_TICK = 0.93;         // кромка/мишень на диагонали: угол дотянут — нота и вспышка
+const CORNER_TICK = 0.97;         // кромка/мишень на диагонали: угол дотянут — нота и вспышка (до сборки 76 — 0,93:
+                                  // шлепки доводят углы до 0,92–0,96, и ноты играли без единой тяги; тяга даёт 0,98–1,00)
 const CORNER_SIDE = 0.80;         // …и соседние стороны (±30° от диагонали) дотянуты хотя бы настолько
 let rimProf = new Float32Array(RIM_BINS), rimSrc = new Float32Array(RIM_BINS), fillBuf = new Float32Array(RIM_BINS);
 const pullS = new Float32Array(RIM_BINS), pullS2 = new Float32Array(RIM_BINS);   // доли хода тяги по секторам (pullTo)
@@ -4653,11 +4654,15 @@ function cornerAngle(k){ return -Math.PI*3/4 + k*Math.PI/2; }
 function resetCorners(){ cornerDone = [0,0,0,0]; cornerFlash = [0,0,0,0]; readyBlinkAt = 0; sqC = null; }
 // Угол засчитывается, только если дотянуты и соседние стороны: одни тяги за углы давали звезду
 // (угол/сторона 2,18, заполнение 0,61), а стенд играл четыре ноты и «готово» (ревью 17.11, P4).
-// Аккорд и мигание борта — когда отмечены все четыре угла И лист готов (sheetFill ≥ READY_FILL).
+// Аккорд и мигание борта — когда отмечены все четыре угла И лист готов: шаг 3 (лист в покое,
+// сборка 76 — раньше аккорд мог сыграть на лету шлепка до шага 3) и sheetFill ≥ READY_FILL.
 function checkCorners(){
   if(phase !== "TABLE" || stepNo < 2 || xf) return;
   let left = 0; for(let k=0;k<4;k++) if(!cornerDone[k]) left++;
   if(!left && readyBlinkAt) return;
+  // Углы судятся по стоящему листу (как готовность) или под пальцем во время тяги: на лету шлепка
+  // разлёт узлов на миг давал углу 0,97, лист оседал на 0,94, а нота уже сыграла (живая проба 17.11).
+  if(action.state !== "PULLING" && sheetSpeed() >= READY_STILL*targetR) return;
   rimProfile();
   const rat = a => rimProf[rimBin(a)]/targetAt(a);
   for(let k=0;k<4;k++){
@@ -4668,7 +4673,7 @@ function checkCorners(){
     cornerDone[k] = 1; cornerFlash[k] = performance.now(); left--;
     audioCornerTick(4 - left);
   }
-  if(!left && !readyBlinkAt && sheetFill() >= READY_FILL){ audioReady(); readyBlinkAt = performance.now(); }
+  if(!left && !readyBlinkAt && stepNo === 3 && sheetFill() >= READY_FILL){ audioReady(); readyBlinkAt = performance.now(); }
 }
 // ─── Шлепок уважает квадрат (сборка 75, 17.11.2026) ───
 // Сборки 67–74 гасили рост шлепка только ЗА пунктиром: сторона на 0,95 мишени получала полный
@@ -4728,6 +4733,14 @@ function slapAt(arr, th){
   const f = (th + Math.PI)/(2*Math.PI)*RIM_BINS - 0.5, b0 = Math.floor(f), t = f - b0;
   return arr[((b0%RIM_BINS)+RIM_BINS)%RIM_BINS]*(1-t) + arr[(((b0+1)%RIM_BINS)+RIM_BINS)%RIM_BINS]*t;
 }
+// Средняя доля шлепка по секторам (slapRoom() уже посчитан): сколько от удара лист ещё берёт.
+// Ниже SLAP_TEAR_SHARE шлепок лист уже не растит и не утончает — и дырку не пробивает: у листа,
+// дошедшего до пунктира, дыра читалась как штраф ни за что (ревью сборки 75: 148 рваных ячеек
+// за 8 шлепков на потолке силы по готовому квадрату при той же площади и толщине). Порог по доле
+// в точке дырки не годится: к толщине 0,10 сторона по маху уже стоит у пунктира (доля 0), и
+// шлепок не рвал бы никогда (Node 17.11: пятый шлепок на потолке — средняя доля 0,25, дальше ≤ 0,04).
+const SLAP_TEAR_SHARE = 0.10;
+function slapShareMean(){ let m = 0; for(let b=0;b<RIM_BINS;b++) m += slapS[b]; return m/RIM_BINS; }
 function slapEase(x, y){ const tc = targetC(); return slapAt(slapS, Math.atan2(y - tc.y, x - tc.x)); }
 function plasticStretch(I, direction, center){
   const sr = Math.max(1, sheetRadius()), limited = slapMin < 1;
@@ -6264,7 +6277,9 @@ function loop(now){
   // заполнение мишени нужно только листу на столе с шага 2 (на таве и на шаге 1 его не показывают)
   const fillNow = phase==="TABLE" && stepNo>=2 && !dish ? sheetFill() : 0, pct = Math.round(fillNow*100);
   const ragged = tornAt ? " · рваный узор" : "";
-  const ready = fillNow >= READY_FILL ? " ✓ готов · неси на таву →" : "";
+  // «готов» — только когда шаг 3 защёлкнулся (лист встал): по одному заполнению строка опережала
+  // шаг на 11–31 кадр, и бросок в этом окне оставался шлепком (ревью сборки 75)
+  const ready = stepNo===3 && phase==="TABLE" && !dish ? " ✓ готов · неси на таву →" : "";
   const banner = advancedAt && performance.now()-advancedAt < 2600;
   const mc = meanCook(), md = meanDry();
   const verdictAge = verdictAt ? performance.now() - verdictAt : Infinity;
