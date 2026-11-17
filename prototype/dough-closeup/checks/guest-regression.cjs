@@ -160,7 +160,12 @@ const fryNow = h => h.J('{t:dish.panTime,cook:meanCook(),dry:meanDry(),crisp:dis
 function until(h, cond, max = 60 * 400) { let n = 0; while (!h.run(cond) && n < max) { h.frames(1); n++; } assert.ok(h.run(cond), `waited ${n} frames for ${cond}`); return n; }
 function onPan(h) { stretched(h); toPan(h); }
 function arrive(h) { until(h, 'GST.here'); until(h, 'guestPic()===2'); until(h, 'guestPic()===1'); }
-function finish(h, crisp) { envelope(h); toTable(h); cut(h); if (crisp !== undefined) h.run(`dishCrisp=${crisp}`); }
+// Changed with the review fixes of the frying batch (17.11): an open sheet no longer browns (OPEN_COOK_CAP, below
+// «бледное» — see frying-regression F1), so «the sheet lay open while she came, then fold and serve» is a RAW roti
+// now and she refuses it. Where a test only needs a roti she takes, the folded envelope fries on until its steel
+// side is «бледное» (model time, a few seconds) — the answer for such a roti is a nod, as before.
+const PALE = 'fryStep(meanCook())>=1';
+function finish(h, crisp) { if (!h.run('envelopeDone()')) envelope(h); if (!h.run(PALE)) until(h, PALE); toTable(h); cut(h); if (crisp !== undefined) h.run(`dishCrisp=${crisp}`); }
 // script shortcuts for the colour of the roti: every side set to c / the side on the steel and the side
 // seen from above set apart (dry is set to 1: colour without dryness does not exist in the model)
 const cookAll = (h, c) => h.run(`for(const t of dish.thermal) if(t){t.dry[0]=t.dry[1]=1;t.cook[0]=t.cook[1]=${c};}`);
@@ -216,7 +221,9 @@ test('G1', 'Som comes on the first ball by frying, not earlier; knocks after 1.5
 });
 
 test('G2', 'a knock on every new frying step (hint, 0.8 s); no hint twice for one step', () => {
-  const h = guest(); light(h); onPan(h); arrive(h);
+  // the sheet lies open while she comes (it does not brown: OPEN_COOK_CAP), then it is folded — the steps start there
+  const h = guest(); light(h); onPan(h); arrive(h); assert.equal(h.run('guestCookStep()'), 0, 'open sheet: no step, no knock'); envelope(h);
+  assert.equal(h.run('guestCookStep()'), 0, 'just folded: still below «бледное»');
   h.run('COOK_RATE=FRY_RATES[40]');   // script shortcut: the fast frying preset of the stand panel, to pass the steps sooner
   const seen = []; let frames = 0, hintFrames = 0, last = h.gev().length;
   while (h.run('guestCookStep()') < 3 && frames < 60 * 240) {
@@ -318,7 +325,7 @@ test('G4', 'the answer follows the frying ladder and BOTH sides: one side «пр
       assert.equal(h.gev().length, n0 + (fry === 'flip' ? 2 : 1));
       until(h, 'guestPic()===1');
     }
-    if (h.run('dish.folds') < 4) envelope(h);
+    if (h.run('dish.folds') < 4) { envelope(h); until(h, PALE); }   // 'short': folded late, taken off as soon as the steel side is «бледное»
     const sides = h.J('guestSides()');
     toTable(h); cut(h); if (crisp !== undefined) h.run(`dishCrisp=${crisp}`);
     serve(h, h.gs().som);
@@ -378,7 +385,7 @@ test('G4', 'the answer follows the frying ladder and BOTH sides: one side «пр
 test('G5', 'second ball — hers again, hints go on; after the second answer she leaves; the third roti goes to the counter', () => {
   const h = guest(); light(h); onPan(h); arrive(h); finish(h, 0);
   serve(h, h.gs().som); sec(h, 3);
-  nextBall(h); onPan(h);
+  nextBall(h); onPan(h); envelope(h);   // folded: an open sheet does not brown, she would have nothing to knock at
   assert.equal(h.pic(), 1); assert.equal(h.gs().sat, true);
   h.run('COOK_RATE=FRY_RATES[40]'); const n0 = h.gev().length;   // script shortcut: fast frying preset
   until(h, 'guestCookStep()>=1'); h.frames(2);

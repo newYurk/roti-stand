@@ -5,7 +5,8 @@
 //   F1 times: «приготовленное» on the steel side ~20 s, «горелое» ~60 s; a flip in time is the fast path;
 //   F2 one ladder for the words of the stand and for Aunt Som; the line names only what is seen;
 //   F3 the flick on the finished envelope: 575 px/s, a near miss is shown, never a fifth fold;
-//   F4 margarine: a puddle on bare steel, a stroke from the block is never a fold, 3 strokes — crunch;
+//   F4 margarine: a puddle on bare steel, a stroke from the block is never a fold, 3 strokes — crunch
+//      (also right after the folds, on both screens); a raw roti refused by Som goes back on the tava;
 //   F5 the look: the browning rim, the burnt colour, the open sheet turning matte, smoothed patches.
 // Pure Node/vm with the mocks of model-regression.cjs, as guest-regression.cjs: stand.js, banana.js,
 // egg.js, evening.js and guest.js in ONE context; every action of the player goes through the stand's
@@ -225,10 +226,27 @@ test('F1', 'times by the model: the steel side is «приготовленное
   until(q, 'fryStep(meanCook())>=2'); const tB2 = q.run('dish.panTime') - t0;
   assert.ok(tB2 <= 22, `the second side is «приготовленное» ${tB2.toFixed(1)} s after the flip`);
   assert.equal(q.run('guestVerdict(meanCook(),dishSideMean("cook","topWeights"),0)'), 'crunch', 'both sides «приготовленное»: crunch');
-  // an open sheet left on the steel: when would its future top be «бледное» without any flip
-  const o = guest(); light(o); onPan(o); until(o, 'fryStep(meanCook())>=1'); const open = o.run('dish.panTime');
-  h.tick(2, 1 / 60, true); q.tick(2, 1 / 60, true); assert.equal(h.run('loopErrs') + q.run('loopErrs'), 0);
-  return { summary: `folded at ${folded.toFixed(1)} s; steel side: бледное ${at.pale} s, приготовленное ${at.cooked} s, зажаренное ${at.fried} s, горелое ${at.burnt} s of pan time; flip at ${tA.toFixed(1)} s → new bottom бледное +${tB.toFixed(1)} s (crunch with margarine at ${(tA + tB).toFixed(1)} s), приготовленное +${tB2.toFixed(1)} s (crunch at ${(tA + tB2).toFixed(1)} s); an open sheet is бледное all over after ${open.toFixed(1)} s` };
+  // the lazy path (review of the batch, 17.11): an open sheet left on the steel for 25 s and folded only then.
+  // It used to fry from below, the folds brought the fried underside up, and «wait, then fold» gave both sides
+  // «приготовленное» with no flip — faster than the honest way. Now the open sheet stays below «бледное».
+  const o = guest(); light(o); onPan(o); tap(o, o.spots().pan); sec(o, 25);
+  const openCook = o.run('meanCook()'), openMax = o.run('Math.max(...dish.thermal.filter(Boolean).map(t=>Math.max(t.cook[0],t.cook[1])))');
+  assert.equal(o.run(`fryStep(${openCook})`), 0, `open sheet, 25 s on the steel: still below «бледное» (${openCook.toFixed(3)})`);
+  assert.ok(openMax <= o.run('OPEN_COOK_CAP') + o.run('DOME_SCORCH') + 1e-9, `no spot of it is browned past the cap (${openMax.toFixed(3)})`);
+  assert.ok(o.run('OPEN_COOK_CAP') < o.run('FRY_STEPS[0]'));
+  envelope(o); const lazyT = o.run('dish.panTime'), lazy = o.J('guestSides()');
+  assert.equal(o.run(`fryStep(${lazy.top})`), 0, `folded late: the top is raw (${lazy.top.toFixed(3)}), not the fried underside`);
+  assert.notEqual(o.run(`guestVerdict(${lazy.bottom},${lazy.top},0)`), 'crunch', 'no crunch right after the late folds');
+  until(o, 'fryStep(meanCook())>=3', 60 * 120);
+  assert.equal(o.run('fryStep(dishSideMean("cook","topWeights"))'), 0, 'and never without a flip: the bottom is «зажаренное», the top still raw');
+  assert.equal(o.run('guestVerdict(meanCook(),dishSideMean("cook","topWeights"),9)'), 'nod', 'margarine does not replace the flip either');
+  assert.equal(o.run('fryHint()').startsWith('поджарилось'), false);
+  // undoing a fold of a browned envelope does not wipe its colour
+  const u = guest(); fried(u); until(u, 'fryStep(meanCook())>=2'); const before = u.run('meanCook()');
+  u.run('undoDish()'); u.frames(30); assert.equal(u.run('envelopeDone()'), false);
+  assert.ok(u.run('Math.max(...dish.thermal.filter(Boolean).map(t=>Math.max(t.cook[0],t.cook[1])))') >= before, 'the cap stops the browning, it does not lower it');
+  h.tick(2, 1 / 60, true); q.tick(2, 1 / 60, true); o.tick(2, 1 / 60, true); assert.equal(h.run('loopErrs') + q.run('loopErrs') + o.run('loopErrs'), 0);
+  return { summary: `folded at ${folded.toFixed(1)} s; steel side: бледное ${at.pale} s, приготовленное ${at.cooked} s, зажаренное ${at.fried} s, горелое ${at.burnt} s of pan time; flip at ${tA.toFixed(1)} s → new bottom бледное +${tB.toFixed(1)} s (crunch with margarine at ${(tA + tB).toFixed(1)} s), приготовленное +${tB2.toFixed(1)} s (crunch at ${(tA + tB2).toFixed(1)} s); open sheet 25 s → colour ${openCook.toFixed(3)} (cap ${o.run('OPEN_COOK_CAP')}); folded at ${lazyT.toFixed(1)} s: bottom ${lazy.bottom.toFixed(3)}, top ${lazy.top.toFixed(3)}, no crunch without a flip` };
 });
 
 test('F2', 'one ladder and plain words: the line says nothing about frying until the envelope is done, never «можно начинку» or «→ сырое»; «край румяный — переверни» when the steel side is done; what it calls ready is a crunch for Som', () => {
@@ -239,7 +257,10 @@ test('F2', 'one ladder and plain words: the line says nothing about frying until
   tap(h, h.spots().pan); envelope(h);
   assert.equal(h.run('envelopeDone()'), true);
   h.frames(160); note();
-  assert.equal(h.run('fryHint()'), 'мах от края — перевернуть', 'the way to flip stays in the line until a flip succeeds');
+  // changed after the review of 17.11: the line used to say «мах от края — перевернуть» from the first second,
+  // calling to flip a roti raw on both sides. Now it is silent until the rim is browned.
+  assert.equal(h.run('fryHint()'), '', 'both sides raw: nothing to do with the hands, the line is silent');
+  assert.equal(live(h), '');
   until(h, 'fryStep(meanCook())>=2'); h.frames(2); note();
   assert.equal(live(h), 'край румяный — мах от края');
   edgeStroke(h, { v: 700 }); for (let i = 0; i < 40; i++) { h.frames(1); note(); }
@@ -252,9 +273,11 @@ test('F2', 'one ladder and plain words: the line says nothing about frying until
   assert.equal(h.run('fryVerdict(0.3,0.1,5)'), 'crunch'); assert.equal(h.run('fryVerdict(0.3,0.1,4.9)'), 'nod'); assert.equal(h.run('fryVerdict(0.3,0.05,9)'), 'nod');
   until(h, 'fryStep(meanCook())>=4', 60 * 120); h.frames(2); note();
   assert.equal(live(h), 'край чёрный — горит');
+  assert.ok(lum(h.J('cookColor([227,213,178],FRY_STEPS[3])')) < 60, 'and at «горелое» the colour IS black, not dark brown');
   const all = [...seen];
   for (const m of all) assert.ok(!/можно начинку|→|сырое|подсыхает|дальше темнеть/.test(m), `no old frying words: ${m}`);
-  for (const m of all.filter(m => /край|поджарилось|мах от края — перевернуть/.test(m))) assert.ok(m.length <= 36, `one short line (36 characters fit one line at 375 px with the guest): ${m} (${m.length})`);
+  for (const m of all) assert.ok(m !== 'мах от края — перевернуть', 'no call to flip a raw roti');
+  for (const m of all.filter(m => /край|поджарилось/.test(m))) assert.ok(m.length <= 36, `one short line (36 characters fit one line at 375 px with the guest): ${m} (${m.length})`);
   // the ladder is one
   assert.deepEqual(h.J('[0,0.079,0.08,0.279,0.28,0.549,0.55,1.099,1.1,1.4].map(c=>cookWord(c)+"/"+guestStepOf(c))'),
     ['сырое/0', 'сырое/0', 'бледное/1', 'бледное/1', 'приготовленное/2', 'приготовленное/2', 'зажаренное/3', 'зажаренное/3', 'горелое/4', 'горелое/4']);
@@ -346,13 +369,33 @@ test('F4', 'margarine: a stroke from the block over bare steel leaves a puddle t
     smear(h, [E, c]); h.frames(20); assert.equal(h.run('dish.folds'), 0);
   }
   // crunch by the hands
-  const h = guest(); fried(h); until(h, 'meanDry()>0.9');
+  // Changed after the review of 17.11. The old case waited for meanDry()>0.9 and 200 frames after every stroke
+  // and got 8.42; live, three strokes right after quick folds gave 2.72–3.97 < 5. Now the crisp is counted by
+  // the share of the edge that fizzes (edgeFat — what the player sees), dryness does not cut it, and the case
+  // below is the hard one: three strokes RIGHT after the folds, 2 s and 0.4 s apart, near and far from the
+  // edge, on both screens, the sheet still wet (script: dry set low, as after folds in 6 s).
+  for (const [w, hh] of [[390, 844], [375, 667]]) for (const [k, pause] of [[1.12, 2], [1.3, 2], [1.02, 2], [1.12, 0.4]]) {
+    const e = guest({ w, hh }); fried(e);
+    e.run('for(const t of dish.thermal) if(t){t.dry[0]=Math.min(t.dry[0],0.5);t.dry[1]=Math.min(t.dry[1],0.5);}');
+    const C = corners(e, k), got = [];
+    for (const seg of [[C[0], C[1]], [C[0], C[3]], [C[3], C[2]]]) {
+      smear(e, seg); if (!got.length) assert.ok(e.run('fatUnder') > 0.15, `the edge fizzes at once (${e.run('fatUnder').toFixed(2)} of it)`);
+      e.frames(Math.round(pause * 60)); got.push(+e.run('dishCrisp').toFixed(2));
+    }
+    e.frames(240); got.push(+e.run('dishCrisp').toFixed(2));
+    assert.ok(got[0] < e.run('FRY_CRISP'), `${w}px k=${k}: one stroke is not the crunch (${got[0]})`);
+    assert.ok(got[3] >= e.run('FRY_CRISP'), `${w}px k=${k} pause ${pause}s: three early strokes reach the crunch (${got.join(' → ')})`);
+    assert.equal(e.run('dish.folds'), 4); assert.equal(e.run('loopErrs'), 0);
+    out.push(`${w}/${k}/${pause}s: ${got.join('→')}`);
+  }
+  const h = guest(); fried(h);
   const K = corners(h, 1.12);
   const far = h.J('(()=>{const b=butterSpot();return [__harness.toClient(panC.x-(b.x-panC.x)*0.9,panC.y-(b.y-panC.y)*0.9)]})()');
   const b0 = h.run('butterLeft');
   const crisp = []; let prev = 0;
   for (const seg of [[K[0], K[1]], [K[0], K[3]], [K[3], K[2]]]) {
     smear(h, seg); h.tick(2, 1 / 60, true); h.frames(200);
+    assert.ok(Math.abs(h.run('crispSheen()') - Math.min(1, h.run('dishCrisp') / h.run('FRY_CRISP'))) < 1e-9, 'the sheen of the edge shows the crisp gathered so far');
     const c = h.run('dishCrisp'); crisp.push(+(c - prev).toFixed(2)); prev = c;
     assert.equal(h.run('dish.folds'), 4, 'a stroke along the edge never folds');
   }
@@ -368,7 +411,7 @@ test('F4', 'margarine: a stroke from the block over bare steel leaves a puddle t
   out.push(`margarine + flip: crunch ${(h.run('dish.panTime') - tf).toFixed(1)} s after the flip, pan time ${h.run('dish.panTime').toFixed(1)} s`);
   assert.ok(h.run('butterLeft') < b0 - 0.05 && h.run('butterLeft') >= h.run('BUTTER_MIN'), 'the block shrinks, but never to nothing');
   // far from the roti
-  const q = guest(); fried(q); until(q, 'meanDry()>0.9');
+  const q = guest(); fried(q);
   const P = q.spots().pan, R = q.spots().panR, B = q.J('(()=>{const b=butterSpot();return __harness.toClient(b.x,b.y)})()');
   smear(q, [{ x: B.x - R * 0.25, y: B.y + R * 0.02 }]); q.frames(300);
   assert.ok(q.run('dishCrisp') < 1, `a dab at the rim, far from the roti: crisp ${q.run('dishCrisp').toFixed(2)}`);
@@ -411,8 +454,11 @@ test('F5', 'the look, as numbers: the rim of the top takes the colour of the ste
   const s = q.J(sd);
   assert.ok(s.seen < s.own * 0.8, `the seen side is evener than the raw numbers (sd ${s.seen.toFixed(1)} vs ${s.own.toFixed(1)})`);
   // the colour scale
-  const scale = h.J('[0,0.2,0.4,0.6,0.8,1.0,1.2,1.4].map(c=>cookColor([227,213,178],c))').map(lum);
+  // changed after the review of 17.11: the scale reaches black at «горелое» (1.12; it used to creep there by 1.3,
+  // and «край чёрный — горит» stood over a dark brown rim), then stays black
+  const scale = h.J('[0,0.2,0.4,0.6,0.8,1.0,1.06,1.12].map(c=>cookColor([227,213,178],c))').map(lum);
   for (let i = 1; i < scale.length; i++) assert.ok(scale[i] < scale[i - 1], 'darker with every step of colour, past «зажаренное» too');
+  assert.equal(lum(h.J('cookColor([227,213,178],1.4)')), scale.at(-1), 'black stays black');
   // the open sheet: translucent → matte
   const o = guest(); light(o); onPan(o);
   const set = () => o.run('(()=>{let s=0,n=0;for(const f of dish.faces) if(f.kind==="dough"){s+=doughSet(f);n++;} return s/n})()');
@@ -423,6 +469,37 @@ test('F5', 'the look, as numbers: the rim of the top takes the colour of the ste
   o.tick(2, 1 / 60, true); h.tick(2, 1 / 60, true); q.tick(2, 1 / 60, true);
   assert.equal(o.run('loopErrs') + h.run('loopErrs') + q.run('loopErrs'), 0);
   return { summary: `rim width ${[p1, p2, p3].map(p => p.rimW.toFixed(2)).join(' → ')} of the roti; edge luminance by step ${L.map(v => v.toFixed(0)).join(' → ')}, middle at «приготовленное» ${lum(p2.mid).toFixed(0)}; seen side sd ${s.seen.toFixed(1)} vs ${s.own.toFixed(1)}; matte in ${matte.toFixed(1)} s (from ${s0.toFixed(2)})` };
+});
+
+test('F6', 'the refusal is not a dead end: a raw cut roti refused by Som is carried back to the middle of the tava and fries on (the cuts are undone, colour and crisp stay); dropped at the rim of the tava it stays on the table; fried through and flipped, she takes it', () => {
+  const out = [];
+  for (const [w, hh] of [[390, 844], [375, 667]]) {
+    const h = guest({ w, hh }); light(h); onPan(h); arrive(h); envelope(h);
+    cookAll(h, 0.05);   // script: the sides read raw
+    h.run('dishCrisp=1.5');
+    toTable(h); cut(h);
+    const before = h.eve().rotiDone;
+    serve(h, h.gs().som);
+    assert.equal(lastPan(h).outcome, 'serve-refused'); assert.equal(live(h), 'сырое — верни на таву'); assert.equal(h.run('dish.mode'), 'cut');
+    const P = h.spots().pan, R = h.spots().panR;
+    serve(h, { x: P.x - R * 0.93, y: P.y });
+    assert.equal(lastPan(h).outcome, 'serve-back', 'released at the rim of the tava: still on the table'); assert.equal(h.run('dish.mode'), 'cut');
+    serve(h, P);
+    assert.equal(lastPan(h).outcome, 'pan-back'); assert.equal(h.run('dish.mode'), 'fold'); assert.equal(h.run('phase'), 'PAN');
+    assert.equal(h.run('dish.cuts.length'), 0, 'whole again'); assert.equal(h.run('dish.folds'), 4); assert.equal(h.run('envelopeDone()'), true);
+    assert.equal(h.eve().rotiDone, before, 'the evening did not count it'); assert.equal(h.eve().ball, true);
+    assert.equal(h.run('dishCrisp'), 1.5, 'the crisp stays with the roti');
+    assert.equal(live(h), 'снова на таве');
+    const t0 = h.run('dish.panTime');
+    until(h, 'fryStep(meanCook())>=2'); const side = h.run('dish.panTime') - t0;
+    edgeStroke(h, { v: 700 }); h.frames(40); assert.equal(h.run('dish.flips'), 1);
+    until(h, 'fryVerdict(meanCook(),dishSideMean("cook","topWeights"),0)==="crunch"');
+    toTable(h); cut(h); serve(h, h.gs().som);
+    assert.equal(h.g().taken, 1, 'now she takes it'); assert.equal(h.g().answers.at(-1).answer, 'crunch'); assert.equal(h.eve().rotiDone, before + 1);
+    h.tick(3, 1 / 60, true); assert.equal(h.run('loopErrs'), 0); assert.deepEqual(h.errors, []);
+    out.push(`${w}px: back on the tava, «приготовленное» +${side.toFixed(1)} s, then crunch`);
+  }
+  return { summary: out.join(' · ') };
 });
 
 const passed = results.filter(r => r.status === 'PASS').length;

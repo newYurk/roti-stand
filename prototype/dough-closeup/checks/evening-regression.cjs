@@ -134,7 +134,9 @@ function cut(h) {
 }
 function serve(h, { short = false } = {}) {
   const B = rotiBox(h), S = h.spots();
-  const to = short ? { x: S.pan.x, y: S.pan.y } : { x: S.counter.x, y: S.counter.y };
+  // short: released at the rim of the tava, not reaching the counter. (It used to be the middle of the tava; since
+  // the review fixes of the frying batch, 17.11, the middle of the tava takes the roti back to fry on — V3 below.)
+  const to = short === 'pan' ? { x: S.pan.x, y: S.pan.y } : short ? { x: S.pan.x - S.panR * 0.93, y: S.pan.y } : { x: S.counter.x, y: S.counter.y };
   drive(h, line(B.c, to, { v: 420, hold: 80 }), { settle: 30 });
 }
 function ballByScriptAndTouches(h) { stretched(h); toPan(h); envelope(h); toTable(h); cut(h); serve(h); }
@@ -196,9 +198,14 @@ test('V3', 'a whole ball by touches: flatten → stretch → tava → envelope �
   assert.match(h.run('dish.message'), /Сначала разрежь/);
   cut(h);
   serve(h, { short: true });
-  assert.equal(h.run('!!dish'), true, 'released over the tava: the roti stays on the table');
-  assert.equal(h.run('gestures.at(-1).outcome'), 'serve-back');
+  assert.equal(h.run('!!dish'), true, 'released at the rim of the tava: the roti stays on the table');
+  assert.equal(h.run('gestures.at(-1).outcome'), 'serve-back'); assert.equal(h.run('dish.mode'), 'cut');
   assert.equal(h.eve().rotiDone, 0);
+  // released over the middle of the tava: it goes back to fry on, whole; then to the table and cut again
+  serve(h, { short: 'pan' });
+  assert.equal(h.run('gestures.at(-1).outcome'), 'pan-back'); assert.equal(h.run('dish.mode'), 'fold'); assert.equal(h.run('phase'), 'PAN');
+  assert.equal(h.run('dish.cuts.length'), 0); assert.equal(h.eve().rotiDone, 0); assert.equal(h.eve().ball, true);
+  toTable(h); cut(h);
   serve(h);
   const e = h.eve();
   assert.equal(e.rotiDone, 1); assert.equal(e.ballsLeft, 2); assert.equal(e.ball, false);
