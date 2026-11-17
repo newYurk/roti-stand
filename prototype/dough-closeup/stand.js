@@ -11,7 +11,7 @@
 // до 400%+ и лист «рвётся» в середине от любого движения. Замер это обнаружил сразу.
 // Число узлов сохранено (1 060 после обрезки по кругу; прежняя оценка «~1150» была на глаз,
 // пересчитано 07.09.2026), однородность рёбер восстановлена.
-const BUILD = "2026-11-17 · тяга и шлепок, квадратная мишень · 67";
+const BUILD = "2026-11-17 · тяга и шлепок, квадратная мишень · 68";
 const GRID = 38;                   // 38x38, в круг попадает 1 060 узлов (посчитано, не оценка)
 let SUBSTEPS = 8;                  // T2: 8–10 подшагов, 1 итерация
 let DAMP = 0.986;
@@ -3165,7 +3165,8 @@ function step(dt){
     return;
   }
   // Тяга — кинематика: край стоит там, куда его привёл палец, решатель ждёт отпускания.
-  if(action.state==="PULLING"){ measureThickness(); updateAction(dt); return; }
+  // Подъём и полёт шлепка с языком в руке — то же самое: язык держит палец, а не решатель.
+  if(action.state==="PULLING" || (action.pull && (action.state==="LIFTING" || action.state==="FLYING"))){ measureThickness(); updateAction(dt); return; }
   const h = dt / SUBSTEPS;
   // Затухание зависит от фазы: в полёте лист скользит свободнее, после удара,
   // когда окно пластичности закрылось, — успокаивается быстрее (audit §5).
@@ -3245,14 +3246,16 @@ function relaxRim(dt){
   }
 }
 
-// Тяги дуги хвата в LIFTING (liftPull, предел LIFT_REACH) больше нет (17.11.2026). Она тянула дугу
-// пружиной к пальцу, пока шёл подъём. Теперь подъём начинается не с первого быстрого события, а
-// когда мах подтверждён (SLAP_MIN_MS): палец к этому времени далеко за краем, тяга всегда
-// упиралась в предел и спорила с языком, который край уже вытянул за пальцем (pullTo). Node, пять
-// шлепков подряд, 18 раскладок: с ней 0–18 вывернутых ячеек (у main в том же тесте 13), без неё
-// 0–12, в 12 раскладках из 18 — ноль; первый шлепок по листу, вытянутому тягами: 280 против 7.
-// Видимый подъём края теперь — сам язык тяги: под быстрым махом край идёт за пальцем на
-// PULL_GAIN_FAST хода и отпускается в момент подъёма.
+// ─── Подъём перед шлепком (17.11.2026) ───
+// Тяги дуги хвата в LIFTING (liftPull, предел LIFT_REACH) больше нет: подъём начинается, когда мах
+// подтверждён (SLAP_MIN_MS), палец к этому времени далеко за краем, и пружина к пальцу всегда
+// упиралась в предел и спорила с языком, который край уже вытянул за пальцем (pullTo).
+// Видимый подъём края — сам язык тяги: под быстрым махом край идёт за пальцем на PULL_GAIN_FAST
+// хода, не дальше PULL_FAST_CAP. Язык остаётся в руке весь подъём и полёт (в полёте отпускается до
+// PULL_FLY_KEEP) и снимается ударом. Первая версия отпускала язык в момент подъёма: край успевал
+// вернуться в ноль до удара и только потом расходился — дёрганье «туда-обратно-туда», которого на
+// main не было (покадровый след Node, мах 9,2 gs/с: main держит край на 0,16→0,10 gs до удара,
+// первая версия — 0,24→0,00). Вывернутые ячейки после пяти шлепков — в checks/model-regression.cjs.
 // Ширина хвата решает, получится лист или жгут (замер: 4% тонкой площади при щипке
 // против 76% при широком хвате). Хват растёт от прижима, но насыщается за 100–250 мс,
 // а не за полторы секунды: удержание — удобная замена ширине ладони (audit §6.2).
@@ -3377,7 +3380,8 @@ function armAction(pointerId, p, tEv, client){
   { const t0 = Number.isFinite(tEv) ? tEv : performance.now(); action.down.t = t0; action.last.t = t0;
     const m = gestureMetric(p, client);
     action.samples = [{ x:p.x, y:p.y, u:m.u, v:m.v, t:t0 }]; action.moved = false; action.pull = null;
-    action.stroke = { start:null, path:0, lastMoveT:t0, i0:0, au:m.u, av:m.v };
+    action.downM = { u:m.u, v:m.v }; action.evFb0 = evTimeFallbacks;
+    action.stroke = { start:null, path:0, lastMoveT:t0, i0:0, au:m.u, av:m.v, judged:false };
     action.liftI = 0; action.liftRad = null; action.rel = null; action.vPeak = 0; action.events = 0;
     action.lastClient = client || null; }
   if(stepNo!==1) updateGripFromHold();                 // на шаге 1 дуга хвата не нужна
@@ -3434,6 +3438,7 @@ function bakeFlatten(){
     for(let i=0;i<N;i++){ px[i]+=dx; py[i]+=dy; prx[i]=px[i]; pry[i]=py[i]; }
   }
   layoutPan();
+  sqC = null;                       // мишень шага 2 встаёт по центру листа на входе в шаг
   clearAction();
 }
 
@@ -3480,7 +3485,10 @@ function updateGripFromHold(){
 //  • «тяга или шлепок» решается по скорости за окно вдвое длиннее (SLAP_WIN_MS) и, пока палец
 //    на столе, не раньше SLAP_MIN_MS от начала штриха: при дрожи ±1,5 px окно 80 мс даёт разброс
 //    скорости 0,3 gs/с на 30–60 Гц, и ведение на 0,9 порога читалось шлепком в 9 прогонах из 128
-//    (Node, 17.11). Короткий мах решается на отпускании — там окно равно самому штриху;
+//    (Node, 17.11). Короткий мах (моложе SLAP_MIN_MS) решается по концу штриха — отпускание,
+//    остановка пальца или пауза перед новым штрихом (strokeVerdict): окно там равно самому штриху.
+//    Живой палец в конце маха тормозит и встаёт: судить такой мах по скорости в миг отпускания
+//    нельзя — он читался тягой (ревью 17.11, P1). Паузы перед махом не требуется (P2);
 //  • путь штриха копится шагами не короче PATH_Q: иначе дрожь на частых событиях его удлиняет;
 //  • мёртвая зона — max(SLOP_GS·gs, SLOP_CSS px): в рамах (?frame=) gs мал, и дрожь пальца
 //    иначе выходила бы из зоны.
@@ -3492,10 +3500,10 @@ let V_PULL_FULL = 4.0;            // gs/с: ниже — край идёт за 
 const PULL_GAIN_FAST = 0.6;       // доля хода края у самого порога шлепка: шаг роста через порог мал
 const SLOP_GS = 0.15, SLOP_CSS = 10;
 const SLAP_MIN_PATH = 0.45, SLAP_OUT_COS = Math.cos(80*Math.PI/180);
-const SLAP_HOLD_MS = 63;          // пауза перед штрихом: раньше — проезд пальца, решит отпускание
 const VEL_WIN_MS = 80, PAUSE_MS = 40, IMPULSE_KS = 0.25;
 const SLAP_WIN_MS = 160, SLAP_MIN_MS = 150, PATH_Q = 0.05;
 const STALE_MS = 50;              // столько без движения — палец остановился, скорость считается нулевой
+const SAMPLES_MAX = 256;          // отсчётов жеста в памяти: секунда с лишним на 240 Гц (поворот запятой считается по ним)
 const GATE_PATH = 1.2;            // gs стола: столько пути после подъёма — и решаем «дуга или прямой»
 try{
   const v = parseFloat(new URLSearchParams(location.search).get("vslap"));
@@ -3511,7 +3519,8 @@ function pushSample(p, tEv, client){
   const S = action.samples, L = S[S.length-1], st = action.stroke;
   let t = Number.isFinite(tEv) ? tEv : performance.now(); if(t <= L.t) t = L.t + 0.01;
   const m = gestureMetric(p, client), s = { x:p.x, y:p.y, u:m.u, v:m.v, t };
-  if(!action.moved && Math.hypot(m.u-S[0].u, m.v-S[0].v) >= gestureSlop()) action.moved = true;
+  // мёртвая зона — от точки КАСАНИЯ (action.downM), а не от S[0]: массив отсчётов сдвигается
+  if(!action.moved && Math.hypot(m.u-action.downM.u, m.v-action.downM.v) >= gestureSlop()) action.moved = true;
   if(action.moved){
     const d = Math.hypot(m.u-L.u, m.v-L.v);
     if(d > 1e-4){
@@ -3519,6 +3528,7 @@ function pushSample(p, tEv, client){
         // Начало штриха — предыдущий отсчёт; после паузы он старый, и движение началось
         // не раньше кадра назад (события во время покоя не приходят).
         st.start = t - L.t > PAUSE_MS ? t - 17 : L.t; st.path = 0; st.i0 = S.length - 1; st.au = L.u; st.av = L.v;
+        st.judged = false;
       }
       st.lastMoveT = t;
       const da = Math.hypot(m.u-st.au, m.v-st.av);
@@ -3526,7 +3536,7 @@ function pushSample(p, tEv, client){
     }
   }
   S.push(s); action.events++; action.lastClient = client || null;
-  if(S.length > 96){ S.shift(); st.i0 = Math.max(0, st.i0-1); if(action.liftI) action.liftI = Math.max(0, action.liftI-1); }
+  if(S.length > SAMPLES_MAX){ S.shift(); st.i0 = Math.max(0, st.i0-1); if(action.liftI) action.liftI = Math.max(0, action.liftI-1); }
   action.last = { x:p.x, y:p.y, t };
 }
 // Скорость руки: { x, y } — единицы стола в секунду, speed — gs/с по экрану.
@@ -3590,6 +3600,22 @@ function slapForce(vc, rad, v){
   const tang = Math.abs(rad.x*vc.y - rad.y*vc.x)/sp;
   return Math.min(IMPULSE_MAX, IMPULSE_KS * Math.max(vc.speed, v ? v.speed : 0) * Math.min(1, Math.max(0, outCos) + 0.55*tang));
 }
+// Суд над штрихом по его последнему движению: скорости и сила шлепка (0 — не шлепок).
+function strokeVerdict(){
+  const v = sampleVelocity(), vc = sampleVelocity(SLAP_WIN_MS);
+  return { v, vc, force: slapForce(vc, grabRadial(), v) };
+}
+// Штрих кончился (пауза, остановка), а на ходу его не судили — он был моложе SLAP_MIN_MS.
+// Судим один раз; шлепок бьёт сам, не дожидаясь отпускания (как на main). true — ушли в полёт.
+function judgeEndedStroke(){
+  const st = action.stroke;
+  if(!st || st.start === null || st.judged || !action.moved) return false;
+  st.judged = true;
+  if(st.lastMoveT - st.start >= SLAP_MIN_MS) return false;   // зрелый штрих судился на каждом событии
+  const j = strokeVerdict();
+  if(!(j.force > 0)) return false;
+  startLift(j.vc, j.force, st.start - action.down.t); toFlying(); return true;
+}
 function noteRelease(v){   // числа жеста для журнала: по ним подстраиваются пороги
   const st = action.stroke;
   action.rel = { v:v.speed, peak:Math.max(action.vPeak||0, v.speed), path:st ? st.path : 0,
@@ -3600,12 +3626,19 @@ function noteRelease(v){   // числа жеста для журнала: по 
 // «липкой буксировки», снятой раньше, здесь нет. У тяги есть длина: палец уходит вперёд, тесто
 // отстаёт по tanh («резинка»), а когда палец ушёл далеко за предел — «пальцы соскользнули»,
 // тяга фиксируется сама. Предел — ещё и мишень: у дотянутой стороны хода нет, она упирается.
-const PULL_SIGMA = 0.55;          // рад: угловая ширина поля тяги
+const PULL_SIGMA = 1.0;           // рад: угловая ширина поля тяги. 0,55 давало язык: соседи не шли, одни
+                                  // тяги за углы строили звезду, а готовность требовала 16 тяг (ревью 17.11, P7)
+const PULL_OUT_COS = Math.cos(65*Math.PI/180);   // конус тяги уже конуса шлепка: вбок край не тащим
+const PULL_SKEW = 25*Math.PI/180; // край идёт за пальцем не дальше этого угла от радиуса хвата
+const PULL_NEIGH = 1.25;          // тянутый участок — не дальше стольких радиусов соседей (±30°): ни звезды, ни креста
+const PULL_OVER = 0.03;           // тяга ведёт кромку до пунктира и на столько за него; дальше — только шлепки (SQ_OVER)
+const PULL_FAST_BAND = 0.25;      // доля V_SLAP над порогом, за которую язык укорачивается до PULL_FAST_CAP
 const PULL_MIN = 0.25;            // gs: короче — тесто возвращается
-const PULL_CAP_GS = 1.4, PULL_CAP_R = 0.45;   // предел хода: в gs и в радиусах листа
+const PULL_CAP_GS = 1.4, PULL_CAP_R = 0.55;   // предел хода: в gs и в радиусах листа
 const PULL_SLIP = 1.6;            // палец на столько пределов впереди — тяга фиксируется сама
 const PULL_BLOCK = 0.06;          // gs: меньше запаса до мишени — сторона дотянута
 const PULL_FAST_CAP = 0.40;       // gs: предел хода края под махом на пороге шлепка и быстрее
+const PULL_FLY_KEEP = 0.5;        // доля языка, остающаяся к удару (на main дуга хвата к удару держала ~0,6 подъёма)
 const PULL_NUDGE = 0.10;          // gs: настолько упёршаяся сторона подаётся под пальцем и возвращается
 let pullN = 0;                    // зафиксированных тяг на этом листе (контур листа рисуется по кромке)
 // Ход края от скорости руки: полный до V_PULL_FULL, дальше падает до PULL_GAIN_FAST на пороге
@@ -3627,30 +3660,77 @@ function pullBegin(){
     const t = Math.max(0, Math.min(1, (Math.min(1, rho/rg) - 0.1)/0.75));
     w[i] = Math.exp(-(phi*phi)/(PULL_SIGMA*PULL_SIGMA)) * t*t*(3-2*t);
   }
-  const th = Math.atan2(gy,gx), room = Math.max(0, targetAt(th)*(1+SQ_OVER) - rg);
+  // Запас хода — от центра МИШЕНИ: до контура × (1+PULL_OVER). И не дальше PULL_NEIGH радиусов
+  // соседей на ±30° ПОСЛЕ тяги (соседи идут следом с весом w30): узкое поле звезду не построит.
+  const tc = targetC(), tx = px[e]-tc.x, ty = py[e]-tc.y, rt = Math.hypot(tx,ty), th = Math.atan2(ty,tx);
+  rimProfile(tc);
+  const neigh = Math.min(rimProf[rimBin(th - Math.PI/6)], rimProf[rimBin(th + Math.PI/6)]);
+  const w30 = Math.exp(-(Math.PI/6)*(Math.PI/6)/(PULL_SIGMA*PULL_SIGMA)), den = 1 - PULL_NEIGH*w30;
+  const roomN = den > 0.02 ? Math.max(0, (PULL_NEIGH*neigh - rt)/den) : (PULL_NEIGH*neigh > rt ? Infinity : 0);
+  const room = Math.max(0, Math.min(targetAt(th)*(1+PULL_OVER) - rt, roomN));
   let cap = Math.min(PULL_CAP_GS*gestureScale, PULL_CAP_R*sheetRadius(), room);
   if(cap < PULL_BLOCK*gestureScale) cap = 0;
-  action.pull = { c, rg, nx:gx/rg, ny:gy/rg, bx:Float32Array.from(px), by:Float32Array.from(py), w,
-    e:0, raw:0, gain:1, dx:0, dy:0, cap };
+  // Узлы кромки и дробный номер сектора каждого узла (от центра мишени): по ним pullTo зажимает ход.
+  const ab = new Float32Array(N), rim = [];
+  for(let i=0;i<N;i++) ab[i] = (Math.atan2(py[i]-tc.y, px[i]-tc.x) + Math.PI)/(2*Math.PI)*RIM_BINS - 0.5;
+  for(const i of edgeNodes) if(!(conDeg && conDeg[i] <= 0) && w[i] > 0) rim.push(i);
+  action.pull = { c, tc, rg, nx:gx/rg, ny:gy/rg, bx:Float32Array.from(px), by:Float32Array.from(py), w, ab, rim,
+    e:0, raw:0, gain:1, fast:0, k:1, dx:0, dy:0, cap };
   action.state = "PULLING";
 }
-function pullTo(p, gain){
+// fast — 0…1: насколько рука быстрее порога шлепка (язык укорачивается до PULL_FAST_CAP).
+function pullTo(p, gain, fast){
   const P = action.pull; let dx = p.x-action.down.x, dy = p.y-action.down.y; const len = Math.hypot(dx,dy);
   if(gain != null) P.gain = gain;
+  if(fast != null) P.fast = Math.max(0, Math.min(1, fast));
   P.raw = len; P.dx = dx; P.dy = dy;
-  let e = 0;
-  if(len > 1e-9 && (dx*P.nx + dy*P.ny)/len >= SLAP_OUT_COS){
+  let e = 0, ux = P.nx, uy = P.ny;
+  if(len > 1e-9 && (dx*P.nx + dy*P.ny)/len >= PULL_OUT_COS){
+    // Край идёт по направлению пальца, но не дальше PULL_SKEW от радиуса хвата, а ход — проекция
+    // пути пальца на это направление: косая тяга не сдвигает лист вбок (ревью 17.11, P6:
+    // под 60° к радиусу шесть тяг вывернули 44 ячейки).
+    const a = Math.atan2(P.nx*dy - P.ny*dx, P.nx*dx + P.ny*dy), b = Math.max(-PULL_SKEW, Math.min(PULL_SKEW, a));
+    const cb = Math.cos(b), sb = Math.sin(b); ux = P.nx*cb - P.ny*sb; uy = P.nx*sb + P.ny*cb;
+    const along = Math.max(0, dx*ux + dy*uy);
     // упёршаяся сторона чуть подаётся и вернётся на отпускании; в длины покоя это не идёт
     let lim = P.cap > 0 ? P.cap : PULL_NUDGE*gestureScale;
-    // Под быстрым махом язык короткий (PULL_FAST_CAP): длинный, отпущенный на подъёме, выворачивал
-    // ячейки при ударе (Node 17.11, шесть случайных серий тяг и шлепков: 323 против 193).
-    const fast = (1 - P.gain)/(1 - PULL_GAIN_FAST);
-    lim += (Math.min(lim, PULL_FAST_CAP*gestureScale) - lim) * Math.max(0, Math.min(1, fast));
-    e = P.gain * lim * Math.tanh(len/lim);
+    // Под махом быстрее порога шлепка язык короткий (PULL_FAST_CAP): длинный, отпущенный на подъёме,
+    // выворачивал ячейки при ударе (Node 17.11, шесть случайных серий тяг и шлепков: 323 против 193).
+    // В коридоре V_PULL_FULL…V_SLAP язык не укорачивается: там это ещё тяга, и её рост резать нечем.
+    lim += (Math.min(lim, PULL_FAST_CAP*gestureScale) - lim) * P.fast;
+    e = P.gain * lim * Math.tanh(along/lim);
   }
   P.e = P.cap > 0 ? e : 0;
-  const k = len > 1e-9 ? e/len : 0; dx *= k; dy *= k;
-  for(let i=0;i<N;i++){ px[i] = P.bx[i] + dx*P.w[i]; py[i] = P.by[i] + dy*P.w[i]; prx[i]=px[i]; pry[i]=py[i]; vx[i]=0; vy[i]=0; }
+  dx = ux*e*P.k; dy = uy*e*P.k;
+  // Ход зажат ПО УГЛУ: в каждом секторе кромка идёт наружу не дальше контура мишени × (1+PULL_OVER).
+  // Запас считался только в точке хвата, и соседи уезжали за пунктир (ревью 17.11, P6: 1,21 мишени).
+  // Доля хода s — одна на сектор (наименьшая по узлам кромки в нём и в соседних секторах) и
+  // линейно по углу между секторами: узлы на одном луче идут с одной долей и друг друга не обгоняют
+  // (зажим каждого узла по отдельности выворачивал ячейки у кромки: 9 за 8 тяг, Node 17.11).
+  const tc = P.tc, S1 = pullS, S2 = pullS2; S1.fill(1);
+  if(e > 0){
+    const rMin = SQ_SIDE*targetR, lim2 = (x, y)=>{ const t = Math.atan2(y, x), l = targetAt(t)*(1+PULL_OVER); return l*l; };
+    for(const i of P.rim){
+      const w = P.w[i], x0 = P.bx[i]-tc.x, y0 = P.by[i]-tc.y, x = x0 + dx*w, y = y0 + dy*w, r2 = x*x + y*y;
+      if(r2 <= rMin*rMin || r2 <= lim2(x, y)) continue;
+      let k;
+      if(x0*x0 + y0*y0 >= lim2(x0, y0)) k = (x0*dx + y0*dy) > 0 ? 0 : 1;   // уже за контуром: наружу ни шагу
+      else { let lo = 0, hi = 1;
+        for(let it=0; it<7; it++){ const m = (lo+hi)*0.5, xm = x0 + dx*w*m, ym = y0 + dy*w*m; if(xm*xm + ym*ym > lim2(xm, ym)) hi = m; else lo = m; }
+        k = lo; }
+      const b = ((Math.round(P.ab[i]) % RIM_BINS) + RIM_BINS) % RIM_BINS;
+      if(k < S1[b]) S1[b] = k;
+    }
+    for(let b=0;b<RIM_BINS;b++) S2[b] = Math.min(S1[b], S1[(b+1)%RIM_BINS], S1[(b-1+RIM_BINS)%RIM_BINS]);
+  } else S2.fill(1);
+  for(let i=0;i<N;i++){
+    const w = P.w[i]; let k = 1;
+    if(w > 0 && e > 0){
+      const f = P.ab[i], b0 = Math.floor(f), t = f - b0, i0 = ((b0 % RIM_BINS) + RIM_BINS) % RIM_BINS;
+      k = S2[i0] + (S2[(i0+1)%RIM_BINS] - S2[i0])*t;
+    }
+    px[i] = P.bx[i] + dx*w*k; py[i] = P.by[i] + dy*w*k; prx[i]=px[i]; pry[i]=py[i]; vx[i]=0; vy[i]=0;
+  }
 }
 function pullRestore(){
   const P = action.pull; if(!P) return;
@@ -3676,9 +3756,9 @@ function pullCommit(){
   plasticT = 0; action.timer = 0.30; action.state = "SETTLING";
 }
 function startLift(v, force, held){
-  // Тяга, начатая этим же движением, отпускается: длины покоя не тронуты, лист упруго вернётся.
+  // Язык тяги, начатой этим же движением, остаётся в руке до удара (см. «Подъём перед шлепком»):
+  // длины покоя не тронуты, лист упруго вернётся сам.
   const rad = grabRadial(), sp = Math.hypot(v.x, v.y) || 1;
-  action.pull = null;
   action.state = "LIFTING";
   if(stepNo === 3 && phase === "TABLE") tossTry++;   // попытка засчитывается с момента маха
   action.timer = LIFT_MAX; action.heldAtLift = Math.round(held);
@@ -3695,6 +3775,7 @@ function updateActionMove(p, tEv, client){
     const v = sampleVelocity(); action.velocity = { x:v.x, y:v.y };
     const pt = pathTurn(); action.sweep = pt.sweep; if(pt.tail) action.tailDir = pt.tail;
     if(action.state === "CARRY"){ xf.ox = p.x - action.carryFrom.x; xf.oy = p.y - action.carryFrom.y; return; }
+    if(action.pull) pullTo(p, PULL_GAIN_FAST, 1);          // край на подъёме ещё идёт за пальцем
     // Мах ещё разгоняется: сила — по пику скорости, а не по первому событию за порогом.
     const f = slapForce(sampleVelocity(SLAP_WIN_MS), action.liftRad || action.direction, v);
     if(f > action.impulse){ action.impulse = f; noteRelease(v); }
@@ -3703,6 +3784,8 @@ function updateActionMove(p, tEv, client){
   }
   if(stepNo !== 1){
     if(action.state !== "ARMED" && action.state !== "PULLING") return;
+    // Пауза длиннее PAUSE_MS: прежний штрих кончился — судим его до того, как начнётся новый.
+    if(action.stroke && Number.isFinite(tEv) && tEv - action.stroke.lastMoveT > PAUSE_MS && judgeEndedStroke()) return;
     pushSample(p, tEv, client);
     updateGripFromHold();
     if(!action.moved) return;
@@ -3710,16 +3793,16 @@ function updateActionMove(p, tEv, client){
     if(action.stroke.start !== null && action.last.t - action.stroke.start >= VEL_WIN_MS && v.speed > action.vPeak) action.vPeak = v.speed;   // пик — только по полному окну
     const rad = grabRadial();
     const st = action.stroke, held = st.start === null ? 0 : st.start - action.down.t;
-    const ripe = st.start !== null && held >= SLAP_HOLD_MS && action.last.t - st.start >= SLAP_MIN_MS;
+    const ripe = st.start !== null && action.last.t - st.start >= SLAP_MIN_MS;
     const vc = ripe ? sampleVelocity(SLAP_WIN_MS) : null, force = ripe ? slapForce(vc, rad, v) : 0;
     if(force > 0){ startLift(vc, force, held); return; }
     if(action.state === "ARMED"){
       // внутрь и вбок — ни тяга, ни шлепок: лист не трогаем, пока палец не пошёл наружу
       const dx = p.x-action.down.x, dy = p.y-action.down.y, len = Math.hypot(dx,dy);
-      if(len < 1e-9 || (dx*rad.x + dy*rad.y)/len < SLAP_OUT_COS) return;
+      if(len < 1e-9 || (dx*rad.x + dy*rad.y)/len < PULL_OUT_COS) return;
       pullBegin();
     }
-    pullTo(p, pullGain(v.speed));
+    pullTo(p, pullGain(v.speed), (v.speed - V_SLAP)/(PULL_FAST_BAND*V_SLAP));
     const P = action.pull, lim = Math.max(P.cap, PULL_MIN*gestureScale);
     // пальцы соскользнули: тяга — единица действия, а не буксировка
     if(P.cap > 0 && P.raw >= lim*PULL_SLIP && v.speed < V_SLAP*0.6 && action.last.t - action.stroke.start >= 120){
@@ -3757,17 +3840,18 @@ function releaseAction(tEv){
   if(action.state === "ARMED" || action.state === "PULLING"){
     // Быстрый короткий мах мог целиком уместиться между двумя событиями: на отпускании решаем
     // по тем же числам. Палец, который остановился, шлепком не считается, и край догоняет его.
-    const tUp = Number.isFinite(tEv) ? tEv : performance.now();
-    const fresh = action.moved && action.stroke.start !== null && tUp - action.stroke.lastMoveT <= STALE_MS;
+    const tUp = Number.isFinite(tEv) ? tEv : performance.now(), st = action.stroke;
+    const fresh = action.moved && st.start !== null && tUp - st.lastMoveT <= STALE_MS;
+    // Штрих на ходу (fresh) судим сейчас. Вставший палец шлепком не считается — кроме короткого
+    // маха, который ещё никто не судил: «рывок — стоп — отпустила» остаётся шлепком.
+    if(fresh){
+      st.judged = true;
+      const j = strokeVerdict();
+      if(j.force > 0){ startLift(j.vc, j.force, st.start - action.down.t); toFlying(); return; }
+    } else if(judgeEndedStroke()) return;
     const v = fresh ? sampleVelocity() : { x:0, y:0, speed:0 };
-    const vc = fresh ? sampleVelocity(SLAP_WIN_MS) : v;
-    const force = fresh ? slapForce(vc, grabRadial(), v) : 0;
-    if(force > 0){
-      const held = action.stroke.start - action.down.t;
-      startLift(vc, force, held); toFlying(); return;
-    }
     if(action.state === "ARMED"){ clearAction(); return; }   // не сдвинула или вела внутрь — ничего
-    pullTo(action.last, pullGain(v.speed));
+    pullTo(action.last, pullGain(v.speed), 0);
     noteRelease(v); pullCommit(); return;
   }
   if(action.state === "LIFTING"){ if(commaLike()) endCarry(); else toFlying(); return; }   // бросок
@@ -3776,9 +3860,16 @@ function releaseAction(tEv){
   // (Псевдокод аудита здесь очищал бы состояние — это обрывало бы удар на лету.)
   action.pointerId = null;
 }
+// Полёт — 80–160 мс до удара, как на main. Там подъём начинался с первого движения, здесь мах
+// подтверждается не раньше SLAP_MIN_MS от начала штриха: это время уже прошло у игрока на глазах
+// (край тянулся за пальцем), и оно вычитается из полёта — иначе удар по длинному маху опаздывал
+// на ~70 мс против main (ревью 17.11, P9).
+const FLY_MIN = 0.02, LIFT_SEEN_MS = 80;
 function toFlying(){
+  const st = action.stroke, age = st && st.start !== null ? action.last.t - st.start : 0;
   action.state = "FLYING";
-  action.timer = 0.08 + Math.random()*0.08;                // 80–160 мс до удара
+  action.timer = Math.max(FLY_MIN, 0.08 + Math.random()*0.08 - Math.max(0, age - LIFT_SEEN_MS)/1000);
+  action.flyT = action.timer;
 }
 
 function updateAction(dt){
@@ -3790,8 +3881,13 @@ function updateAction(dt){
     if(action.timer <= 0 || performance.now() - action.last.t > 90) liftGate();
   } else if(action.state === "PULLING"){
     // Палец остановился — край, отставший в коридоре скоростей, догоняет его.
-    const P = action.pull;
-    if(P && P.gain < 1 && performance.now() - action.stroke.lastMoveT > STALE_MS) pullTo(action.last, Math.min(1, P.gain + dt*4));
+    if(performance.now() - action.stroke.lastMoveT > STALE_MS){
+      if(judgeEndedStroke()) return;                         // короткий рывок и стоп — шлепок бьёт сам
+      const P = action.pull;
+      if(P && (P.gain < 1 || P.fast > 0)) pullTo(action.last, Math.min(1, P.gain + dt*4), Math.max(0, P.fast - dt*6));
+    }
+  } else if(action.state === "ARMED" && stepNo !== 1){
+    if(action.stroke && performance.now() - action.stroke.lastMoveT > STALE_MS) judgeEndedStroke();
   } else if(action.state === "CARRY"){
     action.timer -= dt;
     const stalled = performance.now() - action.last.t > 90;   // рука остановилась — дуга кончилась
@@ -3802,6 +3898,9 @@ function updateAction(dt){
     if(action.timer <= 0) land();
   } else if(action.state === "FLYING"){
     action.timer -= dt;
+    // язык в полёте отпускается наполовину (PULL_FLY_KEEP), остальное снимает удар
+    const P = action.pull;
+    if(P && action.timer > 0){ P.k = PULL_FLY_KEEP + (1-PULL_FLY_KEEP)*Math.max(0, Math.min(1, action.timer/(action.flyT||1))); pullTo(action.last); }
     if(action.timer <= 0) impactAction();
   } else if(action.state === "SETTLING"){
     action.timer -= dt;
@@ -3825,12 +3924,14 @@ const COMMA_MAX       = 0.45;               // с: дольше вести — �
 function commaLike(){ return Math.abs(action.sweep) >= COMMA_MIN_SWEEP; }
 
 function enterCarry(){
+  pullRestore();                    // язык тяги в руку не едет: лист подхватывается ровным
   const c = centerOfSheet();
   action.state = "CARRY"; action.timer = COMMA_MAX;
   action.carryFrom = { x:action.last.x, y:action.last.y };
   xf = { cx:c.x, cy:c.y, ox:0, oy:0, th:0, lift: sheetRadius()*0.10 };
 }
 function endCarry(){
+  pullRestore();
   const c = centerOfSheet();
   if(!xf) xf = { cx:c.x, cy:c.y, ox:0, oy:0, th:0, lift:0 };   // запятая уложилась в 80 мс
   const hx = c.x + xf.ox, hy = c.y + xf.oy;                     // где лист сейчас, в руке
@@ -3912,6 +4013,7 @@ function bakeTransform(ox, oy, th){
     px[i] = cx + ox + dx*c - dy*s; py[i] = cy + oy + dx*s + dy*c;
     prx[i] = px[i]; pry[i] = py[i]; vx[i] = 0; vy[i] = 0;
   }
+  sqC = null;                       // лист перенесён целиком — мишень встаёт под ним заново
 }
 
 // ─── Жарка листа без блюда (лист на таве, пока блюдо не собрано) и общие скорости ───
@@ -4039,6 +4141,7 @@ function punchHole(direction){
 }
 function impactAction(){
   action.state = "IMPACT";
+  action.pull = null;               // язык отпущен: узлы остаются где были, длины покоя не тронуты
   const c = centerOfSheet();
   applySlapImpulse(action.impulse * gestureScale, action.direction, c);
   // Сработал стоп-сигнал audit §6.6: скоростной импульс в одиночку не растил площадь —
@@ -4088,26 +4191,45 @@ function slapWeight(x, y, direction, center, sr, t){
 // (docs/sources). Мишень — суперэллипс по осям стола: полусторона SQ_SIDE·targetR, угол на 1,11·targetR.
 // Рост режется ПО УГЛУ: сторона, дошедшая до пунктира, затухает к контуру × (1+SQ_OVER) и встаёт,
 // углы ещё растут — «тяни там, где до пунктира далеко». Раньше был один общий стоп по радиусу листа.
-const SQ_N = 5, SQ_SIDE = 0.90, SQ_OVER = 0.12, RIM_BINS = 48;
+// У углов запас меньше, чем у сторон (SQ_OVER_CORNER): с общим запасом 0,12 углы уходили на 1,24
+// мишени при сторонах 0,92 — готовый лист был «подушкой» с вогнутыми сторонами (ревью 17.11, P5).
+const SQ_N = 5, SQ_SIDE = 0.90, SQ_OVER = 0.12, SQ_OVER_CORNER = 0.05, RIM_BINS = 48;
 const READY_FILL = 0.92;          // sheetFill() с этого значения — лист готов к таве
+const FILL_WORST = 0.85;          // готовый лист ни в одном секторе не короче этой доли мишени
 const CORNER_TICK = 0.93;         // кромка/мишень на диагонали: угол дотянут — нота и вспышка
-let rimProf = new Float32Array(RIM_BINS);
+const CORNER_SIDE = 0.80;         // …и соседние стороны (±30° от диагонали) дотянуты хотя бы настолько
+let rimProf = new Float32Array(RIM_BINS), rimSrc = new Float32Array(RIM_BINS), fillBuf = new Float32Array(RIM_BINS);
+const pullS = new Float32Array(RIM_BINS), pullS2 = new Float32Array(RIM_BINS);   // доли хода тяги по секторам (pullTo)
 function targetAt(th){ const c=Math.abs(Math.cos(th)), s=Math.abs(Math.sin(th)); return targetR*SQ_SIDE/Math.pow(Math.pow(c,SQ_N)+Math.pow(s,SQ_N), 1/SQ_N); }
+// Запас за пунктиром по направлению: SQ_OVER на серединах сторон, SQ_OVER_CORNER на диагоналях.
+function sqOver(th){ const c = Math.cos(2*th); return SQ_OVER_CORNER + (SQ_OVER - SQ_OVER_CORNER)*c*c; }
+// Центр мишени — место на столе, а не центр масс листа: пунктир не ездит за тестом и не прыгает
+// на отпускании (ревью 17.11, P12: 0,06 gs после двух тяг). Ставится по центру листа на входе в
+// шаг 2 и заново после любого переноса листа целиком (ресайз, возврат из руки на стол, «заново»).
+// Кромка, готовность, углы и запас роста меряются от него: лист, уехавший вбок, с одной стороны
+// не дотянут до пунктира, и тянуть надо там.
+let sqC = null;
+function targetC(){ return sqC || (sqC = centerOfSheet()); }
 function rimBin(th){ return ((Math.floor((th+Math.PI)/(2*Math.PI)*RIM_BINS))%RIM_BINS+RIM_BINS)%RIM_BINS; }
 // Профиль кромки: наибольший радиус живых узлов края в каждом из RIM_BINS секторов.
 function rimProfile(c){
-  c = c || centerOfSheet(); rimProf.fill(0);
+  c = c || targetC(); rimProf.fill(0);
   for(const i of edgeNodes){ if(conDeg && conDeg[i] <= 0) continue; const dx=px[i]-c.x, dy=py[i]-c.y, b=rimBin(Math.atan2(dy,dx)), d=Math.hypot(dx,dy); if(d>rimProf[b]) rimProf[b]=d; }
-  const src = Float32Array.from(rimProf);
+  const src = rimSrc; src.set(rimProf);
   for(let b=0;b<RIM_BINS;b++) if(!src[b]){ for(let k=1;k<RIM_BINS;k++){ const v=Math.max(src[(b+k)%RIM_BINS], src[(b-k+RIM_BINS)%RIM_BINS]); if(v){ rimProf[b]=v; break; } } }
   return rimProf;
 }
-// Заполнение мишени: 18-й перцентиль отношения кромка/мишень по секторам (как прежний «короткий
-// радиус», но против квадрата): один недотянутый сектор готовность не держит, сторона — держит.
+// Заполнение мишени: меньшее из трёх — 18-й перцентиль отношения кромка/мишень по секторам,
+// самая короткая из четырёх середин сторон и самый короткий сектор с поправкой READY_FILL/FILL_WORST
+// (готовый лист нигде не короче FILL_WORST мишени). Одного перцентиля мало: он прощает 8 секторов
+// из 48 — «подушка» с вогнутыми серединами сторон считалась готовой на 99 % (ревью 17.11, P5),
+// а лист с одним недотянутым углом (0,64 мишени) — на 92 % (Node 17.11, случайные серии).
 function sheetFill(){
-  const c = centerOfSheet(); rimProfile(c); const a = [];
-  for(let b=0;b<RIM_BINS;b++) a.push(rimProf[b]/targetAt((b+0.5)/RIM_BINS*2*Math.PI-Math.PI));
-  a.sort((x,y)=>x-y); return a[Math.floor(RIM_BINS*0.18)];
+  rimProfile(); const a = fillBuf;
+  for(let b=0;b<RIM_BINS;b++) a[b] = rimProf[b]/targetAt((b+0.5)/RIM_BINS*2*Math.PI-Math.PI);
+  let side = Infinity;
+  for(let k=0;k<4;k++){ const b = (k*RIM_BINS/4) % RIM_BINS, m = (a[b] + a[(b-1+RIM_BINS)%RIM_BINS])*0.5; if(m < side) side = m; }
+  a.sort(); return Math.min(a[Math.floor(RIM_BINS*0.18)], side, a[0]*READY_FILL/FILL_WORST);
 }
 function sheetPct(){ return Math.round(sheetFill()*100); }
 // Кромка на направлении th (rimProfile уже посчитан): диагональ лежит на стыке двух секторов.
@@ -4121,35 +4243,42 @@ function squareness(){
 // Углы: каждый, впервые дошедший до мишени, — своя нота и вспышка; четвёртый — аккорд «готово».
 let cornerDone = [0,0,0,0], cornerFlash = [0,0,0,0], readyBlinkAt = 0;
 function cornerAngle(k){ return -Math.PI*3/4 + k*Math.PI/2; }
-function resetCorners(){ cornerDone = [0,0,0,0]; cornerFlash = [0,0,0,0]; readyBlinkAt = 0; }
+function resetCorners(){ cornerDone = [0,0,0,0]; cornerFlash = [0,0,0,0]; readyBlinkAt = 0; sqC = null; }
+// Угол засчитывается, только если дотянуты и соседние стороны: одни тяги за углы давали звезду
+// (угол/сторона 2,18, заполнение 0,61), а стенд играл четыре ноты и «готово» (ревью 17.11, P4).
+// Аккорд и мигание борта — когда отмечены все четыре угла И лист готов (sheetFill ≥ READY_FILL).
 function checkCorners(){
   if(phase !== "TABLE" || stepNo < 2 || xf) return;
   let left = 0; for(let k=0;k<4;k++) if(!cornerDone[k]) left++;
-  if(!left) return;
+  if(!left && readyBlinkAt) return;
   rimProfile();
+  const rat = a => rimProf[rimBin(a)]/targetAt(a);
   for(let k=0;k<4;k++){
     if(cornerDone[k]) continue;
     const th = cornerAngle(k);
     if(rimAt(th)/targetAt(th) < CORNER_TICK) continue;
+    if(Math.min(rat(th - Math.PI/6), rat(th + Math.PI/6)) < CORNER_SIDE) continue;
     cornerDone[k] = 1; cornerFlash[k] = performance.now(); left--;
-    if(left > 0) audioCornerTick(4 - left);
-    else { audioReady(); readyBlinkAt = performance.now(); }
+    audioCornerTick(4 - left);
   }
+  if(!left && !readyBlinkAt && sheetFill() >= READY_FILL){ audioReady(); readyBlinkAt = performance.now(); }
 }
-// Доля роста на направлении th: 1 до пунктира, затухает к контуру × (1+SQ_OVER) и там 0.
-function growEase(th){
+// Доля роста в точке (x, y): 1 до пунктира, затухает к контуру × (1+over) и там 0.
+// Профиль кромки и угол — от центра мишени (rimProfile() уже посчитан вызывающим).
+function growEase(x, y){
+  const tc = targetC(), th = Math.atan2(y - tc.y, x - tc.x);
   const over = rimProf[rimBin(th)]/targetAt(th);
-  return over > 1.0 ? Math.max(0, 1 - (over-1.0)/SQ_OVER) : 1;
+  return over > 1.0 ? Math.max(0, 1 - (over-1.0)/sqOver(th)) : 1;
 }
 function plasticStretch(I, direction, center){
-  rimProfile(center);
+  rimProfile();
   const sr = Math.max(1, sheetRadius());
   for(let k2=0;k2<cons.length;k2++){
     const c2 = cons[k2]; if(c2.broken) continue;
     const mx = (px[c2.a]+px[c2.b])*0.5, my = (py[c2.a]+py[c2.b])*0.5;
     const t = ((thick[c2.a]||1)+(thick[c2.b]||1))*0.5;
     const w = slapWeight(mx, my, direction, center, sr, t);
-    c2.rest *= 1 + SLAP_GROW * I * w * growEase(Math.atan2(my-center.y, mx-center.x));
+    c2.rest *= 1 + SLAP_GROW * I * w * growEase(mx, my);
   }
 }
 
@@ -4159,11 +4288,11 @@ function plasticStretch(I, direction, center){
 const SLAP_KICK_FLOOR = 0.25;
 function applySlapImpulse(I, direction, center){
   const sr = Math.max(1, sheetRadius());
-  rimProfile(center);
+  rimProfile();
   for(let i=0;i<N;i++){
     const loose = conDeg ? Math.min(1, conDeg[i]/3) : 1;
     const ddx = px[i]-center.x, ddy = py[i]-center.y;
-    const kick = SLAP_KICK_FLOOR + (1-SLAP_KICK_FLOOR) * growEase(Math.atan2(ddy, ddx));
+    const kick = SLAP_KICK_FLOOR + (1-SLAP_KICK_FLOOR) * growEase(px[i], py[i]);
     const w = slapWeight(px[i], py[i], direction, center, sr, thick[i]||1) * loose * kick;
     const dl = Math.hypot(ddx,ddy) || 1;
     vx[i] += (ddx/dl*0.78 + direction.x*0.22) * I * w;
@@ -4212,6 +4341,7 @@ function finalizeGesture(){
     v_gs: +rel.v.toFixed(2), v_css: Math.round(rel.v*gcss),
     v_peak_gs: +rel.peak.toFixed(2), v_slap_gs: V_SLAP,
     path_gs: +rel.path.toFixed(2), stroke_ms: Math.round(rel.ms), events: rel.events,
+    t_fallbacks: Math.max(0, evTimeFallbacks - (action.evFb0|0)),
     squareness: +squareness().toFixed(3), fill: +sheetFill().toFixed(3),
     areaRatio: +(areaNow/Math.max(1,startArea)).toFixed(3),
     diameterRatio: +(sheetRadius()/Math.max(1,startR)).toFixed(3),
@@ -4650,9 +4780,13 @@ let dbgDown = 0, dbgMove = 0, dbgKind = "ждёт";
 // Время события, а не момент обработки: занятый главный поток склеивает touchmove,
 // и по времени обработки медленная складка читалась бы как мах. Берём e.timeStamp,
 // если он в той же шкале, что performance.now().
+// Откат на время обработки считается (evTimeFallbacks) и пишется в журнал жеста: если шкала
+// timeStamp на телефоне чужая, скорости жеста меряются по времени обработки — это надо видеть.
+let evTimeFallbacks = 0;
 function evTime(e){
   const now=performance.now(), t=e && e.timeStamp;
-  return Number.isFinite(t) && Math.abs(t-now)<1000 ? t : now;
+  if(Number.isFinite(t) && Math.abs(t-now)<1000) return t;
+  evTimeFallbacks++; return now;
 }
 // Точка ввода на столе при нарезке берётся на нарисованном верху кусков, а не на плоскости стола.
 function dishInputLocal(cx, cy){
@@ -4754,8 +4888,8 @@ function onCancel(id){
   // Отмена всегда возвращает покой из ARMED/LIFTING (audit §5); начатая тяга откатывается целиком;
   // автономные фазы (FLYING и дальше) доигрывают сами и очистятся за ≤0.4 с.
   if(action.state === "CARRY"){ action.pointerId = null; dropCarry(); }
-  else if(action.state === "PULLING"){ pullRestore(); clearAction(); }
-  else if(action.state === "ARMED" || action.state === "LIFTING") clearAction();
+  else if(action.state === "PULLING" || action.state === "LIFTING"){ pullRestore(); clearAction(); }   // и язык подъёма тоже
+  else if(action.state === "ARMED") clearAction();
   else action.pointerId = null;
 }
 
@@ -4874,7 +5008,8 @@ addEventListener("blur", ()=>{
   releasePress(dishGesture); dishGesture=null; fatGesture=null;
   dishTouches.clear(); if(dishTwist) endTwist(dishTwist.input==="wheel");
   if(action.state==="CARRY"){ action.pointerId = null; dropCarry(); }
-  else if(action.state==="ARMED"||action.state==="LIFTING") clearAction();
+  else if(action.state==="PULLING"||action.state==="LIFTING"){ pullRestore(); clearAction(); }   // иначе тяга висела до «заново»: физика в ней стоит
+  else if(action.state==="ARMED") clearAction();
 });
 
 addEventListener("keydown", e=>{
@@ -5431,7 +5566,7 @@ function drawTable(g, sx, sy){   // пикселизация делается н
 function drawStretchTarget(g, sx, sy){
   const R_ = (x)=>x*sx, D_ = (y)=>y*sy;
   if(phase !== "TABLE") return;
-  const c2 = action.pull ? action.pull.c : centerOfSheet();   // во время тяги мишень не ездит за центром масс
+  const c2 = stepNo===1 ? centerOfSheet() : targetC();   // с шага 2 мишень стоит на столе (targetC)
   g.strokeStyle = "#4a3a24"; g.lineWidth = Math.max(1, R_(2));
   g.setLineDash([R_(10), R_(8)]);
   if(stepNo===1){
@@ -5456,7 +5591,7 @@ function drawStretchTarget(g, sx, sy){
 function drawCornerFlash(g, sx, sy){
   if(phase !== "TABLE" || stepNo < 2 || xf) return;
   const R_ = (x)=>x*sx, D_ = (y)=>y*sy, now = performance.now();
-  const c2 = action.pull ? action.pull.c : centerOfSheet();
+  const c2 = targetC();
   for(let k=0;k<4;k++){
     if(!cornerDone[k]) continue;
     const age = (now - cornerFlash[k])/450;
@@ -5558,7 +5693,8 @@ function loop(now){
   acc+=real; frameCount++;
   if(acc>0.5){ fps=frameCount/acc; acc=0; frameCount=0; }
   const liveEl = document.getElementById("live");
-  const fillNow = sheetFill(), pct = Math.round(fillNow*100);
+  // заполнение мишени нужно только листу на столе с шага 2 (на таве и на шаге 1 его не показывают)
+  const fillNow = phase==="TABLE" && stepNo>=2 && !dish ? sheetFill() : 0, pct = Math.round(fillNow*100);
   const ragged = tornAt ? " · рваный узор" : "";
   const ready = fillNow >= READY_FILL ? " ✓ готов · запятой на таву →" : "";
   const banner = advancedAt && performance.now()-advancedAt < 2600;
@@ -5676,6 +5812,8 @@ function rescaleSheet(oldZ, oldPan, oldR){
     px[i] = o1.x + (px[i]-o0.x)*s; py[i] = o1.y + (py[i]-o0.y)*s; prx[i] = px[i]; pry[i] = py[i];
     vx[i] *= s; vy[i] *= s;
   }
+  if(sqC && !onPan) sqC = { x:o1.x + (sqC.x-o0.x)*s, y:o1.y + (sqC.y-o0.y)*s };   // мишень едет вместе с листом
+  else sqC = null;
   scaleSheetLengths(s);
 }
 // Всё, что у листа измеряется в единицах стола, кроме самих узлов (их переносят вызывающие).
