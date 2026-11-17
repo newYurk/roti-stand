@@ -8,8 +8,19 @@
 <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
 <meta http-equiv="Pragma" content="no-cache">
 <meta http-equiv="Expires" content="0">
-<title>Роти · тесто, складки и нарезка</title>
-<link rel="stylesheet" href="stand.css">
+<title>Макашница</title>
+<!-- С домашнего экрана: без полосы Safari, портрет, цвета тележки (шаг 1 v0). -->
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icons/icon-180.png">
+<link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Макашница">
+<meta name="apple-mobile-web-app-status-bar-style" content="black">
+<meta name="theme-color" content="#14100c">
+<!-- Режим стенда (?dev=1) включается до первой раскладки, чтобы поле не прыгало. -->
+<script>if(/[?&]dev=1(&|$)/.test(location.search)) document.documentElement.classList.add("dev");</script>
+<link rel="stylesheet" href="stand.css?v=2026-11-17-b74">
 
 </head>
 <body>
@@ -22,6 +33,17 @@
   <div id="card" hidden>
     <div id="cardBody"></div>
     <button id="nextRoti">следующий роти</button>
+  </div>
+  <!-- Радио: служебный листок рамки вечера, единственное место со словами (evening.js). -->
+  <div id="radioSheet" hidden>
+    <div id="radioBox">
+      <button id="sound">звук: выкл</button>
+      <button id="evRestart">начать вечер заново</button>
+      <button id="evPanel">панель стенда</button>
+      <button id="evLog">скопировать журнал</button>
+      <div id="evBuild"></div>
+      <button id="evClose">закрыть</button>
+    </div>
   </div>
 </div>
 
@@ -54,7 +76,7 @@
     <div class="grp" id="gPlay">
       <button id="reset">заново</button>
       <button id="dump">скопировать лог</button>
-      <button id="sound">звук: выкл</button>
+      <button id="radioBtn" title="Звук, вечер заново, спрятать панель">радио</button>
     </div>
     <div class="grp measure" id="gZ"><b>высота</b>
       <button data-z="1.5">×1,5</button>
@@ -102,10 +124,11 @@
   </div>
 </div>
 
-<script src="stand.js?v=2026-11-17-b73"></script>
+<script src="stand.js?v=2026-11-17-b74"></script>
 <script src="counter-item.js?v=2026-09-19"></script>
 <script src="drizzle.js?v=2026-09-20-noserve"></script>
 <script src="banana.js?v=2026-09-20f"></script>
 <script src="egg.js?v=2026-09-20c"></script>
+<script src="evening.js?v=2026-11-17-b74"></script>
 </body>
 </html>

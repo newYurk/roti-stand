@@ -65,6 +65,17 @@
   #gZ, #gView, #gTune, #gCond, #gFry, #gPress, #gThrough,
   #stats, #mini, #toolsBtn, #hardReload, #gStepNav,
   #serveDish, #card { display:none !important; }
+  /* Рамка вечера (шаг 1 v0): игровой режим по умолчанию — панель стенда спрятана, поле во весь экран.
+     html.dev ставит ?dev=1 (до первой раскладки) или пункт «панель стенда» в радио. Справа сверху
+     висит лампа — служебные строки её не закрывают. */
+  html:not(.dev) #panel{ display:none; }
+  html:not(.dev) #topbar{ right:96px; }
+  #radioSheet{ position:absolute; inset:0; z-index:7; display:flex; align-items:center;
+    justify-content:center; background:rgba(15,12,9,.78); }
+  #radioBox{ display:flex; flex-direction:column; gap:10px; min-width:230px; padding:16px;
+    background:#1c1710; border:1px solid #5a4526; }
+  #radioBox button{ padding:12px 14px; font-size:14px; }
+  #evBuild{ color:var(--dim); font-size:11px; }
   /* Значок предпросмотра ветки: его заполняет только локальный сервер предпросмотра
      (/__preview.json). На Pages адреса нет, и значок остаётся скрытым. */
   #previewBadge{ position:absolute; left:6px; bottom:6px; max-width:calc(100% - 12px);
@@ -90,7 +101,7 @@
      тулбара Safari, а любой скачок высоты пересобирает лист. Поле не `flex:1`, значит
      содержимое панели физически не может двигать его границу. */
   @media (orientation:portrait) and (max-width:600px){
-    #stage{ flex:none; height:120vw; }
+    html.dev #stage{ flex:none; height:120vw; }
     #panel{ flex:1 1 auto; align-content:flex-start;
       overflow-y:auto; touch-action:pan-y; }
     #stats{ height:auto; min-height:7em; }
