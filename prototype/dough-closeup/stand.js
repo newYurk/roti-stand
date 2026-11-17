@@ -11,7 +11,7 @@
 // до 400%+ и лист «рвётся» в середине от любого движения. Замер это обнаружил сразу.
 // Число узлов сохранено (1 060 после обрезки по кругу; прежняя оценка «~1150» была на глаз,
 // пересчитано 07.09.2026), однородность рёбер восстановлена.
-const BUILD = "2026-11-17 · звук по умолчанию выключен, кнопка «звук» · 73";
+const BUILD = "2026-11-17 · рамка вечера: лампа, миска на три шарика, крышка, радио · 74";
 const GRID = 38;                   // 38x38, в круг попадает 1 060 узлов (посчитано, не оценка)
 let SUBSTEPS = 8;                  // T2: 8–10 подшагов, 1 итерация
 let DAMP = 0.986;
@@ -253,7 +253,7 @@ function zone(name){
     // встаёт в 20 px от края, а лист остаётся крупнее, чем был в альбоме.
     const inset = work ? cv.width * 0.04 : 0;
     let fWork = WORK_FRAC;
-    if(stepNo===1 && !frameOn) fWork = 0.70;   // плющение: тесто — герой, тава ждёт сверху
+    if(stepNo===1 && !frameOn && !eveningOn()) fWork = 0.70;   // плющение: тесто — герой, тава ждёт сверху (в рамке вечера раскладка не прыгает)
     const f = work ? fWork : 1 - fWork;
     const h = (bot - top) * f, y = work ? bot - h : top;
     return { x:inset, y, w:cv.width - inset*2, h, cx:cv.width*0.5, cy:y + h*0.5 };
@@ -315,6 +315,11 @@ function layoutPan(){
 // материал: разорванные ячейки отсутствуют, складка отражает материал и порядок
 // слоёв. Это геометрический стенд, не симуляция самоконтакта или готовности блюда.
 let dish = null, dishGesture = null;
+// Рамка вечера (evening.js, шаг 1 v0) держит в стенде только два флага и вызовы eveningXxx() под
+// typeof: без evening.js (проверки в Node, ?dev=1) стенд работает как раньше.
+// sheetHidden — стол свободен, шарика на нём нет; fryHold — тава под крышкой, жарка стоит.
+let sheetHidden = false, fryHold = false;
+const eveningOn = ()=> typeof eveningActive==="function" && eveningActive();
 // Жарка как действие (срез 17.09): прижим пальцем, купола и жир — модификаторы тепла по месту.
 // Живут вне dish.thermal (его целиком сравнивают проверки) и вне dish (его снимки — история):
 // panPress — точки прижима {x,y,level} в координатах блюда; domes — купола; fatMap — жир на
@@ -452,7 +457,7 @@ function fillingUnderSheet(){
   return false;
 }
 function canPlaceBanana(){
-  return !!dish && dish.mode==="fold" && dish.folds===0 && !dishFlight && !dishMove && !fillingUnderSheet();
+  return !!dish && dish.mode==="fold" && dish.folds===0 && !dishFlight && !dishMove && !fryHold && !fillingUnderSheet();
 }
 function _fillingOf(kind){
   return (dish.filling||[]).filter(f => (f.kind||"banana")===kind);
@@ -495,7 +500,7 @@ window.canPlaceBanana = canPlaceBanana;
 const EGG_MM = 1.6;
 const EGG_MAX = 24;
 function canPlaceEgg(){
-  return !!dish && dish.mode==="fold" && dish.folds===0 && !dishFlight && !dishMove && !fillingUnderSheet();
+  return !!dish && dish.mode==="fold" && dish.folds===0 && !dishFlight && !dishMove && !fryHold && !fillingUnderSheet();
 }
 function addEgg(x, y, opts){
   if(!canPlaceEgg()) return false;
@@ -994,7 +999,7 @@ function moddedDrives(){
   return {dryDrive:dryD.map(avg),cookDrive:cookD.map(avg)};
 }
 function cookDish(dt){
-  if(!dish || dish.mode!=="fold" || phase!=="PAN" || !dish.thermal || dishFlight) return;
+  if(!dish || dish.mode!=="fold" || phase!=="PAN" || !dish.thermal || dishFlight || fryHold) return;
   if(dishGesture && dishGesture.slide) return;   // лист на лопатке — стали не касается
   if(!dish.dryDrive) rebuildDishContact();
   updatePanPress(dt);
@@ -1522,6 +1527,7 @@ function syncDishUI(){
     egg.hidden=!dish || dish.mode!=="fold" || dish.folds>0;
     egg.disabled=!!dishFlight || !!dishMove;
   }
+  if(typeof eveningHint==="function") eveningHint();
 }
 // Складка — только ВНУТРЬ листа. Раньше линия сгиба строилась по любому сдвигу длиннее
 // 0,12, и сдвиг пальца вдоль кромки на 10 CSS px складывал полсписта (портрет: сгиб
@@ -1538,6 +1544,12 @@ function beginDishGesture(id,p,client,time){
     // Рез считается в материале: сдвиг куска под пальцем вычитается из всего штриха; начало в
     // щели — сдвиг ближайшего куска не известен, штрих идёт по нарисованному столу как есть.
     const u=unshiftCutPoint(start), o=u ? u.o : {x:0,y:0};
+    // Рамка вечера: нарезанный роти берут за середину и уносят наверх, на стойку, — тем же переносом,
+    // что и на таву. Рез после первого начинается у края или снаружи, не из середины.
+    // Середина часто приходится на щель первого реза (u пуст) — она тоже середина.
+    if(dish.cuts.length && eveningOn() && cutMiddle(u ? u.p : start)){
+      dishGesture={id,start,end:start,client:at,samples,zone:"serve",t0,moved:false,carry:false}; return;
+    }
     dishGesture={id,start:{x:start.x-o.x,y:start.y-o.y},end:{x:start.x-o.x,y:start.y-o.y},client:at,samples,cutShift:o};
     return;
   }
@@ -1590,6 +1602,12 @@ function beginDishGesture(id,p,client,time){
 // Угол конуса меряется так, как его видит рука, — на экране: вид из-за прилавка сжимает вертикаль в
 // TILT раз, и в координатах блюда штрих под 45° на экране у боковых кромок уходил за 60° (6 «ничего»
 // из 160, runs/fix91-diagnosis), а у ближней и дальней конус был шире заявленного. Сборка 72.
+// Середина нарезанного роти: внутренняя половина его габарита на столе (SERVE_MID по каждой оси).
+const SERVE_MID = 0.5;
+function cutMiddle(q){
+  const b=dish.cutBounds, c=dish.cutCenter; if(!b || !c) return false;
+  return Math.abs(q.x-c.x)<=(b.right-b.left)*SERVE_MID/2 && Math.abs(q.y-c.y)<=(b.bottom-b.top)*SERVE_MID/2;
+}
 function inwardFold(g){
   const vx=g.target.x-g.anchor.x, vy=g.target.y-g.anchor.y, len=Math.hypot(vx,vy*TILT);
   return (g.inwards || [g.inward]).some(n=>{
@@ -1635,6 +1653,11 @@ function moveDishGesture(p,client,time){
     // дрожащим пальцем давал штрих длиннее 300 мс и складку вместо переворота (ревью 17.09).
     if(g.stroke){ if(g.moved) trackStroke(g,client,t); else { g.stroke.pos={x:client.x,y:client.y}; g.stroke.lastT=t; } }
   } else { if(!g.moved) g.movedAt=t; g.moved=true; }   // вызов без экранных координат (проверки) — без мёртвой зоны
+  if(g.zone==="serve"){                       // нарезанный роти в руке: идёт за пальцем на стойку
+    if(g.moved && !g.carry){ g.carry=true; g.carryFrom={x:g.end.x,y:g.end.y}; dish.message="В руке — неси наверх, на стойку"; }
+    if(g.carry) g.slide={x:g.end.x-g.carryFrom.x,y:g.end.y-g.carryFrom.y};
+    return;
+  }
   if(g.zone==="middle"){
     // Сложенный роти взяли за середину и повели — он в руке и идёт за пальцем 1:1 (сборка 70).
     // Взять в руку — это повести сразу (первые CARRY_GRAB_MS); палец, который уже прижимал, должен
@@ -1757,6 +1780,16 @@ function endDishGesture(time){
       dishBack={slide:g.slide,t0:performance.now()};
       logPanGesture("carry-back",f,{...extra,carry:true}); dishNote("Неси дальше — на стол");
     }
+    return;
+  }
+  if(g.zone==="serve"){
+    // Отпустила над стойкой — роти подан (журнал serve, как у прежней кнопки «подать»), стол свободен;
+    // иначе роти остаётся на столе, где лежал.
+    const last=g.samples[g.samples.length-1];
+    const f={speed:0,duration:tUp-g.t0,path:Math.hypot(last.x-g.client.x,last.y-g.client.y),stale:0};
+    const over=g.carry && typeof eveningCounterHit==="function" && eveningCounterHit(last);
+    if(over && serveDish()){ logPanGesture("serve-carry",f,{zone:"serve",carry:true}); eveningServed(); }
+    else if(g.carry){ logPanGesture("serve-back",f,{zone:"serve",carry:true}); dishNote("Неси выше — на стойку"); }
     return;
   }
   if(g.zone==="middle"){
@@ -3110,7 +3143,7 @@ function drawDish(g,sx,sy){
   const lift=dishGesture && dish.mode==="fold" && dishGesture.anchor && !dishGesture.preview && !dishGesture.press ? dishGesture : null;
   const H=faces===dish.faces ? stackHeights(faces) : previewHeights(faces), zk=pose.scale*Z_EXAG/ROTI_R_MM*VIEW_UP*sy;
   if(lift) drawSpatula(g,screen,lift,sx,sy);
-  if(dish.mode!=="fold" && !moving && faces===dish.faces) drawDishTable(g,screen,faces,H,zk,sx,sy);
+  if(dish.mode!=="fold" && !moving && !slide && faces===dish.faces) drawDishTable(g,screen,faces,H,zk,sx,sy);   // в руке (на стойку) — плоский вид: рельеф не пересчитывается каждый кадр
   else {
     drawDishFaces(g,faces,screen,H,zk,true,pieceShiftLive(faces));
     if(lift) drawLiftedEdge(g,screen,lift,sx,sy);
@@ -3121,7 +3154,7 @@ function drawDish(g,sx,sy){
   if(dish.mode==="fold" && !moving && !slide) drawFoldGuide(g,screen,sx);
   if(dish.mode==="fold" && !(dishGesture && dishGesture.preview)) drawDomes(g,screen,H,zk);
   if(dish.mode==="fold") drawPressDents(g,screen,H,zk,pose,sx,sy);
-  if(dishGesture && !slide && dishGesture.zone!=="middle" && !(dishGesture.press && !dishGesture.moved)){
+  if(dishGesture && !slide && dishGesture.zone!=="middle" && dishGesture.zone!=="serve" && !(dishGesture.press && !dishGesture.moved)){
     const d=dishGesture, o=d.cutShift||{x:0,y:0}, up=dish.mode==="cut" ? tableLiftCanvas()*sy : 0;
     const sh=q=>{ const a=screen({x:q.x+o.x,y:q.y+o.y}); return {x:a.x,y:a.y-up}; };
     const a=sh((d.plan&&d.plan.anchor)||d.anchor||d.start),b=sh((d.plan&&d.plan.target)||d.target||d.end);
@@ -4335,6 +4368,7 @@ function panHeat(r){
   return Math.max(0.5, 0.75 - 0.20*((r-0.70)/0.30));            // прохладный борт
 }
 function cookStep(dt){
+  if(fryHold) return;
   for(let i=0;i<N;i++){
     if(conDeg[i] <= 0) continue;
     const r = Math.hypot(px[i]-panC.x, py[i]-panC.y)/PAN_R;
@@ -5117,6 +5151,7 @@ function dishInputLocal(cx, cy){
 }
 function onDown(id, cx, cy, t){
   if(performance.now()<inputQuietUntil) return;
+  if(typeof eveningDown==="function" && eveningDown(id, cx, cy, t)) return;   // лампа, миска, крышка, радио; стол до лампы молчит
   // Нажатие сразу после поворота колесом фиксирует поворот и идёт дальше как обычный жест
   // (иначе первый рез или складка после прокрутки пропадали).
   if(dish && dishTwist && dishTwist.input==="wheel") endTwist(true);
@@ -5171,6 +5206,7 @@ function onDown(id, cx, cy, t){
   armAction(id, p, t, {x:cx,y:cy});                  // только выбор края: тесто НЕ двигается
 }
 function onMove(id, cx, cy, t){
+  if(typeof eveningMove==="function" && eveningMove(id, cx, cy, t)) return;
   if(dishTouches.has(id)) dishTouches.set(id,toLocal(cx,cy));
   if(dishPinch && dishPinch.ids && dishPinch.ids.includes(id)){
     const a=dishTouches.get(dishPinch.ids[0]), b=dishTouches.get(dishPinch.ids[1]);
@@ -5202,6 +5238,7 @@ function onMove(id, cx, cy, t){
   updateActionMove(toLocal(cx, cy), t, {x:cx,y:cy});
 }
 function onUp(id, cx, cy, t){
+  if(typeof eveningUp==="function" && eveningUp(id, cx, cy, t)) return;
   dishTouches.delete(id);
   if(dishPinch && dishPinch.ids && dishPinch.ids.includes(id)) dishPinch=null;
   if(dishTwist && ((dishTwist.ids && dishTwist.ids.includes(id)) || dishTwist.id===id)){ endTwist(true); return; }
@@ -5238,6 +5275,7 @@ function onUp(id, cx, cy, t){
   releaseAction(t);
 }
 function onCancel(id){
+  if(typeof eveningUp==="function" && eveningUp(id, NaN, NaN, NaN, true)) return;
   dishTouches.delete(id);
   // iOS может отменить касания, когда забирает жест двумя пальцами себе: поворот к этому моменту
   // уже сделан пальцами — фиксируем его, а не выбрасываем (отменить можно кнопкой).
@@ -5264,7 +5302,7 @@ let rawTouch = 0, rawPointer = 0;
 // умерла кнопка «всё равно продолжить» на заглушке поворота: она лежала внутри #stage,
 // а проверка была только на #panel. Заглушки больше нет, но правило остаётся:
 // ЛЮБОЙ новый слой поверх поля добавлять СЮДА, иначе его кнопки не нажмутся.
-function inUI(t){ return !!(t && t.closest && t.closest("#panel, #card")); }
+function inUI(t){ return !!(t && t.closest && t.closest("#panel, #card, #radioSheet")); }
 
 // Список пальцев на поле сверяется с тем, что знает сам браузер (e.touches): палец, чей конец
 // не дошёл до страницы, иначе навсегда оставался бы «вторым» (ломал поворот), а его складка или
@@ -5375,7 +5413,7 @@ addEventListener("blur", ()=>{
 
 addEventListener("keydown", e=>{
   if(e.code==="Space"){ e.preventDefault(); pressNow(); }
-  if(e.code==="KeyR"){ restartRun(); }
+  if(e.code==="KeyR" && !eveningOn()){ restartRun(); }   // в рамке вечера «заново» — только через радио
 });
 // Кнопка «сейчас порвётся» убрана с панели 17.09 (владелица: «ей не пользуюсь, место только занимает»).
 // Предсказание разрыва осталось в модели и на пробеле — им пользуется протокол замера, а не игрок.
@@ -5574,7 +5612,8 @@ function restartRun(){
 
 function playLogText(){
   return JSON.stringify({ formatVersion:2, exportedAt:new Date().toISOString(),
-    current:measurementContext(), tears:log, gestures }, null, 2);
+    current:measurementContext(), tears:log, gestures,
+    evening:typeof eveningExport==="function" ? eveningExport() : undefined }, null, 2);
 }
 function fallbackCopy(txt){
   const ta = document.createElement("textarea");
@@ -5742,9 +5781,10 @@ function draw(){
   // В раме drawTable рисует только игру поверх картинки — жир, маргарин, мишень растяжки.
   // (В сборке 38 это было написано, но в раме drawTable не вызывался вовсе — владелица заметила.)
   drawTable(g, sx, sy);
+  if(typeof eveningDraw==="function") eveningDraw(g, sx, sy, 0);   // небо, стойка, радио, миска — под тестом
 
   if(dish) drawDish(g,sx,sy);
-  else {   // режим «только звук», в котором поле не рисовалось вовсе, снят 08.09.2026
+  else if(!sheetHidden){   // режим «только звук», в котором поле не рисовалось вовсе, снят 08.09.2026
     // ячейки решётки; порванные и просвеченные насквозь — дырки
     // порванные ячейки: пометить их узлы, чтобы подсветить рваный край у соседей
     if(tornAt){
@@ -5882,6 +5922,7 @@ function draw(){
     }
   }
 
+  if(typeof eveningDraw==="function") eveningDraw(g, sx, sy, 1);   // крышка, сумерки без лампы, лампа — поверх
   if(pixelated){
     ctx.imageSmoothingEnabled=false;
     ctx.fillStyle="#14100c"; ctx.fillRect(0,0,cv.width,cv.height);
@@ -5942,7 +5983,7 @@ function drawPanGlow(g, sx, sy){
 // с шага 2 — пунктирный квадрат со скруглёнными углами (targetAt), по осям стола.
 function drawStretchTarget(g, sx, sy){
   const R_ = (x)=>x*sx, D_ = (y)=>y*sy;
-  if(phase !== "TABLE") return;
+  if(phase !== "TABLE" || sheetHidden) return;
   const c2 = stepNo===1 ? centerOfSheet() : targetC();   // с шага 2 мишень стоит на столе (targetC)
   g.strokeStyle = "#4a3a24"; g.lineWidth = Math.max(1, R_(2));
   g.setLineDash([R_(10), R_(8)]);
@@ -6058,6 +6099,7 @@ function loop(now){
     if (typeof bananaUpdate === "function") bananaUpdate(dt);
     if (typeof eggUpdate === "function") eggUpdate(dt);
     if (typeof drizzleUpdate === "function") drizzleUpdate(dt);
+    if (typeof eveningUpdate === "function") eveningUpdate(dt);
     draw();
     if (typeof drizzleDraw === "function") drizzleDraw(ctx);
   }catch(err){
@@ -6100,6 +6142,8 @@ function loop(now){
     : (stepNo===2 && sameSlapN>=2)
       ? `тот же край ${sameSlapN}× — обойди, иначе лепесток · лист ${pct}%${ready}${ragged}`
     : `коснись края · лист ${pct}%${ready}${ragged}`;
+  // Рамка вечера говорит своё, когда стенду сказать нечего (стол пуст, лампа не горит, тава под крышкой).
+  if(typeof eveningLive==="function"){ const s = eveningLive(); if(s !== null) liveEl.textContent = s; }
   // Ответ на предсказание отличается цветом, иначе он теряется среди обычных подсказок.
   liveEl.style.color = verdictAge < 3500 ? (verdict.startsWith("угадала") ? "#8fbf6a" : "#f0c674")
                      : action.state!=="RESTING" ? "#8fbf6a" : "#d98b3a";
