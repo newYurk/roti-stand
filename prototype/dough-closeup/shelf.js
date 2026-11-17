@@ -25,18 +25,20 @@ const SHELF_BANANAS = 2, SHELF_JAM = 3;      // связка на 2 роти, б
 const SHELF_ARRIVE_EARLY_S = 5;              // после вчерашнего кивка Сом приходит на 5-й секунде жарки (обычно на 8-й)
 const SHELF_KNOCK_EARLY_S = 0.01;            // и стучит сразу (обычно через 1,5 с)
 const SHELF_JAR_HAND_S = 3;                  // сколько пустая банка у неё в руке, прежде чем встать на полку
-const SHELF_CELL = 24, SHELF_HIT = 22;       // CSS px: шаг вещей на полке и запас касания по сторонам
+const SHELF_CELL = 30, SHELF_HIT = 22;       // CSS px: шаг вещей на полке и запас касания по сторонам
+const SHELF_W = 82;                          // доска полки: три места с шагом 30 (у гостьи без этого файла она 74)
 const SHELF_TINT = { fill:"#a8402c", rim:"rgba(29,21,14,0.55)" };   // полоса варенья: цвет банки
 const SHELF_GLASS = "#8b7f6e", SHELF_LID = "#d9d2c0", SHELF_LABEL = "#e8dcc0", SHELF_RED = "#a8402c", SHELF_YELLOW = "#e3c04a";
 
 function shelfFresh(){
   return { v:SHELF_V, n:1, bananas:0, jam:0, jar:false, empty:false, banBall:0, jamBall:0,
-    som:{ jar:false, early:false }, jarIn:null, begun:false };
+    som:{ jar:false, early:false }, jarIn:null, begun:false, again:false };
 }
 let SHF = shelfFresh();
 let shelfEvents = [];                  // журнал полки: хранится в roti_evening.shelf.events
 let sArmed = false, sSeen = false, sBefore = 0;   // варенье в руке: ждём штрих, был ли он, сколько полос было до него
 let sDown = null;                      // палец на банке: {id, what}
+let sBack = false;                     // это касание банки ставит варенье обратно (оно было в руке), а не берёт
 let sHand = 0;                         // сколько банка уже у Сом в руке
 
 // ─────────────────────────── сохранение и журнал
@@ -55,7 +57,7 @@ function shelfLoad(){
   const som = s.som && typeof s.som === "object" ? s.som : {};
   SHF = { v:SHELF_V, n:Math.max(1, Math.round(+s.n) || 1), bananas:n(s.bananas, SHELF_BANANAS), jam:n(s.jam, SHELF_JAM),
     jar:!!s.jar || n(s.jam, SHELF_JAM) > 0, empty:!!s.empty, banBall:n(s.banBall, EVE_BALLS), jamBall:n(s.jamBall, EVE_BALLS),
-    som:{ jar:!!som.jar, early:!!som.early }, jarIn:s.jarIn === "wait" || s.jarIn === "hand" || s.jarIn === "shelf" ? s.jarIn : null, begun:!!s.begun };
+    som:{ jar:!!som.jar, early:!!som.early }, jarIn:s.jarIn === "wait" || s.jarIn === "hand" || s.jarIn === "shelf" ? s.jarIn : null, begun:!!s.begun, again:!!s.again };
   if(Array.isArray(s.events)) shelfEvents = s.events.slice(-60);
 }
 function shelfLog(event, item, extra){
@@ -79,8 +81,11 @@ function shelfNewEvening(from, wasOver){
     SHF.som = { jar:a.some(x => x.answer === "crunch"), early:a.some(x => x.answer === "nod") };
     SHF.n++;
   }
-  SHF.banBall = 0; SHF.jamBall = 0; SHF.begun = false; sHand = 0; sDown = null;
-  SHF.jarIn = SHF.som.jar ? "wait" : null;
+  // тот же вечер сначала (радио): в журнале его второе начало помечено again; пустую банку Сом несёт снова,
+  // только если ещё не донесла — донесённая уже на полке (или убрана), вторая такая же не появляется
+  SHF.again = from === "radio" && (SHF.begun || SHF.again);
+  SHF.jarIn = !SHF.som.jar ? null : from === "radio" && SHF.jarIn === "shelf" ? "shelf" : "wait";
+  SHF.banBall = 0; SHF.jamBall = 0; SHF.begun = false; sHand = 0; sDown = null; sBack = false;
 }
 // Подарок Сом ложится на полку (guest.js зовёт из guestServe): тот же вид пополняется до полного.
 function shelfGift(gift){
@@ -175,8 +180,8 @@ function shelfJarLands(why){
 // Три места на полке гостьи (guestShelf): связка, банка, пустая банка Сом. Места постоянные — вещи не
 // переезжают, когда соседняя кончилась.
 function shelfGeo(G){
-  const u = G.u, F = guestShelf(G), cx = i => F.x0 + (13 + SHELF_CELL*i)*u;
-  return { F, u, bunch:{ x:cx(0), y:F.y }, jar:{ x:cx(1), y:F.y }, empty:{ x:cx(2), y:F.y } };
+  const u = G.u, F = guestShelf(G), cx = i => F.x0 + (12 + SHELF_CELL*i)*u;
+  return { F, u, x1:F.x0 + Math.max(F.w, SHELF_W*u), bunch:{ x:cx(0), y:F.y }, jar:{ x:cx(1), y:F.y }, empty:{ x:cx(2), y:F.y } };
 }
 function shelfAny(){ return SHF.bananas > 0 || SHF.jar || SHF.empty; }
 // Что под пальцем: "jar", "empty" или null. Связка на касание не отвечает — бананы кладут на лист.
@@ -214,13 +219,25 @@ function shelfUp(id, cx, cy, cancel){
   const what = sDown.what; sDown = null;
   if(cancel) return true;
   if(Number.isFinite(cx) && Number.isFinite(cy) && shelfHit(eveGeo(), evePt(cx, cy)) !== what) return true;   // увела палец с банки — передумала
+  const back = sBack; sBack = false;
   if(what === "empty" && SHF.empty){ SHF.empty = false; shelfLog("putaway", "empty-jar"); }
+  else if(what === "jar" && back){ /* варенье было в руке: касание банки поставило его обратно */ }
   else if(what === "jar" && SHF.jar){
     if(SHF.jam <= 0 && !(SHF.jamBall > 0 && SHF.jamBall === shelfBall() && shelfJamCan())){ SHF.jar = false; shelfLog("putaway", "jar"); }
     else shelfArm();
   }
   return true;
 }
+
+// Варенье в руке, а палец лёг на радио, тетрадь или банку: жест варенья (drizzle.js) это касание не забирает —
+// варенье возвращается в банку, касание идёт туда, куда легло. drizzle.js спрашивает до своего жеста.
+window.drizzlePass = function(cx, cy){
+  if(!sArmed || eveDev) return false;
+  const G = eveGeo(), p = evePt(cx, cy), what = shelfHit(G, p);
+  if(!what && Math.hypot(p.x - G.radio.x, p.y - G.radio.y) > G.radio.hit && !(typeof nbItemHit === "function" && nbItemHit(G, p))) return false;
+  shelfDisarm(); sBack = what === "jar";
+  return true;
+};
 
 // ─────────────────────────── служебная строка
 function shelfLive(cur){
@@ -238,8 +255,9 @@ function shelfUpdate(dt){
   if(eveDev){ shelfDisarm(); sDown = null; return; }
   if(EVE.lamp && !SHF.begun){                              // лампа зажжена: вечер начат — строка в журнал, один раз
     SHF.begun = true;
-    eveLog("begin", { n:SHF.n, shelf:shelfContents(), som:shelfSomState() || null });
+    eveLog("begin", { n:SHF.n, shelf:shelfContents(), som:shelfSomState() || null, ...(SHF.again ? { again:true } : {}) });
   }
+  if(sBack && !sDown) sBack = false;                       // касание ушло не на банку
   // пустая банка Сом: пришла — банка в руке; постояла 3 с (крышка и тетрадь счёт останавливают) — банка на полке
   if(SHF.jarIn === "wait" && typeof GST !== "undefined" && GST.here){ SHF.jarIn = "hand"; sHand = 0; eveSave(); }
   if(SHF.jarIn === "hand"){
@@ -283,7 +301,7 @@ function shelfBunchDraw(g, sx, sy, x, y, u, count){
 function shelfDraw(g, sx, sy, G){
   if(eveDev || !shelfAny()) return;
   const S = shelfGeo(G), u = G.u;
-  g.fillStyle = SHELF_GLASS; g.fillRect(S.F.x0*sx, S.F.y*sy, S.F.w*sx, Math.max(1, 3*u*sy));
+  g.fillStyle = SHELF_GLASS; g.fillRect(S.F.x0*sx, S.F.y*sy, (S.x1 - S.F.x0)*sx, Math.max(1, 3*u*sy));
   if(SHF.bananas > 0) shelfBunchDraw(g, sx, sy, S.bunch.x, S.bunch.y, u, SHF.bananas);
   if(SHF.jar) shelfJarDraw(g, sx, sy, S.jar.x, S.jar.y, u, SHF.jam, sArmed, true);
   if(SHF.empty) shelfJarDraw(g, sx, sy, S.empty.x, S.empty.y, u, 0, false, false);

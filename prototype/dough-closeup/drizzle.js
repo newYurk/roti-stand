@@ -223,16 +223,26 @@ function _segments(pts) {
 
 // Плоская полоса (варенье): одна ровная линия одного цвета через все грани, без обрезки по грани и
 // без каймы — на мелких треугольниках листа обрезанная нить рвалась в клочья.
+// Ширина одна на всю полосу и не зависит от скорости пальца (быстрый штрих был волосом, медленный — комками).
+function _flatWidth() { return Math.max(4, (typeof PAN_R === "number" ? PAN_R : 80) * 0.05); }
+// Точки чаще, чем через полширины полосы, пропускаются: дрожь медленного пальца шла по краю зубцами.
+function _thin(pts, min) {
+  const out = [];
+  for (let i = 0; i < pts.length; i++) {
+    const q = pts[i], l = out[out.length - 1];
+    if (!l || i === pts.length - 1 || Math.hypot(q.x - l.x, q.y - l.y) >= min) out.push(q);
+  }
+  return out;
+}
 function _strokeFlat(ctx, trail) {
   ctx.globalAlpha = 1;
   ctx.strokeStyle = trail.tint.fill;
   for (const seg of _segments(trail.pts)) {
-    let w = 0;
-    for (const p of seg) w += p.w;
-    ctx.lineWidth = Math.max(4, w / seg.length * 1.6);
+    ctx.lineWidth = _flatWidth();
     ctx.beginPath();
-    seg.forEach((p, i) => { const q = _screen(p.x, p.y, p.face); if (i) ctx.lineTo(q.x, q.y); else ctx.moveTo(q.x, q.y); });
-    if (seg.length === 1) { const q = _screen(seg[0].x, seg[0].y, seg[0].face); ctx.lineTo(q.x + 0.01, q.y); }
+    const qs = _thin(seg.map(p => _screen(p.x, p.y, p.face)), ctx.lineWidth / 2);
+    qs.forEach((q, i) => { if (i) ctx.lineTo(q.x, q.y); else ctx.moveTo(q.x, q.y); });
+    if (qs.length === 1) ctx.lineTo(qs[0].x + 0.01, qs[0].y);
     ctx.stroke();
   }
 }
@@ -410,6 +420,8 @@ function _onDown(e) {
   if (!_inDrizzlePhase() || _ui(e)) return;
   if (e.button != null && e.button !== 0) return;
   if (_active) return;
+  // варенье (shelf.js): касание радио, тетради или банки — не штрих; shelf.js убирает варенье, касание идёт стенду
+  if (window.drizzleTint && typeof window.drizzlePass === "function" && window.drizzlePass(e.clientX, e.clientY)) return;
   _active = true;
   _captureId = e.pointerId;
   _coast = null;
@@ -571,10 +583,11 @@ function drizzlePaint(g, screen, k) {
     g.strokeStyle = trail.tint ? trail.tint.fill : DRIZZLE_COLOR_FILL;
     for (const seg of _segments(trail.pts)) {
       let w = 0; for (const p of seg) w += p.w;
-      g.lineWidth = Math.max(2, w / seg.length * 1.6 / Math.max(1e-6, pose.scale) * k);
+      g.lineWidth = Math.max(2, (trail.tint ? _flatWidth() : w / seg.length * 1.6) / Math.max(1e-6, pose.scale) * k);
       g.beginPath();
-      seg.forEach((p, i) => { const q = at(p); if (i) g.lineTo(q.x, q.y); else g.moveTo(q.x, q.y); });
-      if (seg.length === 1) { const q = at(seg[0]); g.lineTo(q.x + 0.01, q.y); }
+      const qs = trail.tint ? _thin(seg.map(at), g.lineWidth / 2) : seg.map(at);
+      qs.forEach((q, i) => { if (i) g.lineTo(q.x, q.y); else g.moveTo(q.x, q.y); });
+      if (qs.length === 1) g.lineTo(qs[0].x + 0.01, qs[0].y);
       g.stroke();
     }
   }
@@ -597,8 +610,11 @@ window.setDrizzleMode = _setMode;
   function wrap(name) {
     const orig = window[name];
     if (typeof orig !== "function" || orig._drizzleWrap) return false;
-    const wrapped = function () {
-      if (_inDrizzlePhase()) return;
+    const wrapped = function (id, cx, cy) {
+      // варенье в руке, а касание легло на радио, тетрадь или банку (shelf.js): оно идёт стенду. Слушатель стенда
+      // стоит раньше нашего, поэтому вопрос задаётся и здесь, и в _onDown — кто первый, тот и спросит.
+      const pass = name === "onDown" && _inDrizzlePhase() && window.drizzleTint && typeof window.drizzlePass === "function" && window.drizzlePass(cx, cy);
+      if (!pass && _inDrizzlePhase()) return;
       return orig.apply(this, arguments);
     };
     wrapped._drizzleWrap = true;
