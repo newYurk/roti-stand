@@ -11,7 +11,7 @@
 // до 400%+ и лист «рвётся» в середине от любого движения. Замер это обнаружил сразу.
 // Число узлов сохранено (1 060 после обрезки по кругу; прежняя оценка «~1150» была на глаз,
 // пересчитано 07.09.2026), однородность рёбер восстановлена.
-const BUILD = "2026-11-17 · звук по умолчанию выключен, кнопка «звук» · 73";
+const BUILD = "2026-11-17 · гладкая кромка листа в рисунке (стол, рука, тава, конверт) · 74";
 const GRID = 38;                   // 38x38, в круг попадает 1 060 узлов (посчитано, не оценка)
 let SUBSTEPS = 8;                  // T2: 8–10 подшагов, 1 итерация
 let DAMP = 0.986;
@@ -75,6 +75,7 @@ let startArea = 1;                 // площадь листа при рожд�
 let gestures = [];                 // журнал шлепков (audit §6.6)
 let cons = null;                             // {a,b,rest,broken}
 let edgeNodes = [];                          // граничные узлы — за них берут лист
+let rimLoop = [], rimLoopQuad = [];          // кромка по порядку обхода (рёбра ячеек с одной ячейкой) и ячейка каждого её ребра — для рисования
 let rimRing = [];                            // те же узлы по кругу, соседи по кромке (для оплывания)
 // Разрыв — не провал и не перезапуск (решение владельца 22.08.2026): дырка остаётся
 // в листе рваным узором, симуляция не останавливается, тесто не переделывается.
@@ -395,9 +396,10 @@ function startDish(){
   if(dish) return; // раскладка начинки ровно одна на посадку
   panPress=[]; domes=[]; domeState={session:-1,left:0,next:0}; dishCrisp=0;   // жир на таве остаётся: он принадлежит сковороде
   const faces=[];
+  rimDraw();   // грани блюда берут ту же сглаженную кромку, что и рисунок листа (сборка 74)
   for(let q=0;q<quads.length;q++){
     if(quadCons[q].some(c=>c.broken)) continue;
-    const ids=quads[q], points=ids.map(i=>({x:(px[i]-panC.x)/targetR,y:(py[i]-panC.y)/targetR}));
+    const ids=quads[q], points=ids.map(i=>({x:(dX[i]-panC.x)/targetR,y:(dY[i]-panC.y)/targetR}));
     const tone=ids.reduce((s,i)=>s+thick[i],0)/4;
     // Внутренняя диагональ сохраняет вогнутые квады при выпуклом отсечении.
     for(const p of materialTriangles(points)){
@@ -3210,6 +3212,7 @@ function build(){
   quadPrev = new Float32Array(quads.length).fill(1);
   quadSm = new Float32Array(quads.length).fill(1);
   quadRest = null;
+  buildRimLoop();
   conDeg = new Int32Array(N);
   for(const cc of c){ conDeg[cc.a]++; conDeg[cc.b]++; }
 
@@ -3285,6 +3288,66 @@ function build(){
   verdict = ""; verdictAt = 0;
   { const b = document.getElementById("tear"); if(b) b.classList.remove("armed"); }
   runStart = performance.now();
+}
+
+// ─────────────────────────── кромка для рисования (сборка 74)
+// Лист — решётка 38×38, обрезанная по кругу: его граница — рёбра ячеек, то есть лесенка из
+// шагов в одну ячейку. Лесенка топологическая: как лист ни тяни, край остаётся ступенчатым,
+// и таким же он уходил в грани блюда (startDish), в полёт и на таву. Физика тут ни при чём —
+// ступени есть только в картинке. Поэтому сглаживается только картинка, в одном месте:
+// rimDraw() отдаёт координаты узлов для рисования (dX, dY), где узлы кромки стоят на
+// сглаженной вдоль обхода линии (треугольное окно ±RIM_K узлов), а все остальные — как в
+// физике. px/py не меняются; дыры, складки, начинка и рез считаются как раньше.
+// У рваного края (порванная ячейка кромки, оторванный узел) сглаживания нет: окно узла
+// обрывается на первом таком соседе, так что разрыв остаётся разрывом.
+let RIM_K = 4;                               // 0 — рисовать кромку как в физике (так её меряет checks/edge-regression.cjs «до»)
+let dX = null, dY = null, rimRaw = null;
+function buildRimLoop(){
+  rimLoop = []; rimLoopQuad = [];
+  const key = (a,b)=> a<b ? a*65536+b : b*65536+a;
+  const uses = new Map();
+  const sides = (q)=>{ const [a,b,d,e] = quads[q]; return [[a,b],[b,d],[d,e],[e,a]]; };
+  for(let q=0;q<quads.length;q++) for(const [u,v] of sides(q)){ const k = key(u,v); uses.set(k, (uses.get(k)||0)+1); }
+  const next = new Map(); let start = -1;
+  for(let q=0;q<quads.length;q++) for(const [u,v] of sides(q)){
+    if(uses.get(key(u,v)) !== 1) continue;
+    if(next.has(u)) return;                    // узел-перемычка: одной петли нет — рисуем как есть
+    next.set(u, {v, q}); if(start < 0) start = u;
+  }
+  if(start < 0) return;
+  const loop = [], lq = []; let n = start;
+  do { const e = next.get(n); if(!e) return; loop.push(n); lq.push(e.q); n = e.v; } while(n !== start && loop.length <= next.size);
+  if(n !== start || loop.length !== next.size) return;
+  rimLoop = loop; rimLoopQuad = lq;
+}
+function rimDraw(){
+  if(!dX || dX.length !== N){ dX = new Float32Array(N); dY = new Float32Array(N); }
+  dX.set(px); dY.set(py);
+  const L = rimLoop, n = L.length;
+  if(RIM_K < 1 || n < 4*RIM_K) return;
+  if(!rimRaw || rimRaw.length !== n) rimRaw = new Uint8Array(n);
+  rimRaw.fill(0);
+  let anyRaw = false;
+  for(let i=0;i<n;i++){
+    if(conDeg && conDeg[L[i]] <= 0){ rimRaw[i] = 1; anyRaw = true; }
+    const qc = quadCons[rimLoopQuad[i]];
+    if(qc[0].broken || (qc[1]&&qc[1].broken) || (qc[2]&&qc[2].broken) || (qc[3]&&qc[3].broken)){ rimRaw[i] = rimRaw[(i+1)%n] = 1; anyRaw = true; }
+  }
+  for(let i=0;i<n;i++){
+    let m = RIM_K;
+    if(anyRaw){
+      if(rimRaw[i]) continue;
+      m = 0;
+      while(m < RIM_K && !rimRaw[(i+m+1)%n] && !rimRaw[(i-m-1+2*n)%n]) m++;
+      if(!m) continue;
+    }
+    let sx = 0, sy = 0, sw = 0;
+    for(let j=-m;j<=m;j++){
+      const w = m+1-(j<0?-j:j), id = L[(i+j+n)%n];
+      sx += w*px[id]; sy += w*py[id]; sw += w;
+    }
+    dX[L[i]] = sx/sw; dY[L[i]] = sy/sw;
+  }
 }
 
 // ─────────────────────────── XPBD
@@ -5683,8 +5746,9 @@ function viewX(){
   const c = Math.cos(xf.th), s = Math.sin(xf.th);
   // Укладка (LAY): у каждого узла свой подъём — ближний край уже на стали, дальний ещё в руке.
   const S = xf.layS, u = xf.layU || 0, H = xf.layH || 0, L0 = xf.lift0 || 0, ramp = Math.min(1, u/LAY_TOUCH);
+  rimDraw();
   for(let i=0;i<N;i++){
-    const dx = px[i]-xf.cx, dy = py[i]-xf.cy;
+    const dx = dX[i]-xf.cx, dy = dY[i]-xf.cy;
     let lift = xf.lift;
     if(S){ const tau = layTouchAt(S[i]); lift = u >= tau ? 0 : (L0 + H*S[i]*ramp)*(1 - u/tau); }
     vxBuf[i] = xf.cx + xf.ox + dx*c - dy*s;
@@ -5762,7 +5826,8 @@ function draw(){
     const bodyC = centerOfSheet(), bodyR2 = Math.pow(sheetRadius()*0.96, 2);
     // В руке и в полёте лист рисуется со сдвигом, поворотом и подъёмом, а под ним — тень:
     // так видно, что он оторвался от доски и летит, хотя узлы физики стоят.
-    const X = xf ? viewX() : px, Y = xf ? viewY() : py;
+    if(!xf) rimDraw();
+    const X = xf ? viewX() : dX, Y = xf ? viewY() : dY;
     if(xf){
       const gx = xf.cx + xf.ox, gy = xf.cy + xf.oy, gr = sheetRadius()*1.03;
       g.fillStyle = "rgba(6,3,1,0.42)";
@@ -5872,7 +5937,7 @@ function draw(){
         g.fillStyle="#d98b3a";
         const S2 = pixelated ? 2 : 6;
         for(const n of action.gripIds)
-          g.fillRect(prX(px[n],py[n])*sx-S2/2, prY(px[n],py[n])*sy-S2/2, S2, S2);
+          g.fillRect(prX(X[n],Y[n])*sx-S2/2, prY(X[n],Y[n])*sy-S2/2, S2, S2);
         const rr = pixelated ? 4 : 14;
         g.beginPath();
         g.ellipse(prX(action.last.x,action.last.y)*sx, prY(action.last.x,action.last.y)*sy,
