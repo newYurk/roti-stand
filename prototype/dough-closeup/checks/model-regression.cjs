@@ -390,9 +390,14 @@ test('intact thin quads remain rendered; broken topology still renders actual ho
   h.drawCalls.length=0;
   // Break a quad at the sheet centre through the native topology mutation. Holes are drawn from
   // step 2 on: a step-1 lump is always drawn as a disc (sheetLooksDisc), and it does not tear.
-  h.run('{stepNo=2;const c=centerOfSheet();let best=0,bd=Infinity;quads.forEach((q,k)=>{const x=q.reduce((s,n)=>s+px[n],0)/4,y=q.reduce((s,n)=>s+py[n],0)/4,d=(x-c.x)**2+(y-c.y)**2;if(d<bd){bd=d;best=k;}});for(const c of quadCons[best])breakCon(c);onTear();draw();}');
-  assert.ok(h.metrics().broken>0);assert.ok(h.drawCalls.some(c=>c.fillStyle==='#100a06'),'native broken quad is drawn as a hole');
-  return {closedPaths:h.drawCalls.length,holePaths:h.drawCalls.filter(c=>c.fillStyle==='#100a06').length};
+  h.run('{stepNo=2;const c=centerOfSheet();let best=0,bd=Infinity;quads.forEach((q,k)=>{const x=q.reduce((s,n)=>s+px[n],0)/4,y=q.reduce((s,n)=>s+py[n],0)/4,d=(x-c.x)**2+(y-c.y)**2;if(d<bd){bd=d;best=k;}});for(const c of quadCons[best])breakCon(c);onTear();__cut=0;{const f=cutSheetHoles;cutSheetHoles=function(){__cut++;return f.apply(this,arguments)}}draw();}');
+  // Build 96 (review 18.11 p. 2): a hole is see-through — the broken quad is not filled at all (no dark #100a06),
+  // and the soft sheet layer is cut out there (cutSheetHoles); without the soft layer the quad is simply not drawn.
+  assert.ok(h.metrics().broken>0);
+  assert.ok(!h.drawCalls.some(c=>c.fillStyle==='#100a06'),'the hole is not painted dark');
+  const cut=h.run('__cut'), quadPaths=h.drawCalls.filter(c=>c.fillStyle!=='#100a06').length;
+  assert.ok(cut>0 || quadPaths<h.run('quads.length'),`native broken quad is drawn as a hole (cut out ${cut}×, ${quadPaths} paths of ${h.run('quads.length')} quads)`);
+  return {closedPaths:h.drawCalls.length,cutOut:cut};
 });
 test('saved material preferences survive startup and gesture log captures material snapshot',()=>{
   const tune={com:30,creep:30,brk:72},h=boot(tune);
