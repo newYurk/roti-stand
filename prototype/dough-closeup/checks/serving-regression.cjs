@@ -241,12 +241,19 @@ test('P4', 'after «нарезано» the roti slides onto the paper tray by it
     const board = h.J('dishPose()'); assert.equal(h.run('!!dish.tray'), false, 'cut not yet: on the board');
     cut(h); h.frames(30);
     assert.equal(h.run('dish.tray'), true, '«нарезано»: on the tray');
-    const tray = h.J('dishPose()'); assert.ok(Math.abs(tray.scale / board.scale - 0.85) < 1e-6, 'the roti on the tray is a bit smaller');
+    const tray = h.J('dishPose()'); assert.ok(tray.scale / board.scale <= 0.85 + 1e-6 && tray.scale / board.scale > 0.6, `the roti on the tray is a bit smaller (×${(tray.scale / board.scale).toFixed(3)})`);
     const T = h.J(`(()=>{const T=trayRect(),p=dishPose(),r=cv.getBoundingClientRect(),C=(x,y)=>{const X=p.x+x*p.scale,Y=p.y+y*p.scale;return {x:r.left+prX(X,Y)*r.width/cv.width,y:r.top+prY(X,Y)*r.height/cv.height}};
       return {a:C(T.left,T.top),b:C(T.right,T.bottom)}})()`);
     const W = h.J('(()=>{const z=zone("work"),r=cv.getBoundingClientRect(),C=(x,y)=>({x:r.left+prX(x,y)*r.width/cv.width,y:r.top+prY(x,y)*r.height/cv.height});return {a:C(z.x,z.y),b:C(z.x+z.w,z.y+z.h)}})()');
     assert.ok(T.a.y >= W.a.y - 1 && T.b.y <= W.b.y + 1, `the tray lies on the table (tray y ${T.a.y.toFixed(0)}…${T.b.y.toFixed(0)}, table ${W.a.y.toFixed(0)}…${W.b.y.toFixed(0)})`);
-    assert.ok(W.b.x - T.b.x < (W.b.x - W.a.x) * 0.08, `at the right edge of the table (${(W.b.x - T.b.x).toFixed(0)} px from it)`);
+    // build 85b: the whole tray lies on the board (the live check: its right half hung off the board)
+    const BD = h.J(`(()=>{const B=boardRect(),r=cv.getBoundingClientRect(),C=(x,y)=>({x:r.left+prX(x,y)*r.width/cv.width,y:r.top+prY(x,y)*r.height/cv.height});return [C(B.x0,B.y0),C(B.x1,B.y0),C(B.x1,B.y1),C(B.x0,B.y1)]})()`);
+    const TQ = h.J(`(()=>{const T=trayRect(),p=dishPose(),r=cv.getBoundingClientRect(),C=(x,y)=>{const X=p.x+x*p.scale,Y=p.y+y*p.scale;return {x:r.left+prX(X,Y)*r.width/cv.width,y:r.top+prY(X,Y)*r.height/cv.height}};
+      return [C(T.left,T.top),C(T.right,T.top),C(T.right,T.bottom),C(T.left,T.bottom)]})()`);
+    const inQuad = (Q, q) => Q.every((a, i) => { const b = Q[(i + 1) % 4]; return (b.x - a.x) * (q.y - a.y) - (b.y - a.y) * (q.x - a.x) >= -0.5; });
+    assert.ok(TQ.every(q => inQuad(BD, q)), `the tray lies on the board (tray ${TQ.map(q => q.x.toFixed(0) + ',' + q.y.toFixed(0)).join(' ')}; board ${BD.map(q => q.x.toFixed(0) + ',' + q.y.toFixed(0)).join(' ')})`);
+    const edge = Math.min(BD[1].x - TQ[1].x, BD[2].x - TQ[2].x);
+    assert.ok(edge < (BD[1].x - BD[0].x) * 0.08, `at the right edge of the board (${edge.toFixed(0)} px from it)`);
     const Z = h.J('nightSpots()').zone;
     assert.ok(Z.x1 < T.a.x || Z.y0 > T.b.y, 'the zone of the dog does not reach the tray');
     // drawn: the tray under the roti, the milk bottle beside it
@@ -260,12 +267,12 @@ test('P4', 'after «нарезано» the roti slides onto the paper tray by it
     h.run('undoDish()'); h.frames(30); assert.equal(h.run('dish.tray'), false, 'the cut undone: back on the board');
     assert.ok(Math.abs(h.J('dishPose()').scale - board.scale) < 1e-9);
     assert.equal(h.run('loopErrs'), 0); assert.deepEqual(h.errors, []);
-    out.push(`${w}×${hh}: tray ${T.a.x.toFixed(0)}…${T.b.x.toFixed(0)} × ${T.a.y.toFixed(0)}…${T.b.y.toFixed(0)}, table top ${W.a.y.toFixed(0)}, dog zone x1 ${Z.x1.toFixed(0)} y0 ${Z.y0.toFixed(0)}, bottle ${M.at.x.toFixed(0)},${M.at.y.toFixed(0)}, ${gap.toFixed(0)} px clear of the bowl`);
+    out.push(`${w}×${hh}: tray ${T.a.x.toFixed(0)}…${T.b.x.toFixed(0)} × ${T.a.y.toFixed(0)}…${T.b.y.toFixed(0)} (×${(tray.scale / board.scale).toFixed(3)}) on the board ${BD[3].x.toFixed(0)}…${BD[2].x.toFixed(0)} × ${BD[0].y.toFixed(0)}…${BD[3].y.toFixed(0)}, ${edge.toFixed(0)} px from its right edge, table top ${W.a.y.toFixed(0)}, dog zone x1 ${Z.x1.toFixed(0)} y0 ${Z.y0.toFixed(0)}, bottle ${M.at.x.toFixed(0)},${M.at.y.toFixed(0)}, ${gap.toFixed(0)} px clear of the bowl`);
   }
   return { summary: out.join(' · ') };
 });
 
-test('P5', 'the milk: a touch of the bottle takes it, a finger led over the roti lays a thin white stripe (half the jam), the bottle goes back after one stripe; the stripe lies on the roti and goes up with the tray; a second touch of the bottle puts it back unused', () => {
+test('P5', 'the milk: a touch of the bottle takes it, a finger led over the roti lays a thin white stripe (0.7 of the jam, dark edge), the bottle goes back after one stripe; the stripe lies on the roti and goes up with the tray; a second touch of the bottle puts it back unused', () => {
   const h = evening({ storage: saveMid(0, { sh: { bananas: 2 } }) });
   onPan(h); h.frames(3); const c = sheetMid(h); tap(h, c); tap(h, c); finish(h);
   const M = h.J('milkSpots()'); assert.equal(M.can, true);
@@ -273,8 +280,9 @@ test('P5', 'the milk: a touch of the bottle takes it, a finger led over the roti
   tap(h, M.at); assert.equal(h.run('milkArmed'), false, 'touched again: put back'); assert.equal(h.run('drizzleStrokes'), 0, 'no stripe from the bottle touches');
   tap(h, M.at); milkStroke(h); h.frames(3);
   assert.equal(h.run('drizzleStrokes'), 1, 'one stripe on the roti'); assert.equal(h.run('milkArmed'), false, 'the bottle went back after the stripe');
-  assert.equal(h.run('_trails[0].tint.milk'), true, 'the stripe is milk'); assert.equal(h.run('_trails[0].tint.fill.startsWith("rgba(253")'), true, 'white');
-  const wk = h.run('_flatWidth(_trails[0].tint)/_flatWidth(null)'); assert.ok(Math.abs(wk - 0.5) < 1e-6, `thinner than the jam (×${wk})`);
+  assert.equal(h.run('_trails[0].tint.milk'), true, 'the stripe is milk'); assert.equal(h.run('_trails[0].tint.fill.startsWith("rgba(255, 255")'), true, 'white');
+  assert.equal(typeof h.run('_trails[0].tint.edge'), 'string', 'with a dark edge under the white (build 85b)');
+  const wk = h.run('_flatWidth(_trails[0].tint)/_flatWidth(null)'); assert.ok(Math.abs(wk - 0.7) < 1e-6, `thinner than the jam (×${wk})`);
   // the stripe goes with the tray: its points stay inside the drawn roti while the finger carries it up
   const inside = () => h.J(`(()=>{const p=dishShownPose(),pts=_trails[0].pts.filter(q=>q&&!q.break);
     const S=pts.map(q=>_screen(q.x,q.y,q.face)),H=dish.hull.map(q=>({x:prX(p.x+q.x*p.scale,p.y+q.y*p.scale),y:prY(p.x+q.x*p.scale,p.y+q.y*p.scale)}));
@@ -289,7 +297,31 @@ test('P5', 'the milk: a touch of the bottle takes it, a finger led over the roti
   go(h, at, { x: B.c.x, y: counterY - 30 }); h.touch('end', 't1', B.c.x, counterY - 30); h.frames(30);
   assert.equal(h.eve().rotiDone, 1, 'served with the milk on it');
   assert.equal(h.run('loopErrs'), 0); assert.deepEqual(h.errors, []);
-  return { summary: `stripe ${before.n} points, ×${wk} of the jam width; went up ${(before.y - mid.y).toFixed(0)} px with the tray, inside the roti all the way` };
+  // build 85b, the live check's stroke: from left of the roti to right of it, along the first (horizontal) cut, 12 px
+  // down over its length. The stripe lies on every piece the finger crossed — no piece the line passes is bare —
+  // and breaks only where it goes from one piece to another (a cut).
+  const along = [];
+  for (const [w, hh] of [[390, 844], [375, 667]]) {
+    const g = evening({ storage: saveMid(0, { sh: { bananas: 2 } }), w, hh });
+    onPan(g); g.frames(3); const c2 = sheetMid(g); tap(g, c2); tap(g, c2); finish(g);
+    tap(g, g.J('milkSpots()').at); const R = rotiBox(g);
+    drive(g, line({ x: R.l.x - 10, y: R.c.y - 6 }, { x: R.r.x + 10, y: R.c.y + 6 }, { v: 1040, hold: 60 }), { settle: 12 });
+    g.frames(3); assert.equal(g.run('drizzleStrokes'), 1, `${w}: one stripe`);
+    const S = g.J(`(()=>{const segs=[];let cur=null;for(const q of _trails[0].pts){ if(!q||q.break){cur=null;continue;}
+        const o=_shiftOf(q.face),s=_screen(q.x,q.y,q.face); if(!cur){cur={o,x0:s.x,x1:s.x,n:0};segs.push(cur);}
+        if(Math.abs(cur.o.x-o.x)>1e-9||Math.abs(cur.o.y-o.y)>1e-9) cur.mixed=true; cur.x0=Math.min(cur.x0,s.x); cur.x1=Math.max(cur.x1,s.x); cur.n++; }
+      const pieces=new Set(segs.map(s=>s.o.x.toFixed(4)+'/'+s.o.y.toFixed(4)));
+      const cols=new Set(segs.map(s=>s.o.x.toFixed(4)));
+      let gap=0; const xs=segs.slice().sort((a,b)=>a.x0-b.x0); for(let i=1;i<xs.length;i++) gap=Math.max(gap,xs[i].x0-xs[i-1].x1);
+      const k=cv.getBoundingClientRect().width/cv.width; return {segs:segs.length,pieces:pieces.size,cols:cols.size,mixed:segs.some(s=>s.mixed),gap:gap*k,span:(xs.at(-1).x1-xs[0].x0)*k}})()`);
+    assert.equal(S.mixed, false, `${w}: a stripe segment never spans two pieces`);
+    assert.equal(S.cols, 3, `${w}: the stripe lies on all three columns of pieces it crossed (${S.cols})`);
+    assert.ok(S.gap < 16, `${w}: breaks only at the cut lines (widest ${S.gap.toFixed(1)} CSS px)`);
+    assert.ok(S.span > (R.r.x - R.l.x) * 0.85, `${w}: from edge to edge (${S.span.toFixed(0)} of ${(R.r.x - R.l.x).toFixed(0)} px)`);
+    assert.equal(g.run('loopErrs'), 0); assert.deepEqual(g.errors, []);
+    along.push(`${w}: ${S.segs} pieces of stripe on ${S.pieces} pieces (${S.cols} columns), widest break ${S.gap.toFixed(1)} px, ${S.span.toFixed(0)} of ${(R.r.x - R.l.x).toFixed(0)} px`);
+  }
+  return { summary: `stripe ${before.n} points, ×${wk} of the jam width; went up ${(before.y - mid.y).toFixed(0)} px with the tray, inside the roti all the way; along the cut: ${along.join(' · ')}` };
 });
 
 test('P6', 'the roti in the hand is drawn at 60 % and hangs 40 px above the finger; the release is judged by the finger: roti over the counter but finger below it — not served; finger over the counter — served (390×844, 375×667)', () => {
@@ -335,6 +367,46 @@ test('P7', 'an evening of three roti by touches — banana heap (while the bunch
   assert.equal(snaps.length, 3, 'three photos'); assert.equal(h.run('__tray'), 3, 'each photo draws the tray'); assert.equal(h.run('__milk'), 3, 'and the milk stripe');
   assert.equal(h.run('loopErrs'), 0); assert.deepEqual(h.errors, []);
   return { summary: `banana+egg per roti: ${rows.join(', ')}; photos ${snaps.length}, with tray ${h.run('__tray')}, with milk ${h.run('__milk')}` };
+});
+
+// Build 85b — the live check, 375×667: the first short tap (70 ms, no move) on the open sheet sometimes did nothing.
+// The tap's length was measured by the clock when the handler ran: a long frame between touchstart and touchend (the
+// sheet has just landed on the tava — heat and relief are rebuilt; here also after a carry test, as in the live run)
+// made a 70 ms tap reach the handler 200+ ms late — a hold, given to the stand. Reproduced by blocking the clock for
+// 220 ms between the two touches: the touchend carries its own time (timeStamp = touchstart + 70 ms).
+test('P8', 'a short tap is the filling even when a long frame falls between touchstart and touchend (right after the sheet lands on the tava, after a carry): the heap, then the egg; a real hold across a long frame is still a press', () => {
+  const out = [];
+  for (const [w, hh] of [[375, 667], [390, 844]]) {
+    const h = evening({ storage: saveMid(0, { sh: { bananas: 2 } }), w, hh });
+    onPan(h); h.frames(3);
+    // the live run's carry test: led from the middle 60 px right and 40 px up, 0.3 s hold — no filling — then back
+    const c0 = h.spots().pan;
+    drive(h, line(c0, { x: c0.x + 60, y: c0.y - 40 }, { v: 300, hold: 300 }), { settle: 30 });
+    assert.equal(kinds(h).banana, 0, `${w}: the carry laid nothing`);
+    if (h.run('phase') !== 'PAN' || h.run('dish.mode') !== 'fold') toPan(h);
+    const c = sheetMid(h), log0 = panLog(h).length;
+    // a real hold across a long frame: the stalled frame waits, the next ordinary frame gives it to the stand
+    let t0 = h.getTime();
+    h.touch('start', 't1', c.x, c.y); h.advance(220); h.run(FRAME);
+    assert.equal(h.run('!!dishGesture'), false, `${w}: the frame right after a stall does not decide (a lifted finger may wait in the queue)`);
+    h.frames(3); assert.equal(h.run('!!dishGesture'), true, `${w}: still held — the stand has it`);
+    h.touch('end', 't1', c.x, c.y, { timeStamp: t0 + 300 }); h.frames(5);
+    assert.equal(kinds(h).banana, 0, `${w}: a hold lays no filling`); assert.equal(panLog(h).at(-1), 'press', `${w}: it is a press`);
+    // a 70 ms tap, the touchend handled right after a 220 ms frame
+    t0 = h.getTime(); const log1 = panLog(h).length;
+    h.touch('start', 't1', c.x, c.y); h.advance(220); h.touch('end', 't1', c.x, c.y, { timeStamp: t0 + 70 }); h.frames(3);
+    const a = kinds(h);
+    assert.ok(a.banana >= 10 && a.banana <= 14, `${w}: the first tap is the heap (${a.banana}+${a.egg})`);
+    assert.equal(panLog(h).length, log1, `${w}: the stand got nothing from it`);
+    // the second, with the stalled frame run before the touchend
+    t0 = h.getTime();
+    h.touch('start', 't1', c.x, c.y); h.advance(220); h.run(FRAME); h.touch('end', 't1', c.x, c.y, { timeStamp: t0 + 70 }); h.frames(3);
+    const b = kinds(h);
+    assert.ok(b.egg > 0 && b.banana === a.banana, `${w}: the second tap is the egg (${b.banana}+${b.egg})`);
+    assert.equal(h.run('!!dishGesture'), false); assert.equal(h.run('loopErrs'), 0); assert.deepEqual(h.errors, []);
+    out.push(`${w}×${hh}: hold across a 220 ms frame → ${panLog(h)[log0]}; 70 ms taps across 220 ms frames → ${a.banana}, then +${b.egg} egg`);
+  }
+  return { summary: out.join(' · ') };
 });
 
 const okN = results.filter(r => r.status === 'PASS').length;

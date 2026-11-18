@@ -14,7 +14,9 @@
 "use strict";
 window.__milkBoot = 1;
 
-const MILK_TINT = { fill: "rgba(253, 251, 244, 0.97)", rim: "rgba(190, 180, 160, 0.5)", thin: 0.5, milk: true };
+// Сборка 85b: шире (0,5 → 0,7 ширины варенья) и с тёмной кромкой (edge, drizzle.js) — на кадре 390×844 узкая
+// белая нить на светлом тесте почти не читалась.
+const MILK_TINT = { fill: "rgba(255, 255, 252, 1)", rim: "rgba(190, 180, 160, 0.5)", edge: "rgba(120, 96, 62, 0.55)", thin: 0.7, milk: true };
 const MILK_HIT_CSS = 30;     // радиус касания бутылки, CSS px
 
 let _armed = false;          // сгущёнка в руке

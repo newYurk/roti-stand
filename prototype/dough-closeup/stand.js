@@ -373,11 +373,18 @@ function dishPose(board){                // board — поза на доске, 
   // (плейтест 17.11, п. 19); теперь вокруг него помещается доска.
   const scale=Math.min(targetR*1.25,w.w*.72/(b.right-b.left)/perspective,w.h*.60/(b.bottom-b.top));
   if(dish.tray && dish.cutBounds && !board){
-    // Нарезанный роти на лотке (сборка 85): мельче на TRAY_SCALE и правым краем лотка у правого края стола, на
+    // Нарезанный роти на лотке (сборка 85): мельче на TRAY_SCALE и правым краем лотка у правого края доски, на
     // высоте доски. У ближнего края слева лежит пёс (night.js, его зона отпускания), у дальнего — тава (отпущенный
     // там роти снова жарится) и граница «нижней трети», по которой пёс поднимает голову.
-    const T=trayRect(), s=scale*TRAY_SCALE, xr=w.x+w.w*(1-TRAY_EDGE);
-    return {x:xr-(T.right-dish.cutCenter.x+cc.x)*s, y:w.cy-cc.y*s, scale:s};
+    // Сборка 85b: лоток лежит на доске целиком (живая проверка: правая половина висела за доской). Правый край
+    // лотка — у правого края доски с полем TRAY_IN её ширины; не влезает по ширине или высоте — роти мельче.
+    const T=trayRect(), B=boardRect(), m=TRAY_IN*(B.x1-B.x0), tw=T.right-T.left, th=T.bottom-T.top;
+    const s=Math.min(scale*TRAY_SCALE,(B.x1-B.x0-2*m)/tw,(B.y1-B.y0-2*m)/th);
+    const xr=B.x1-m;
+    let y=w.cy-cc.y*s;
+    const top=y+(T.top-dish.cutCenter.y+cc.y)*s, bot=y+(T.bottom-dish.cutCenter.y+cc.y)*s;
+    if(bot>B.y1-m) y-=bot-(B.y1-m); else if(top<B.y0+m) y+=(B.y0+m)-top;
+    return {x:xr-(T.right-dish.cutCenter.x+cc.x)*s, y, scale:s};
   }
   return {x:w.cx-cc.x*scale,y:w.cy-cc.y*scale,scale};
 }
@@ -664,6 +671,23 @@ function fillHeight(f,p){
 }
 function layerMM(f,p){ return f.kind==="filling" ? fillHeight(f,p) : doughMM(f.tone); }
 const fillPass = mm => Math.exp(-mm/FILL_HEAT_MM)/(1+mm/COVER_MM);
+// Сборка 85b: кучка (12 кружков) и яйцо поверх неё не делают жарку дольше. Начинка в тепловой модели
+// ослабляется так, чтобы её объём (площадь × высота) действовал не сильнее FILL_FRY_SLICES ломтиков: на роти
+// с 1–3 ломтиками всё как было (k=1), на кучке тень и задержка тепла каждой порции ×k. Жарка и так долгая
+// (плейтест, п. 1), и окно времени жарки настраивалось на одном ломтике. Видимая высота начинки не меняется.
+const FILL_FRY_SLICES = 3;
+function fillFryK(){
+  const F=dish && dish.filling; if(!F || !F.length) return 1;
+  let vol=0, ref=0;
+  for(const f of F){
+    const egg=f.kind==="egg", r=f.radius||0;
+    vol+=Math.PI*r*r*(egg ? EGG_MM : FILL_MM);
+    ref+=egg ? r/1.5 : r;                 // яйцо: лужица 0,075 пролёта против ломтика 0,05 (addEgg/addBananaSlice)
+  }
+  ref/=F.length;
+  const cap=FILL_FRY_SLICES*Math.PI*ref*ref*FILL_MM;
+  return vol>cap ? cap/vol : 1;
+}
 // Сушка верхней, открытой стороны: пар от нагретого низа уходит сквозь лист.
 // INFERRED — источника на долю нет. Закрытая сверху сторона (под клапаном или под
 // начинкой) не сохнет вовсе: там пар заперт, а начинка — водяной резервуар
@@ -709,8 +733,9 @@ function rebuildDishContact(){
     rows.push(s,down,(top?1:0)|(steel?2:0)|(covered?4:0),h,tr,pt.x,pt.y);
   };
   // Для крошечного фрагмента: та же стопка, но тепло кладётся только ему самому (индекс own).
+  const fk=fillFryK(), heatMM=(f,pt)=>f.kind==="filling" ? fillHeight(f,pt)*fk : doughMM(f.tone);
   const stackHeatAt=(stack,own,pt,heat,weight)=>{
-    const hs=stack.map(f=>layerMM(f,pt));
+    const hs=stack.map(f=>heatMM(f,pt));
     let transmission=1, fillAbove=0;
     for(let k=own+1;k<stack.length;k++) if(stack[k].kind==="filling") fillAbove+=hs[k];
     for(let k=0;k<own;k++) transmission*=stack[k].kind==="dough" ? Math.exp(-hs[k]/DOUGH_HEAT_MM) : fillPass(hs[k]);
@@ -721,7 +746,7 @@ function rebuildDishContact(){
   // Тень входит и в поток вверх: клапан получает тепло сквозь охлаждённую начинкой базу,
   // поэтому ему не может достаться больше, чем слою под начинкой.
   const stackHeat=(stack,pt,heat,weight)=>{
-    const hs=stack.map(f=>layerMM(f,pt));
+    const hs=stack.map(f=>heatMM(f,pt));
     let above=0; const fillAbove=new Array(stack.length);
     for(let k=stack.length-1;k>=0;k--){ fillAbove[k]=above; if(stack[k].kind==="filling") above+=hs[k]; }
     let transmission=1;
@@ -2026,7 +2051,7 @@ function updateDishMove(){
 // В руке (несут наверх) роти нарисован в CARRY_SHOW своего размера и висит серединой на CARRY_ABOVE_CSS выше
 // пальца: видно, куда несёшь. Отпускание по-прежнему судится по пальцу (eveningCounterHit, guestRefuses,
 // nightDogHit берут точку касания), зоны Сом, стойки и пса не менялись. Числа стартовые.
-const TRAY_PAD = 0.10, TRAY_SCALE = 0.85, TRAY_EDGE = 0.04, TRAY_T = 0.30;
+const TRAY_PAD = 0.10, TRAY_SCALE = 0.85, TRAY_IN = 0.03, TRAY_T = 0.30;
 const TRAY_PAPER = "#e8dcc2", TRAY_RIM = "#c9b48e";
 const CARRY_SHOW = 0.60, CARRY_ABOVE_CSS = 40;
 function trayRect(){

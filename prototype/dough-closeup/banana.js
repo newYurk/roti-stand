@@ -126,9 +126,22 @@ function fillingTap() {
 window.fillingTap = fillingTap;
 
 function bananaReset() { _pending = null; _passed = null; _syncButton(); }
+// Сборка 85b (живая проверка, 375×667: первое короткое касание листа иногда молчало). Длительность касания
+// меряется по времени самих событий (t — evTime, timeStamp касания), а не по часам в момент обработки: в длинном
+// кадре (лист только лёг на таву — пересборка тепла и рельефа) касание в 70 мс доходило до обработчика через
+// 150+ мс, считалось удержанием и уходило стенду — начинки не было. Держит ли палец — решает кадр, но только кадр
+// без зависания: после долгого кадра (> FILL_STALL_MS) в очереди может ждать уже отпущенный палец — ждём ещё кадр.
+const FILL_STALL_MS = 50;
+let _lastUpd = 0;
+function _dur(P, t) {
+  if (Number.isFinite(t) && Number.isFinite(P.t) && t >= P.t) return t - P.t;
+  return performance.now() - P.at;
+}
 // Каждый кадр: удержание середины дольше FILL_TAP_MS — это прижим, касание уходит стенду.
 function bananaUpdate() {
-  if (_pending && performance.now() - _pending.at >= FILL_TAP_MS) _flush();
+  const now = performance.now(), stalled = now - _lastUpd > FILL_STALL_MS;
+  _lastUpd = now;
+  if (_pending && !stalled && now - _pending.at >= FILL_TAP_MS) _flush();
   _syncButton();
 }
 function _syncButton() {
@@ -165,7 +178,7 @@ function _flush() {
     };
     const move = function (id, cx, cy, t) {
       if (_pending && _pending.id === id) {
-        if (Math.hypot(cx - _pending.cx, cy - _pending.cy) < FILL_SLOP_CSS && performance.now() - _pending.at < FILL_TAP_MS) return;
+        if (Math.hypot(cx - _pending.cx, cy - _pending.cy) < FILL_SLOP_CSS && _dur(_pending, t) < FILL_TAP_MS) return;
         _flush();                                          // ведение: перенос, складка — стенду
       }
       return _origMove.apply(this, arguments);
@@ -173,7 +186,7 @@ function _flush() {
     const up = function (id, cx, cy, t) {
       if (_pending && _pending.id === id) {
         const P = _pending;
-        const quick = performance.now() - P.at < FILL_TAP_MS && Math.hypot(cx - P.cx, cy - P.cy) < FILL_SLOP_CSS;
+        const quick = _dur(P, t) < FILL_TAP_MS && Math.hypot(cx - P.cx, cy - P.cy) < FILL_SLOP_CSS;
         if (quick) { _pending = null; fillingTap(); return; }
         _flush();
       }

@@ -185,9 +185,18 @@ function _tableFromLocal(mx, my, face) {
   return { x: pose.x + p.x * pose.scale, y: pose.y + p.y * pose.scale };
 }
 
+// Нарезанный роти на столе нарисован с высотой кусков: верх поднят на tableLiftCanvas, и касание при нарезке
+// и поливе берётся на этом верху (dishInputLocal). Полоса лежит там же — иначе она висела ниже пальца на высоту
+// кусков и ложилась на соседний кусок (живая проверка сборки 85, полоса сгущёнки, сборка 85b).
+function _lift() {
+  if (typeof dish === "undefined" || !dish || dish.mode !== "cut" || typeof tableLiftCanvas !== "function") return 0;
+  const L = tableLiftCanvas(); if (!L) return 0;
+  const a = typeof dishShownPose === "function" ? dishShownPose().scale : 1, b = typeof dishPose === "function" ? dishPose().scale : 1;
+  return L * a / Math.max(1e-6, b);
+}
 function _screen(mx, my, face) {
   const t = _tableFromLocal(mx, my, face);
-  return { x: _px(t.x, t.y), y: _py(t.x, t.y) };
+  return { x: _px(t.x, t.y), y: _py(t.x, t.y) - _lift() };
 }
 
 function _runs(pts) {
@@ -241,16 +250,23 @@ function _thin(pts, min) {
   }
   return out;
 }
+// Сгущёнка (tint.edge) — белое на светлом тесте: под белой полосой узкая тёмная кромка, чтобы полоса читалась
+// на телефоне (сборка 85b).
+function _flatPath(ctx, qs) {
+  ctx.beginPath();
+  qs.forEach((q, i) => { if (i) ctx.lineTo(q.x, q.y); else ctx.moveTo(q.x, q.y); });
+  if (qs.length === 1) ctx.lineTo(qs[0].x + 0.01, qs[0].y);
+}
+function _flatStroke(ctx, qs, tint, width, edge) {
+  if (tint.edge) { ctx.strokeStyle = tint.edge; ctx.lineWidth = width + 2 * edge; _flatPath(ctx, qs); ctx.stroke(); }
+  ctx.strokeStyle = tint.fill; ctx.lineWidth = width; _flatPath(ctx, qs); ctx.stroke();
+}
 function _strokeFlat(ctx, trail) {
   ctx.globalAlpha = 1;
-  ctx.strokeStyle = trail.tint.fill;
+  const w = _flatWidth(trail.tint), edge = Math.max(1, w * 0.18);
   for (const seg of _segments(trail.pts)) {
-    ctx.lineWidth = _flatWidth(trail.tint);
-    ctx.beginPath();
-    const qs = _thin(seg.map(p => _screen(p.x, p.y, p.face)), ctx.lineWidth / 2);
-    qs.forEach((q, i) => { if (i) ctx.lineTo(q.x, q.y); else ctx.moveTo(q.x, q.y); });
-    if (qs.length === 1) ctx.lineTo(qs[0].x + 0.01, qs[0].y);
-    ctx.stroke();
+    const qs = _thin(seg.map(p => _screen(p.x, p.y, p.face)), w / 2);
+    _flatStroke(ctx, qs, trail.tint, w, edge);
   }
 }
 
@@ -338,6 +354,35 @@ function _hit(p) {
   return null;
 }
 
+// Плоская полоса (варенье, сгущёнка) по нарезанному роти: точка в щели между раздвинутыми кусками не
+// пропадает, а ложится на край ближнего куска (на полширины полосы внутрь) — полоса доходит до каждого реза
+// с обеих сторон и не исчезает на куске, вдоль реза которого шёл палец (сборка 85b). Только внутри контура роти
+// (dish.hull, без раздвижки) и не дальше двух раздвижек от куска: мимо роти полоса по-прежнему рвётся.
+function _snap(p, inset) {
+  if (typeof dish === "undefined" || !dish || dish.mode !== "cut" || typeof pieceShiftLive !== "function") return null;
+  const shift = pieceShiftLive(dish.faces); if (!shift) return null;
+  const local = typeof dishLocal === "function" ? dishLocal(p) : p;
+  if (!(dish.hull && dish.hull.length > 2 && pointInFace(dish.hull, local.x, local.y))) return null;
+  let far = 0; for (const o of shift.values()) far = Math.max(far, Math.hypot(o.x, o.y));
+  let best = null, bd = 2.2 * far + 1e-3;
+  for (let i = 0; i < dish.faces.length; i++) {
+    const f = dish.faces[i]; if (f.kind !== "dough") continue;
+    const o = shift.get(f) || { x: 0, y: 0 }, x = local.x - o.x, y = local.y - o.y, P = f.points;
+    for (let j = 0; j < P.length; j++) {
+      const a = P[j], b = P[(j + 1) % P.length], dx = b.x - a.x, dy = b.y - a.y;
+      const u = Math.max(0, Math.min(1, ((x - a.x) * dx + (y - a.y) * dy) / (dx * dx + dy * dy || 1)));
+      const qx = a.x + u * dx, qy = a.y + u * dy, d = Math.hypot(qx - x, qy - y);
+      if (d < bd) { bd = d; best = { i, qx, qy, x, y, o }; }
+    }
+  }
+  if (!best) return null;
+  const d = Math.hypot(best.qx - best.x, best.qy - best.y) || 1;
+  let mx = best.qx + (best.qx - best.x) / d * inset, my = best.qy + (best.qy - best.y) / d * inset;
+  if (!pointInFace(dish.faces[best.i].points, mx, my)) { mx = best.qx; my = best.qy; }
+  return { i: best.i, mx, my, o: best.o };
+}
+const _sameShift = (a, b) => Math.abs(a.x - b.x) < 1e-9 && Math.abs(a.y - b.y) < 1e-9;
+
 function _nearRoti(p) {
   if (typeof dish === "undefined" || !dish) return false;
   const local = typeof dishLocal === "function" ? dishLocal(p) : p;
@@ -382,14 +427,20 @@ function _stamp(trail, x, y, sp) {
 
 function _stampOne(trail, x, y, sp) {
   const w = _widthForSpeed(sp);
-  const hit = _hit({ x, y });
+  let hit = _hit({ x, y });
+  if (!hit && trail.tint) {
+    const pose = typeof dishPose === "function" ? dishPose() : { scale: 1 };
+    hit = _snap({ x, y }, _flatBase(trail.tint) / 2 / Math.max(1e-6, pose.scale));
+  }
   if (!hit) {
     if (!trail.tint && _nearRoti({ x, y })) _fall(x, y, w);
     trail.broken = true;
     return;
   }
   const last = trail.pts[trail.pts.length - 1];
-  if (trail.broken || (!trail.tint && last && !last.break && last.face !== hit.i)) {
+  // плоская полоса идёт через грани одного куска сплошной; на другой кусок — с разрывом (щель реза)
+  const jump = last && !last.break && (trail.tint ? !_sameShift(_shiftOf(last.face), hit.o || { x: 0, y: 0 }) : last.face !== hit.i);
+  if (trail.broken || jump) {
     trail.pts.push({ break: true });
     trail.broken = false;
   } else if (last && !last.break && last.face === hit.i) {
@@ -590,11 +641,11 @@ function drizzlePaint(g, screen, k) {
     g.strokeStyle = trail.tint ? trail.tint.fill : DRIZZLE_COLOR_FILL;
     for (const seg of _segments(trail.pts)) {
       let w = 0; for (const p of seg) w += p.w;
-      g.lineWidth = Math.max(trail.tint && trail.tint.thin ? 1.2 : 2, (trail.tint ? _flatBase(trail.tint) : w / seg.length * 1.6) / Math.max(1e-6, pose.scale) * k);
-      g.beginPath();
-      const qs = trail.tint ? _thin(seg.map(at), g.lineWidth / 2) : seg.map(at);
-      qs.forEach((q, i) => { if (i) g.lineTo(q.x, q.y); else g.moveTo(q.x, q.y); });
-      if (qs.length === 1) g.lineTo(qs[0].x + 0.01, qs[0].y);
+      const lw = Math.max(trail.tint && trail.tint.thin ? 1.2 : 2, (trail.tint ? _flatBase(trail.tint) : w / seg.length * 1.6) / Math.max(1e-6, pose.scale) * k);
+      g.lineWidth = lw;
+      const qs = trail.tint ? _thin(seg.map(at), lw / 2) : seg.map(at);
+      if (trail.tint) { _flatStroke(g, qs, trail.tint, lw, Math.max(0.6, lw * 0.18)); continue; }
+      _flatPath(g, qs);
       g.stroke();
     }
   }

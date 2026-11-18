@@ -206,17 +206,26 @@ const corners = (h, k = 1.12) => h.J(`(()=>{const b=dishBounds(),cx=(b.left+b.ri
   return [[1,-1],[-1,-1],[-1,1],[1,1]].map(([sx,sy])=>__harness.dishToClient({x:cx+sx*hw,y:cy+sy*hh}))})()`);
 const wet = (h, min) => h.run(`fatMap?Array.from(fatMap).filter(v=>v>${min}).length:0`);
 const lum = c => 0.299 * c[0] + 0.587 * c[1] + 0.114 * c[2];
-// Build 85: a tap now lays the whole heap (12 slices), and more filling fries slower (the model counts its volume). The
-// model times below were set on a roti with ONE slice: that slice is laid by script, as the old tap did.
-function fried(h, { banana = true } = {}) { light(h); onPan(h); if (banana) h.run('{const b=dishBounds();addBananaSlice((b.left+b.right)/2,(b.top+b.bottom)/2)}'); envelope(h); }
+// Build 85b: the tap lays the real heap (12 slices) — the filling's effect on frying is capped at ~3 slices
+// (FILL_FRY_SLICES in stand.js), so the model times hold with it. `egg` adds the second tap (the egg over the heap).
+function fried(h, { banana = true, egg = false } = {}) { light(h); onPan(h); if (banana) tap(h, h.spots().pan); if (egg) tap(h, h.spots().pan); envelope(h); }
 
 test('F1', 'times by the model: the steel side is «приготовленное» in ~20 s and «горелое» in ~60 s; without a flip the top of a quickly folded envelope stays raw; after a flick the new bottom is «бледное» within seconds', () => {
   const h = guest(); fried(h);
+  const heap = h.J('(dish.filling||[]).map(f=>f.kind||"banana")').join(',');
+  assert.ok(/banana/.test(heap), `the tap laid the heap (${heap})`);
   const folded = h.run('dish.panTime'), at = {};
   for (const [s, name] of [[1, 'pale'], [2, 'cooked'], [3, 'fried'], [4, 'burnt']]) { until(h, `fryStep(meanCook())>=${s}`, 60 * 120); at[name] = +h.run('dish.panTime').toFixed(1); }
   assert.ok(at.cooked >= 13 && at.cooked <= 24, `«приготовленное» at 13–24 s of pan time (${at.cooked})`);
   assert.ok(at.burnt >= 45 && at.burnt <= 70, `«горелое» at 45–70 s (${at.burnt})`);
   assert.ok(at.burnt - at.cooked >= 30, 'more than half a minute between «приготовленное» and «горелое»');
+  // the heap and the egg over it (two taps): the same windows — a heap must not make frying longer (build 85b)
+  const e = guest(); fried(e, { egg: true });
+  const fill = e.J('(dish.filling||[]).map(f=>f.kind||"banana")'), nb = fill.filter(k => k === 'banana').length, ne = fill.filter(k => k === 'egg').length;
+  assert.ok(nb >= 10 && ne >= 1, `two taps: heap and egg (${nb}+${ne})`);
+  const ate = {}; for (const [s, name] of [[2, 'cooked'], [4, 'burnt']]) { until(e, `fryStep(meanCook())>=${s}`, 60 * 120); ate[name] = +e.run('dish.panTime').toFixed(1); }
+  assert.ok(ate.cooked >= 13 && ate.cooked <= 24, `heap+egg: «приготовленное» at 13–24 s (${ate.cooked})`);
+  assert.ok(ate.burnt >= 45 && ate.burnt <= 70, `heap+egg: «горелое» at 45–70 s (${ate.burnt})`);
   const topNoFlip = h.run('dishSideMean("cook","topWeights")');
   assert.equal(h.run(`fryStep(${topNoFlip})`), 0, `never flipped: the top is still raw at ${at.burnt} s (${topNoFlip.toFixed(3)})`);
   assert.equal(h.run('guestVerdict(meanCook(),dishSideMean("cook","topWeights"),0)'), 'burnt');
@@ -253,7 +262,7 @@ test('F1', 'times by the model: the steel side is «приготовленное
   u.run('undoDish()'); u.frames(30); assert.equal(u.run('envelopeDone()'), false);
   assert.ok(u.run('Math.max(...dish.thermal.filter(Boolean).map(t=>Math.max(t.cook[0],t.cook[1])))') >= before, 'the cap stops the browning, it does not lower it');
   h.tick(2, 1 / 60, true); q.tick(2, 1 / 60, true); o.tick(2, 1 / 60, true); assert.equal(h.run('loopErrs') + q.run('loopErrs') + o.run('loopErrs'), 0);
-  return { summary: `folded at ${folded.toFixed(1)} s; steel side: бледное ${at.pale} s, приготовленное ${at.cooked} s, зажаренное ${at.fried} s, горелое ${at.burnt} s of pan time; flip at ${tA.toFixed(1)} s → new bottom бледное +${tB.toFixed(1)} s (crunch with margarine at ${(tA + tB).toFixed(1)} s), приготовленное +${tB2.toFixed(1)} s (crunch at ${(tA + tB2).toFixed(1)} s); open sheet 25 s → colour ${openCook.toFixed(3)} (cap ${o.run('OPEN_COOK_CAP')}); folded at ${lazyT.toFixed(1)} s: bottom ${lazy.bottom.toFixed(3)}, top ${lazy.top.toFixed(3)}, no crunch without a flip` };
+  return { summary: `heap ${heap.split(',').length} slices; folded at ${folded.toFixed(1)} s; steel side: бледное ${at.pale} s, приготовленное ${at.cooked} s, зажаренное ${at.fried} s, горелое ${at.burnt} s of pan time; flip at ${tA.toFixed(1)} s → new bottom бледное +${tB.toFixed(1)} s (crunch with margarine at ${(tA + tB).toFixed(1)} s), приготовленное +${tB2.toFixed(1)} s (crunch at ${(tA + tB2).toFixed(1)} s); open sheet 25 s → colour ${openCook.toFixed(3)} (cap ${o.run('OPEN_COOK_CAP')}); folded at ${lazyT.toFixed(1)} s: bottom ${lazy.bottom.toFixed(3)}, top ${lazy.top.toFixed(3)}, no crunch without a flip; heap ${nb} + egg ${ne}: приготовленное ${ate.cooked} s, горелое ${ate.burnt} s (filling factor ${e.run('fillFryK()').toFixed(3)})` };
 });
 
 test('F2', 'one ladder and plain words: the line says nothing about frying until the envelope is done, never «можно начинку» or «→ сырое»; «край румяный — переверни» when the steel side is done; what it calls ready is a crunch for Som', () => {
@@ -455,12 +464,19 @@ test('F5', 'the look, as numbers: the rim of the top takes the colour of the ste
   const q = guest(); fried(q); until(q, 'fryStep(meanCook())>=2');
   q.run('startFlip({x:1,y:0},{x:0,y:0})'); q.frames(40);
   assert.equal(q.run('dishLook().rim'), false, 'flipped: what is seen is the fried side, no rim');
-  // smoothed patches over the filling on the seen side; the cut keeps the true layers
-  const sd = `(()=>{const a=[],b=[];for(const f of dish.faces){ if(f.kind!=="dough"||!dish.topWeights[f.source][f.turned?0:1]) continue;
-      const c=dishCookColor(f),o=dishCookColor(f,undefined,false); a.push(0.299*c[0]+0.587*c[1]+0.114*c[2]); b.push(0.299*o[0]+0.587*o[1]+0.114*o[2]); }
-    const sd=v=>{const m=v.reduce((s,x)=>s+x,0)/v.length;return Math.sqrt(v.reduce((s,x)=>s+(x-m)*(x-m),0)/v.length)};return {seen:sd(a),own:sd(b),n:a.length}})()`;
+  // smoothed patches over the filling on the seen side; the cut keeps the true layers.
+  // Build 85b: measured on the faces paler than the side's mean (that is what PATCH_SMOOTH pulls; the darker contact
+  // spots are not touched by design). With the heap capped at ~3 slices those patches are mild and the side's spread
+  // is mostly the dark contact spots, so the whole-side sd no longer tells the smoothing apart (printed for the record).
+  const sd = `(()=>{const L=dishLook(),a=[],b=[],A=[],B=[];for(const f of dish.faces){ if(f.kind!=="dough"||!dish.topWeights[f.source][f.turned?0:1]) continue;
+      const t=dish.thermal[f.source]; if(!t) continue; const v=t.cook[f.turned?0:1]*(0.55+0.8*(t.contact||1));
+      const c=dishCookColor(f),o=dishCookColor(f,undefined,false),lc=0.299*c[0]+0.587*c[1]+0.114*c[2],lo=0.299*o[0]+0.587*o[1]+0.114*o[2];
+      A.push(lc); B.push(lo); if(v<L.top){ a.push(lc); b.push(lo); } }
+    const sd=v=>{const m=v.reduce((s,x)=>s+x,0)/v.length;return Math.sqrt(v.reduce((s,x)=>s+(x-m)*(x-m),0)/v.length)};
+    return {seen:sd(a),own:sd(b),n:a.length,all:A.length,seenAll:sd(A),ownAll:sd(B)}})()`;
   const s = q.J(sd);
-  assert.ok(s.seen < s.own * 0.8, `the seen side is evener than the raw numbers (sd ${s.seen.toFixed(1)} vs ${s.own.toFixed(1)})`);
+  assert.ok(s.n >= 20, `there are pale patches over the filling (${s.n} faces of ${s.all})`);
+  assert.ok(s.seen < s.own * 0.8, `the pale patches are evener for the eye than the raw numbers (sd ${s.seen.toFixed(1)} vs ${s.own.toFixed(1)})`);
   // the colour scale
   // changed after the review of 17.11: the scale reaches black at «горелое» (1.12; it used to creep there by 1.3,
   // and «край чёрный — горит» stood over a dark brown rim), then stays black
@@ -476,7 +492,7 @@ test('F5', 'the look, as numbers: the rim of the top takes the colour of the ste
   assert.ok(matte >= 1.2 && matte <= 4, `matte ${matte.toFixed(1)} s after landing`);
   o.tick(2, 1 / 60, true); h.tick(2, 1 / 60, true); q.tick(2, 1 / 60, true);
   assert.equal(o.run('loopErrs') + h.run('loopErrs') + q.run('loopErrs'), 0);
-  return { summary: `rim width ${[p1, p2, p3].map(p => p.rimW.toFixed(2)).join(' → ')} of the roti; edge luminance by step ${L.map(v => v.toFixed(0)).join(' → ')}, middle at «приготовленное» ${lum(p2.mid).toFixed(0)}; seen side sd ${s.seen.toFixed(1)} vs ${s.own.toFixed(1)}; matte in ${matte.toFixed(1)} s (from ${s0.toFixed(2)})` };
+  return { summary: `rim width ${[p1, p2, p3].map(p => p.rimW.toFixed(2)).join(' → ')} of the roti; edge luminance by step ${L.map(v => v.toFixed(0)).join(' → ')}, middle at «приготовленное» ${lum(p2.mid).toFixed(0)}; pale patches (${s.n} of ${s.all} faces) sd ${s.seen.toFixed(1)} vs ${s.own.toFixed(1)}, whole seen side ${s.seenAll.toFixed(1)} vs ${s.ownAll.toFixed(1)}; matte in ${matte.toFixed(1)} s (from ${s0.toFixed(2)})` };
 });
 
 test('F6', 'the refusal is not a dead end: a raw cut roti refused by Som is carried back to the middle of the tava and fries on (the cuts are undone, colour and crisp stay); dropped at the rim of the tava it stays on the table; fried through and flipped, she takes it', () => {
