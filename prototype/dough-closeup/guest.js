@@ -10,8 +10,12 @@
    «кивок» без варенья; остальное — «кивок».
    Своих жестов у неё нет: роти ей отдают тем же переносом вверх, что и на стойку (evening.js зовёт
    guestServe). В стенде от неё одна переменная — panKnock: тава вздрагивает от стука.
-   Правила владелицы 17.11: звука нет — всё читается глазами; из движения только вздрагивание тавы на
-   2 px и смена картинок; Сом не говорит словами.
+   Правила владелицы 17.11: звука нет — всё читается глазами; Сом не говорит словами; движение — только
+   то, что что-то сообщает. Сборка 80 (плейтест 17.11, п. 13: стук никто не заметил, между стуками сцена
+   мёртвая): стуча, она наклоняется и тянет руку через стойку к борту тавы — метки стука вспыхивают У БОРТА,
+   не у её руки; пока роти на таве не перевёрнут и до её «хруста» не дошёл, стук повторяется каждые
+   GUEST_AGAIN_S секунд; глаза идут за роти (сгиб, переворот, перенос); роти унесли мимо неё на стойку —
+   она поворачивает голову вслед (guestWatch). Рука и взгляд нарисованы кодом поверх любой картинки.
 
    КАРТИНКИ. Четыре неподвижных кадра «по плечи» в одной рамке: guest/som-1.png … som-4.png
    (1 ждёт, 2 стучит, 3 кивок, 4 хруст; прозрачный фон, ширина около 600 px). Пока хотя бы одного файла
@@ -26,6 +30,11 @@ const GUEST_KNOCK_WAIT = 1.5, GUEST_KNOCK_S = 1.2, GUEST_HINT_S = 0.8, GUEST_ANS
 const GUEST_SHAKE_HEAD_S = 1.1;                        // качает головой: картинка 1, голова два раза в стороны
 const GUEST_SHAKE = [[0.10, 0.22], [0.40, 0.52]];      // два вздрагивания тавы, секунды от начала стука
 const GUEST_SHAKE_PX = 2;
+const GUEST_AGAIN_S = 8;                               // повтор стука, пока роти на таве не перевёрнут и не дошёл до «хруста»
+const GUEST_MARK_S = 0.14;                             // метки у борта держатся столько после каждого удара — глаз успевает
+const GUEST_LEAN = 0.07;                               // наклон к таве на время стука, доля высоты рамки
+const GUEST_FLIP_UP = 0.04;                            // переворот: голова на миг поднимается за взлетевшим роти, доля высоты рамки
+const GUEST_WATCH_S = 2.2;                             // сколько она смотрит вслед роти, унесённому на стойку
 const GUEST_GIFT = { nod:"bananas", crunch:"jam" };
 const GUEST_FILES = [1, 2, 3, 4].map(i => `guest/som-${i}.png`);
 
@@ -36,6 +45,7 @@ let guestEvents = [];                // журнал гостя: хранитс�
 // показ ответа, ступень, на которую она уже стучала, наибольшая ступень жарки этого роти (gBest —
 // только в выгрузку guestExport; ответ с партии «жарка» даёт guestVerdict по обеим сторонам), «села».
 let gWait = 0, gKnock = 0, gKnockAge = 0, gAnswer = 0, gStep = 0, gBest = 0, gBall = 0, gSat = false, gMain = false, gHead = 0, gFlips = 0;
+let gAgain = 0, gWatch = 0, gWatchDir = 0, gWatchAt = null;   // до повтора стука; взгляд вслед: остаток, сторона (−1, 0 — вниз, 1), куда
 
 // ─────────────────────────── картинки
 // Сначала спрашивается только первый файл: пока картинок нет, это один отказ сервера, а не четыре.
@@ -84,13 +94,20 @@ function guestFryNow(){
 }
 function guestReset(){
   GST = guestFresh(); guestEvents = [];
-  gWait = gKnock = gKnockAge = gAnswer = gStep = gBest = gBall = gHead = gFlips = 0; gSat = gMain = false; panKnock = 0;
+  gWait = gKnock = gKnockAge = gAnswer = gStep = gBest = gBall = gHead = gFlips = gAgain = gWatch = gWatchDir = 0; gSat = gMain = false; panKnock = 0;
+  gWatchAt = null;
 }
 
 // ─────────────────────────── ход гостя
 function guestFrying(){ return EVE.ball && phase === "PAN" && !!dish && dish.mode === "fold"; }
+// Чего она ждёт стуком: чтобы роти перевернули (или дожарили до её «хруста» маргарином под краем).
+function guestWantsFlip(){
+  if(!guestFrying() || (dish.flips || 0) > 0) return false;
+  const S = guestSides();
+  return guestVerdict(S.bottom, S.top, S.crisp) !== "crunch";
+}
 function guestKnock(seconds, event){
-  gKnock = seconds; gKnockAge = 0; gMain = event === "knock";
+  gKnock = seconds; gKnockAge = 0; gMain = event === "knock"; gAgain = 0;
   guestLog(event, guestFryNow());
 }
 function guestLeave(why){
@@ -149,6 +166,7 @@ function guestUpdate(dt){
   if(guestFrying() && (dish.flips || 0) !== gFlips){ gFlips = dish.flips || 0; gStep = guestCookStep(); }
   if(guestFrying()) gBest = Math.max(gBest, guestCookStep());     // наибольшая ступень стороны на таве (для журнала; ответ — guestVerdict)
   if(gHead > 0) gHead = Math.max(0, gHead - dt);
+  if(gWatch > 0) gWatch = Math.max(0, gWatch - dt);
   if(gAnswer > 0){
     gAnswer -= dt;
     if(gAnswer <= 0){
@@ -191,32 +209,85 @@ function guestUpdate(dt){
   }
   if(frying){                                              // «теплее»: роти перешёл на следующую ступень жарки
     const s = guestCookStep();
-    if(s > gStep){ gStep = s; guestKnock(GUEST_HINT_S, "hint"); }
+    if(s > gStep){ gStep = s; guestKnock(GUEST_HINT_S, "hint"); return; }
   }
+  // Повтор: роти всё лежит той же стороной — она стучит снова, пока его не перевернут или не снимут.
+  if(guestWantsFlip()){
+    gAgain += dt;
+    if(gAgain >= GUEST_AGAIN_S) guestKnock(GUEST_KNOCK_S, "again");
+  } else gAgain = 0;
 }
+// Роти отпущен на стойку мимо неё (evening.js зовёт это, когда роти уже посчитан): она поворачивает голову
+// туда, где он лёг. Место — его ячейка стойки (как их рисует evening.js); прямо под ней — наклоняется и смотрит вниз.
+function guestWatch(client){
+  if(!GST.here || gAnswer > 0 || eveDev) return;
+  const G = eveGeo(), S = guestSlot(G), C = G.counter;
+  const i = Math.max(0, EVE.rotiDone - GST.taken - (typeof nightTook === "function" ? nightTook() : 0) - 1);
+  const at = { x:(C.x0 + C.x1)/2 + (i - 1)*66*G.u, y:(C.y0 + C.y1)/2 }, dx = (at.x - (S.x0 + S.w/2))/(S.w/2);
+  gWatch = GUEST_WATCH_S; gWatchDir = Math.abs(dx) < 0.25 ? 0 : Math.sign(dx); gWatchAt = at;
+  guestLog("watch", { dir:gWatchDir });
+}
+// 0…1: взгляд вслед набирается за 0,15 с и отпускается за последние 0,35 с.
+function guestWatchK(){
+  if(!(gWatch > 0)) return 0;
+  return Math.max(0, Math.min(1, (GUEST_WATCH_S - gWatch)/0.15, gWatch/0.35));
+}
+// Где сейчас роти (или лист), пиксели холста; null — на столе ничего нет. Для взгляда.
+function guestRotiAt(){
+  if(gWatch > 0 && gWatchAt) return gWatchAt;
+  if(!EVE.ball || sheetHidden) return null;
+  if(!dish){
+    const c = centerOfSheet(), ox = xf ? xf.ox || 0 : 0, oy = xf ? xf.oy || 0 : 0;
+    return { x:prX(c.x + ox, c.y + oy), y:prY(c.x + ox, c.y + oy) };
+  }
+  const pose = dishPose(), c = dish.mode === "fold" ? dishCentroid() : (dish.cutCenter || dishCentroid());
+  let x = pose.x + c.x*pose.scale, y = pose.y + c.y*pose.scale, up = 0;
+  const g = dishGesture;
+  if(g && g.slide){ x += g.slide.x*pose.scale; y += g.slide.y*pose.scale; }
+  if(dishMove){                                            // перелёт с тавы на стол
+    const u = Math.max(0, Math.min(1, (performance.now() - dishMove.t0)/1000/dishMove.T));
+    x = panC.x + (x - panC.x)*u; y = panC.y + (y - panC.y)*u;
+  }
+  if(dishFlight){                                          // переворот: роти взлетает над тавой
+    const u = Math.max(0, Math.min(1, (performance.now() - dishFlight.t0)/1000/dishFlight.T));
+    up = Math.sin(Math.PI*u)*PAN_R*TILT*(dishFlight.almost ? 0.25 : 0.9);
+  }
+  return { x:prX(x, y), y:prY(x, y) - up };
+}
+// Куда смотрят глаза: вектор от её лица к роти (x вправо, y вниз), длиной не больше 1. Длина 1 — роти не
+// ближе середины тавы; ближе (взлетел при перевороте, несут к ней) — вектор короче, зрачки идут к середине
+// глаза: видно, что она провожает его взглядом вверх. Без роти — вниз, на таву.
+function guestGaze(G, S){
+  const at = guestRotiAt(); if(!at) return { x:0, y:1 };
+  const fx = S.x0 + S.w/2, fy = S.y0 + S.h*0.45 + (guestLow() ? S.sit : 0), dx = at.x - fx, dy = at.y - fy;
+  const l = Math.max(Math.hypot(dx, dy), Math.hypot(G.pan.x - fx, G.pan.y - fy), 1e-6);
+  return { x:dx/l, y:dy/l };
+}
+// 0…1: насколько роти сейчас в воздухе над тавой (настоящий переворот) — она на миг поднимает голову за ним.
+function guestFlipUp(){
+  if(!dishFlight || dishFlight.almost) return 0;
+  const u = (performance.now() - dishFlight.t0)/1000/dishFlight.T;
+  return u > 0 && u < 1 ? Math.sin(Math.PI*u) : 0;
+}
+// Куда она стучит: точка на дальнем борту тавы под её рукой; onPan — рука сейчас бьёт (тава вздрагивает),
+// marks — метки стука видны (удар и GUEST_MARK_S после него).
+function guestKnockAt(G, S){
+  const hx = S.x0 + S.w*0.80, k = Math.max(-0.8, Math.min(0.8, (hx - G.pan.x)/PAN_R*0.55));   // рука идёт от плеча наискось к середине борта
+  const hit = GUEST_SHAKE.some(([a, b]) => gKnockAge >= a && gKnockAge < b);
+  const marks = GUEST_SHAKE.some(([a, b]) => gKnockAge >= a && gKnockAge < b + GUEST_MARK_S);
+  return { hand:{ x:hx, y:S.zone.y1 - 6*G.u }, rim:{ x:G.pan.x + k*PAN_R*1.02, y:G.pan.y - PAN_R*TILT*1.02*Math.sqrt(1 - k*k) }, hit, marks };
+}
+// Наклон, доля высоты рамки: стучит — наклонилась к таве; смотрит вслед роти прямо под собой — тоже (поза).
+function guestLean(){ return (guestPic() === 2 ? GUEST_LEAN : 0) + (gWatchDir === 0 ? GUEST_LEAN*guestWatchK() : 0); }
+function guestKnocking(){ return GST.here && gKnock > 0 && !EVE.lid && gAnswer <= 0; }
 function guestPic(){
   if(!GST.here) return 0;
   if(gAnswer > 0) return GST.answers[GST.answers.length - 1].answer === "crunch" ? 4 : 3;
   if(EVE.lid) return 1;                                    // под крышкой она просто ждёт
   return gKnock > 0 ? 2 : 1;
 }
-// Служебная строка: с гостьей у стойки нарезанный роти можно унести и ей. Пока она здесь, строка
-// набрана мельче и прижата к верху (html.guest в stand.css): две строки кончаются над её рамкой, а самые
-// длинные слова вечера при ней короче — иначе вторая и третья строки ложились ей на волосы и лоб.
-// cur === null — тава под крышкой (evening.js спрашивает до своих слов).
-const GUEST_WORDS = [
-  ["Положи банан", "коснись середины — ляжет банан · потом заверни стороны"],
-  ["Банан", "банан лежит · заверни стороны к середине"],
-];
-function guestLive(cur){
-  if(!GST.here) return null;
-  if(cur === null) return "под крышкой · сними её в сторону — жарка пойдёт дальше";
-  const give = gAnswer <= 0 && GST.answers.length < 2;
-  if(give && cur.startsWith("Разрезов")) return "нарезано · за середину и наверх — гостье или на стойку";
-  if(give && cur.startsWith("В руке — неси наверх")) return "неси наверх — гостье или на стойку";
-  for(const [from, to] of GUEST_WORDS) if(cur.startsWith(from)) return to;
-  return null;
-}
+// Своих слов в строке у неё нет (сборка 80): строка стенда не называет, кому нести, — её видно. html.guest
+// (stand.css) остаётся меткой «она у стойки» для проверок и стилей.
 let gMark = null;
 function guestMark(){
   const on = GST.here && !eveDev;
@@ -249,7 +320,9 @@ function guestSpots(){
   return { here:GST.here, pic:guestPic(), sat:gSat, low:guestLow(), sit:S.sit*ky, pictures:guestPictures(),
     som:c(S.x0 + S.w/2, S.y0 + S.h*0.6), slot:{ ...c(S.x0, S.y0), w:S.w*k, h:S.h*ky },
     zone:{ x0:r.left + S.zone.x0*k, x1:r.left + S.zone.x1*k, y1:r.top + S.zone.y1*ky },
-    shelf:c(F.x0 + F.w/2, F.y), gifts:GST.gifts.slice(), knock:panKnock*ky, head:+guestHeadTurn().toFixed(3) };
+    shelf:c(F.x0 + F.w/2, F.y), shelfTop:r.top + (F.y - 23*G.u)*ky, gifts:GST.gifts.slice(), knock:panKnock*ky, head:+guestHeadTurn().toFixed(3),
+    gaze:(g => ({ x:+g.x.toFixed(3), y:+g.y.toFixed(3) }))(guestGaze(G, S)), lean:+(guestLean()*S.h*ky).toFixed(2), watch:+guestWatchK().toFixed(3), watchDir:gWatchDir,
+    arm:guestKnocking() ? (K => ({ rim:c(K.rim.x, K.rim.y), hit:K.hit, marks:K.marks }))(guestKnockAt(G, S)) : null, again:+gAgain.toFixed(2) };
 }
 
 // ─────────────────────────── кадр (evening.js зовёт после неба и до стойки)
@@ -267,22 +340,46 @@ function guestDraw(g, sx, sy, G){
 // Сама гостья: всё, что ниже верхнего края стойки, обрезано — за стойкой её не видно (и «села», и PNG).
 function guestFigure(g, sx, sy, G){
   const pic = guestPic(); if(!pic) return;
-  const S = guestSlot(G), dy = guestLow() ? S.sit : 0;
+  const S = guestSlot(G), dy = (guestLow() ? S.sit : 0) + (guestLean() - (pic === 1 ? GUEST_FLIP_UP*guestFlipUp() : 0))*S.h;
   g.save(); g.beginPath(); g.rect(0, 0, G.W*sx, S.zone.y1*sy); g.clip();
   if(guestPictures()){
     const im = gImgs[pic - 1], k = Math.min(S.w/im.naturalWidth, S.h/im.naturalHeight), w = im.naturalWidth*k, h = im.naturalHeight*k;
     const turn = guestHeadTurn();                          // «нет»: картинка 1 чуть сжимается и уходит в сторону, как поворот головы
     const w2 = w*(1 - 0.07*Math.abs(turn));
     g.drawImage(im, (S.x0 + (S.w - w2)/2 + turn*0.05*S.w)*sx, (S.y0 + S.h - h + dy)*sy, w2*sx, h*sy);
-  } else guestPlaceholder(g, sx, sy, S, dy, pic, guestHeadTurn());
+  } else guestPlaceholder(g, sx, sy, S, dy, pic, guestHeadTurn(), guestGaze(G, S));
+  g.restore();
+}
+// Рука через стойку к борту тавы и метки стука У БОРТА (сборка 80). Рисуется поверх стойки и тавы, пока
+// идёт стук: рукав от стойки, предплечье, кулак на борту; на каждом ударе кулак опускается вместе с тавой,
+// а от него расходятся три короткие светлые чёрточки. Плоские фигуры в палитре стенда.
+function guestArm(g, sx, sy, G){
+  if(!guestKnocking()) return;
+  const u = G.u, S = guestSlot(G), K = guestKnockAt(G, S), drop = K.hit ? 3*u : 0;
+  const a = K.hand, b = { x:K.rim.x, y:K.rim.y - 5*u + drop };
+  const seg = (p, q, w, color) => {
+    g.strokeStyle = color; g.lineWidth = Math.max(1, w*u*sx); g.lineCap = "round";
+    g.beginPath(); g.moveTo(p.x*sx, p.y*sy); g.lineTo(q.x*sx, q.y*sy); g.stroke();
+  };
+  const mid = t => ({ x:a.x + (b.x - a.x)*t, y:a.y + (b.y - a.y)*t });
+  g.save();
+  seg(a, mid(0.45), 17, "#8a4b3c");                        // рукав
+  seg(mid(0.45), b, 11, "#c08a5a");                        // предплечье
+  seg(mid(0.74), mid(0.80), 12.5, "#b9b3a8");              // браслет
+  g.fillStyle = "#c08a5a"; g.beginPath(); g.ellipse(b.x*sx, b.y*sy, 9*u*sx, 7.5*u*sy, 0, 0, Math.PI*2); g.fill();   // кулак
+  if(K.marks){
+    for(const [dx, dy, ex, ey] of [[-13, 2, -24, -3], [13, 2, 24, -3], [-7, 11, -13, 20], [7, 11, 13, 20]])
+      seg({ x:K.rim.x + dx*u, y:K.rim.y + dy*u }, { x:K.rim.x + ex*u, y:K.rim.y + ey*u }, 2.5, "#f0e0b0");
+  }
   g.restore();
 }
 // Нарезанный роти в руке (его несут наверх) закрывает её целиком — пока он в руке, она рисуется поверх
 // него: видно, кому несёшь. evening.js зовёт это после теста, перед крышкой и лампой.
 function guestCarried(){ return !!dish && dish.mode === "cut" && !!dishGesture && dishGesture.zone === "serve" && !!dishGesture.carry; }
 function guestDrawOver(g, sx, sy, G){
-  if(eveDev || !GST.here || !guestCarried()) return;
-  guestFigure(g, sx, sy, G);
+  if(eveDev || !GST.here) return;
+  if(guestCarried()) guestFigure(g, sx, sy, G);
+  guestArm(g, sx, sy, G);
 }
 function guestGift(g, sx, sy, gift, x, y, u){
   if(gift === "jam"){                                      // банка варенья
@@ -303,11 +400,11 @@ function guestGift(g, sx, sy, gift, x, y, u){
 // крошки у рта, плечи подняты.
 // Поворот головы «нет»: −1…1, два качания за GUEST_SHAKE_HEAD_S, затухает. 0 — голова прямо.
 function guestHeadTurn(){
-  if(!(gHead > 0)) return 0;
+  if(!(gHead > 0)) return gWatchDir*guestWatchK();          // вслед роти на стойке: голова повёрнута и стоит
   const u = 1 - gHead/GUEST_SHAKE_HEAD_S;
   return Math.sin(u*Math.PI*4)*(1 - 0.5*u);
 }
-function guestPlaceholder(g, sx, sy, S, dy, pic, turn = 0){
+function guestPlaceholder(g, sx, sy, S, dy, pic, turn = 0, gaze = { x:0, y:1 }){
   const X = nx => (S.x0 + nx*S.w)*sx, Y = ny => (S.y0 + dy + ny*S.h)*sy, R = n => n*S.w*sx, RY = n => n*S.h*sy;
   const SKIN = "#c08a5a", HAIR = "#2a2622", CLOTH = "#8a4b3c", GOLD = "#e0a23a", DARK = "#1d150e";
   const ell = (nx, ny, rx, ry, fill) => { g.fillStyle = fill; g.beginPath(); g.ellipse(X(nx), Y(ny), Math.max(.5, R(rx)), Math.max(.5, RY(ry)), 0, 0, Math.PI*2); g.fill(); };
@@ -338,18 +435,18 @@ function guestPlaceholder(g, sx, sy, S, dy, pic, turn = 0){
     stroke([[hx - 0.07, hy + 0.12], [hx, hy + 0.20], [hx + 0.07, hy + 0.12]], 0.02, DARK);                             // рот — дуга
     for(const [cx, cy] of [[-0.13, 0.13], [0.12, 0.11], [0.14, 0.18], [-0.11, 0.19], [0.03, 0.235], [-0.045, 0.24]]) ell(hx + cx, hy + cy, 0.014, 0.016, "#f0c674");   // крошки
   } else {
-    const look = pic === 1 ? 0.03 : 0, r = pic === 2 ? 0.03 : 0.023;   // 1 — смотрит вниз, на таву; 2 — на тебя
-    for(const s of [-1, 1]) ell(hx + face + s*0.075*(1 - 0.3*Math.abs(turn)), hy + 0.01 + look*(turn ? 0 : 1), r, r*1.1, DARK);
+    // 1 — глаза идут за роти (без роти — вниз, на таву); 2 — смотрит на тебя; 3 — прямо
+    const follow = pic === 1 && !(gHead > 0), r = pic === 2 ? 0.03 : 0.023;
+    const ex = follow ? gaze.x*0.032 : 0, ey = follow ? gaze.y*0.03 : 0;
+    for(const s of [-1, 1]) ell(hx + face + ex + s*0.075*(1 - 0.3*Math.abs(turn)), hy + 0.01 + ey, r, r*1.1, DARK);
     stroke(pic === 3 ? [[hx - 0.07, hy + 0.135], [hx + 0.07, hy + 0.135]] : [[hx + face - 0.035, hy + 0.135], [hx + face + 0.035, hy + 0.135]], 0.02, DARK);
   }
   g.restore();
   if(pic === 1){                                           // пальцы на серебряном браслете
     g.fillStyle = "#b9b3a8"; g.fillRect(X(0.50), Y(0.86), R(0.05), RY(0.10));
     ell(0.43, 0.91, 0.08, 0.055, SKIN);
-  } else if(pic === 2){                                    // костяшками по краю тавы
-    ell(0.80, 0.93, 0.07, 0.075, SKIN);
-    stroke([[0.90, 0.84], [0.95, 0.78]], 0.016, "#f0e0b0");
-    stroke([[0.92, 0.92], [0.99, 0.90]], 0.016, "#f0e0b0");
+  } else if(pic === 2){                                    // рука тянется к таве: дальше её рисует guestArm поверх стойки
+    ell(0.80, 0.97, 0.085, 0.09, CLOTH);
   } else {                                                 // кусок роти в руке
     ell(0.76, 0.90 - up*0.5, 0.075, 0.05, "#c9a15a");
     ell(0.70, 0.93 - up*0.5, 0.06, 0.05, SKIN);
