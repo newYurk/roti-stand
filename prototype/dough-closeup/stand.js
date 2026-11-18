@@ -1413,7 +1413,10 @@ function returnToPan(){
 // от её концов внутрь (палец редко начинает точно с кромки), и тогда рез идёт по всей хорде с запасом.
 // «Нарезано» — когда резов не меньше трёх и они двух направлений (2+2, принимается и 1+2): направление
 // считается от первого реза, «поперёк» — дальше CUT_FAMILY_DEG от него. К сетке резы не привязаны.
-const CUT_END_TOL = 0.15, CUT_OVER = 0.03, CUT_FAMILY_COS = Math.cos(35*Math.PI/180);
+// Срезанный уголок — не рез (ревью сборки 80: три штриха по углам на 20 % стороны давали «нарезано» у целого
+// роти). Хорда реза — не короче CUT_MIN_SPAN габарита роти ВДОЛЬ этого реза: поперёк и по диагонали через
+// середину — весь габарит, уголок в 20 % стороны — пятая часть.
+const CUT_END_TOL = 0.15, CUT_OVER = 0.03, CUT_FAMILY_COS = Math.cos(35*Math.PI/180), CUT_MIN_SPAN = 0.6;
 function cutAcross(a,b){
   const dx=b.x-a.x, dy=b.y-a.y, len=Math.hypot(dx,dy); if(len<.08) return null;
   const ux=dx/len, uy=dy/len, H=dish.hull || dishHull(); let t0=Infinity, t1=-Infinity;
@@ -1425,6 +1428,8 @@ function cutAcross(a,b){
     if(t<t0) t0=t; if(t>t1) t1=t;
   }
   const span=t1-t0; if(!(span>1e-6)) return null;
+  { let lo=Infinity, hi=-Infinity; for(const p of H){ const w=p.x*ux+p.y*uy; if(w<lo) lo=w; if(w>hi) hi=w; }
+    if(span<CUT_MIN_SPAN*(hi-lo)) return null; }                           // срезан уголок
   if(t0<-CUT_END_TOL*span || t1>len+CUT_END_TOL*span) return null;        // начат или кончен в глубине роти
   const f=Math.min(0,t0-CUT_OVER), e=Math.max(len,t1+CUT_OVER);
   return {a:{x:a.x+ux*f,y:a.y+uy*f}, b:{x:a.x+ux*e,y:a.y+uy*e}};
@@ -1764,7 +1769,9 @@ function beginDishGesture(id,p,client,time){
     // Рамка вечера: нарезанный роти берут за середину и уносят наверх, на стойку, — тем же переносом,
     // что и на таву. Рез после первого начинается у края или снаружи, не из середины.
     // Середина часто приходится на щель первого реза (u пуст) — она тоже середина.
-    if(cutEnough() && eveningOn() && cutMiddle(u ? u.p : start)){
+    // Ревью сборки 80: середина — ВСЕГДА перенос, при любом числе резов (рез из середины невозможен: он от
+    // края до края). Иначе снятый слишком рано роти с одним резом было не вернуть на таву, не дорезав.
+    if(eveningOn() && cutMiddle(u ? u.p : start)){
       dishGesture={id,start,end:start,client:at,samples,zone:"serve",t0,moved:false,carry:false}; return;
     }
     dishGesture={id,start:{x:start.x-o.x,y:start.y-o.y},end:{x:start.x-o.x,y:start.y-o.y},client:at,samples,cutShift:o};
@@ -1813,7 +1820,7 @@ function beginDishGesture(id,p,client,time){
   });
   const inward=inwards[0];
   dishGesture={id,start,end:start,anchor,inward,inwards,edge,preview:null,client:at,samples,moved:false,
-    zone:"edge",t0,onMat,press:null,latched:false,
+    zone:"edge",t0,onMat,press:null,latched:false,foldSide:openSideAt(start),
     stroke:{start:null,path:0,lastMoveT:t0,lastT:t0,pos:{x:at.x,y:at.y}}};
   audioScrape();                              // ответ инструмента: лопатка коснулась стали у края
 }
@@ -1834,6 +1841,9 @@ function openSideAt(q){
   }
   return best;
 }
+// Ревью сборки 80: то же — и из ПОЛОСЫ КРОМКИ открытой стороны (и с самой стали у неё, f > 1): там решал
+// прежний foldPlan, и штрих внутрь на 12–24 px не давал ничего, на 45 px — свободную складку («конверт 3 из 4»
+// на 149 с). Теперь у начатого конверта любой штрих внутрь длиннее мёртвой зоны от открытой стороны — её сгиб.
 // Палец пошёл: внутрь (экранный конус ±50° к оси стороны) — жест становится складкой этой стороны.
 function promoteToFold(g,client,t){
   const E=dish.env, k=g.foldSide, d=envSide(E,k), h=E.h[k];
@@ -1846,8 +1856,21 @@ function promoteToFold(g,client,t){
   g.forced={side:k,anchor:{x:base.x+d.x*h,y:base.y+d.y*h},target:base,d};
   g.zone="edge"; g.anchor=g.forced.anchor; g.inward={x:-d.x,y:-d.y}; g.inwards=[g.inward]; g.edge={dx:tv.x,dy:tv.y};
   g.press=null; g.latched=false; g.carryable=false; g.preview=null; g.onMat=true;
-  g.stroke={start:null,path:0,lastMoveT:g.t0,lastT:g.t0,pos:{x:g.client.x,y:g.client.y}};
+  if(!g.stroke) g.stroke={start:null,path:0,lastMoveT:g.t0,lastT:g.t0,pos:{x:g.client.x,y:g.client.y}};
   return true;
+}
+// Сгиб стороны оказался переносом (ревью сборки 80): палец от дальней открытой стороны прошёл весь роти и
+// вышел за противоположный край (FOLD_PAST её полуразмера дальше оболочки) или отпущен над столом — роти в руке.
+const FOLD_PAST = 0.15;
+function foldPassed(g){
+  const F=g.forced, E=dish.env; if(!F || !E || !dish.folds) return false;
+  let lo=Infinity; for(const p of dish.hull) lo=Math.min(lo,(p.x-E.c.x)*F.d.x+(p.y-E.c.y)*F.d.y);
+  return (g.end.x-E.c.x)*F.d.x+(g.end.y-E.c.y)*F.d.y < lo-FOLD_PAST*E.h[F.side];
+}
+function foldToCarry(g,t){
+  g.forced=null; g.plan=null; g.preview=null; g.target=null; g.zone="middle"; g.carryable=true; g.foldSide=-1;
+  g.carry=true; g.carryFrom={x:g.start.x,y:g.start.y}; g.carryAt=t; g.slide={x:g.end.x-g.start.x,y:g.end.y-g.start.y};
+  audioPeel(); dish.message=tip("table","неси на стол и отпусти");
 }
 // Сгиб стороны, пока палец всё ещё ушёл внутрь от места касания; вернулся назад — сгиба нет.
 function forcedFold(g){
@@ -1913,7 +1936,11 @@ function moveDishGesture(p,client,time){
     if(g.carry) g.slide={x:g.end.x-g.carryFrom.x,y:g.end.y-g.carryFrom.y};
     return;
   }
-  if(g.zone==="middle" && !g.carry && g.foldSide>=0 && g.moved && client && promoteToFold(g,client,t)) trackStroke(g,client,t);
+  if((g.zone==="middle" || g.zone==="edge") && !g.carry && g.foldSide>=0 && g.moved && client){
+    const mid=g.zone==="middle";
+    if(promoteToFold(g,client,t) && mid) trackStroke(g,client,t);
+  }
+  if(g.forced && foldPassed(g)) foldToCarry(g,t);
   if(g.zone==="middle"){
     // Сложенный роти взяли за середину и повели — он в руке и идёт за пальцем 1:1 (сборка 70).
     // Взять в руку — это повести сразу (первые CARRY_GRAB_MS); палец, который уже прижимал, должен
@@ -2029,6 +2056,7 @@ function endDishGesture(time){
   const g=dishGesture; dishGesture=null;
   const tUp=Number.isFinite(time) ? time : performance.now();
   releasePress(g);
+  if(g.forced && dish.folds && slideEndsOnTable(g.samples[g.samples.length-1])) foldToCarry(g,tUp);   // сгиб кончился над столом — это был перенос
   if(g.zone==="middle" && g.carry){
     // Отпустила роти из руки: над столом за бортом тавы — перелёт на стол (к нарезке), иначе обратно на таву.
     const last=g.samples[g.samples.length-1], extra=pressExtra(g,tUp);
@@ -2050,6 +2078,11 @@ function endDishGesture(time){
     const last=g.samples[g.samples.length-1];
     const f={speed:0,duration:tUp-g.t0,path:Math.hypot(last.x-g.client.x,last.y-g.client.y),stale:0};
     const over=g.carry && typeof eveningCounterHit==="function" && eveningCounterHit(last);
+    // Над тавой — снова жарится, при любом числе резов и вовсе без них. Над стойкой недорезанный не подаётся.
+    const lp=toLocal(last.x,last.y), enough=cutEnough();
+    if(over && !enough){
+      logPanGesture("serve-uncut",f,{zone:"serve",carry:true}); dishNote(dish.cuts.length ? "сначала дорежь" : "сначала разрежь"); return;
+    }
     // Гостья сырой роти не берёт (guest.js, сборка 78): он остаётся на столе, вечер его не считает.
     if(over && typeof guestRefuses==="function" && guestRefuses(last)){
       logPanGesture("serve-refused",f,{zone:"serve",carry:true}); dishNote("сырое — верни на таву"); return;
@@ -2057,12 +2090,11 @@ function endDishGesture(time){
     // Отпустила над тавой — роти снова жарится (ревью партии «жарка», 17.11: отказ гостьи был тупиком,
     // сырой роти шёл только на стойку и считался в «три роти»). Только в середину тавы: недонесённый до
     // стойки роти у борта остаётся на столе, как раньше.
-    const lp=toLocal(last.x,last.y);
     if(g.carry && !over && Math.hypot(lp.x-panC.x,lp.y-panC.y)<=PAN_R*PAN_BACK_R && returnToPan()){
       logPanGesture("pan-back",f,{zone:"serve",carry:true}); dishNote("снова на таве"); return;
     }
     if(over && serveDish()){ learn("serve"); logPanGesture("serve-carry",f,{zone:"serve",carry:true}); eveningServed(); }
-    else if(g.carry){ logPanGesture("serve-back",f,{zone:"serve",carry:true}); dishNote("неси дальше"); }
+    else if(g.carry){ logPanGesture("serve-back",f,{zone:"serve",carry:true}); dishNote(enough ? "неси дальше" : "режь от края до края"); }
     return;
   }
   if(g.zone==="middle"){
@@ -2073,10 +2105,6 @@ function endDishGesture(time){
     return;
   }
   if(dish.mode!=="fold"){
-    // Рамка вечера: ненарезанный роти повели из середины на стойку — это не рез, а «сначала разрежь».
-    if(!cutEnough() && eveningOn() && cutMiddle(g.start) && eveningCounterHit(g.samples[g.samples.length-1])){
-      dishNote(dish.cuts.length ? "сначала дорежь" : "сначала разрежь"); return;
-    }
     // Конец штриха в нарисованной щели продлевается до выхода из материала (там же, по направлению).
     let end=g.end;
     if(g.cutShift && !onMaterial(end)){
@@ -4896,6 +4924,7 @@ function meanDry(){
 
 let SLAP_GROW = 0.24;            // сторона маха длиннее, но растёт весь лист (19.10.2026: было 0.12)
 let lastSlapDir = null, sameSlapN = 0;
+const SAME_SLAP_COS = Math.cos(20*Math.PI/180);
 let TEAR_I = 3.4;                // с этой силы шлепок опасен…
 let TEAR_THIN = 0.10;            // …если лист уже истончился ниже этого
 const TEAR_PRESETS = {
@@ -4946,7 +4975,9 @@ function impactAction(){
   plasticStretch(action.impulse, action.direction, c);
   {
     const d = lastSlapDir ? lastSlapDir.x*action.direction.x + lastSlapDir.y*action.direction.y : 0;
-    sameSlapN = d > 0.55 ? sameSlapN+1 : 1;
+    // «Тот же край» — ближе SAME_SLAP_DEG к прошлому шлепку. Было 56,6° (d > 0,55): игрок шёл по кругу шагом
+    // 30–45° и читал «теперь другой край» (плейтест 17.11 п. 12, ревью сборки 80).
+    sameSlapN = d > SAME_SLAP_COS ? sameSlapN+1 : 1;
     lastSlapDir = { x:action.direction.x, y:action.direction.y };
   }
   // Дырка рождается из перестарательности: сильный шлепок по уже тонкому листу
@@ -6752,7 +6783,7 @@ function loop(now){
     : stepNo===1 ? flattenLiveWord()
     : stepNo===3 ? tip("carry","готово — за середину и на таву")
     : (st==="ARMED" && action.carryArm) ? ""
-    : st==="ARMED" ? tip("slap","держишь край — махни наружу")
+    : st==="ARMED" ? ((stepNo===2 && sameSlapN>=2) ? "теперь другой край — по кругу" : tip("slap","палец на край — и мах наружу"))   // та же строка, что до касания: не мигает на каждый тап (ревью сборки 80)
     : st==="PULLING" ? (action.pull && action.pull.cap<=0 ? "тут дотянуто — тяни другой край"
                                                           : tip("pull","тянешь — отпусти, останется"))
     : st!=="RESTING" ? ""
