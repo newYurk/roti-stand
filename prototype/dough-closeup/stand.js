@@ -4389,12 +4389,13 @@ function noteRelease(v){   // числа жеста для журнала: по 
 // ── Тяга: край идёт за пальцем по полю смещений; длины покоя пересчитываются на отпускании.
 // Физика на время тяги стоит (step): рост — функция пути пальца, а не времени удержания, поэтому
 // «липкой буксировки», снятой раньше, здесь нет. Сборка 81 (плейтест 77, п. 10): ПОКА ПАЛЕЦ
-// ДЕРЖИТ, край под пальцем идёт за ним — до предела разрыва: полоса между пальцем и листом
-// утончается (прозрачность из скина стола), у предела край дрожит на 2–3 px. Пунктир язык не
-// останавливает — его встречает отпускание: pullCommit возвращает узлы к пунктиру и только тогда
-// пересчитывает длины покоя («остаточное растяжение — при отпускании»). Предел разрыва —
-// физический: самая тонкая ячейка полосы не тоньше PULL_TEAR_T (двойной порог разрыва);
-// тяга не рвёт никогда — рвёт только шлепок (сборка 81, п. 9 спеки).
+// ДЕРЖИТ, край под пальцем идёт за ним без tanh-отставания — до PULL_KNEE·cap ровно 1:1, дальше
+// мягко к cap (пунктир × (1+PULL_OVER)) и не дальше предела разрыва; у предела край дрожит на
+// 2–3 px. Сборка 84: тесто пластичное — языка за пунктиром нет, расстановка зажата к пунктиру и
+// пока палец держит, и pullCommit фиксирует ровно держимую форму (сборка 83 переигрывала на
+// отпускании tanh-расстановку, и лист отскакивал на 10–134 px). Предел разрыва — физический:
+// самая тонкая ячейка полосы не тоньше PULL_TEAR_T (двойной порог разрыва; quadRest на коммите
+// не меняется — материал тот же, площадь больше); тяга не рвёт никогда — рвёт только шлепок.
 const PULL_SIGMA = 1.0;           // рад: угловая ширина поля тяги. 0,55 давало язык: соседи не шли, одни
                                   // тяги за углы строили звезду, а готовность требовала 16 тяг (ревью 17.11, P7)
 const PULL_OUT_COS = Math.cos(65*Math.PI/180);   // конус тяги уже конуса шлепка: вбок край не тащим
@@ -4405,6 +4406,7 @@ const PULL_FAST_BAND = 0.25;      // доля V_SLAP над порогом, за
 const PULL_MIN = 0.25;            // gs: короче — тесто возвращается
 const PULL_CAP_GS = 1.4, PULL_CAP_R = 0.55;   // предел хода: в gs и в радиусах листа
 const PULL_SLIP = 1.6;            // палец на столько пределов впереди — тяга фиксируется сама
+const PULL_KNEE = 0.8;            // доля cap, до которой край идёт за пальцем 1:1; дальше мягко к cap
 const PULL_BLOCK = 0.06;          // gs: меньше запаса до мишени — сторона дотянута
 const PULL_FAST_CAP = 0.40;       // gs: предел хода края под махом на пороге шлепка и быстрее
 const PULL_FLY_KEEP = 0.5;        // доля языка, остающаяся к удару (на main дуга хвата к удару держала ~0,6 подъёма)
@@ -4412,7 +4414,6 @@ const PULL_NUDGE = 0.10;          // gs: настолько упёршаяся �
 const PULL_TEAR_T = 0.032;        // предел разрыва тяги: тоньше этой толщины полосу не тянем. Замер (Node,
                                   // готовый лист): полоса при ходе 200 px — 0,033, при 244 px — 0,030; предел
                                   // встаёт на ~210 px. Уже тоньше пола полоса тянется ещё на 15 %, не намертво
-const PULL_TONGUE = 0.62;         // рад: язык тяги — секторы, свободные от пунктира, пока палец держит
 let pullN = 0;                    // зафиксированных тяг на этом листе (контур листа рисуется по кромке)
 // Ход края от скорости руки: полный до V_PULL_FULL, дальше падает до PULL_GAIN_FAST на пороге
 // шлепка и остаётся таким под быстрым махом. Гасить его под махом до нуля пробовали (17.11):
@@ -4447,9 +4448,7 @@ function pullBegin(){
   const ab = new Float32Array(N), rim = [];
   for(let i=0;i<N;i++) ab[i] = (Math.atan2(py[i]-tc.y, px[i]-tc.x) + Math.PI)/(2*Math.PI)*RIM_BINS - 0.5;
   for(const i of edgeNodes) if(!(conDeg && conDeg[i] <= 0) && w[i] > 0) rim.push(i);
-  // Сборка 81: полоса тяги — целые ячейки языка (по ним считается предел разрыва), и секторы языка
-  // (±PULL_TONGUE от направления хвата, с растушёвкой в два сектора): пока палец держит, они
-  // свободны от пунктира — край идёт за пальцем; остальная кромка зажата, как раньше.
+  // Сборка 81: полоса тяги — целые ячейки под пальцем (по ним считается предел разрыва).
   const strip = [];
   for(let q=0;q<quads.length;q++){
     if(quadCons[q].some(cc=>cc.broken)) continue;
@@ -4458,13 +4457,8 @@ function pullBegin(){
   }
   let thin0 = 1;
   for(const q of strip) thin0 = Math.min(thin0, quadRest ? quadRest[q]/Math.max(1e-6, area(quads[q])) : 1);
-  const tongue = new Float32Array(RIM_BINS), binW = 2*Math.PI/RIM_BINS;
-  for(let b=0;b<RIM_BINS;b++){
-    let d = Math.abs((b+0.5)*binW - Math.PI - th); d = Math.min(d, 2*Math.PI - d);
-    tongue[b] = d <= PULL_TONGUE ? 1 : Math.max(0, 1 - (d - PULL_TONGUE)/(2*binW));
-  }
   action.pull = { c, tc, rg, nx:gx/rg, ny:gy/rg, bx:Float32Array.from(px), by:Float32Array.from(py), w, ab, rim,
-    strip, tongue, thin0, e:0, raw:0, gain:1, fast:0, k:1, dx:0, dy:0, ux:gx/rg, uy:gy/rg, cap,
+    strip, thin0, e:0, raw:0, gain:1, fast:0, k:1, dx:0, dy:0, ux:gx/rg, uy:gy/rg, cap,
     limKin:0, atLimit:false, followed:false };
   action.state = "PULLING";
 }
@@ -4495,7 +4489,7 @@ function pullTo(p, gain, fast, follow){
   const P = action.pull; let dx = p.x-action.down.x, dy = p.y-action.down.y; const len = Math.hypot(dx,dy);
   if(gain != null) P.gain = gain;
   if(fast != null) P.fast = Math.max(0, Math.min(1, fast));
-  P.raw = len; P.dx = dx; P.dy = dy; P.lastP = { x:p.x, y:p.y };
+  P.raw = len; P.dx = dx; P.dy = dy;
   let e = 0, ux = P.nx, uy = P.ny;
   if(len > 1e-9 && (dx*P.nx + dy*P.ny)/len >= PULL_OUT_COS){
     // Край идёт по направлению пальца, но не дальше PULL_SKEW от радиуса хвата, а ход — проекция
@@ -4507,13 +4501,16 @@ function pullTo(p, gain, fast, follow){
     // упёршаяся сторона чуть подаётся и вернётся на отпускании; в длины покоя это не идёт
     let lim = P.cap > 0 ? P.cap : PULL_NUDGE*gestureScale;
     if(follow){
-      // Сборка 81: язык следует за пальцем до предела разрыва (не до пунктира и не до cap);
-      // пунктир и cap встречают язык на отпускании (pullCommit). Дотянутая сторона только подаётся.
+      // Сборка 84: край идёт за пальцем без отставания (без tanh), но не дальше cap (пунктир ×
+      // (1+PULL_OVER), соседи) и предела разрыва; расстановка зажата к пунктиру, как при коммите.
+      // То, что держит палец, и фиксируется на отпускании: тесто пластичное, отскока нет.
       const give = PULL_NUDGE*gestureScale;
-      const want = P.cap > 0 ? along*P.gain : Math.min(along*P.gain, give);
-      e = pullTearLimit(P, ux, uy, want);
+      // Колено PULL_KNEE: до него край идёт за пальцем 1:1, дальше мягко подходит к cap (жёсткий
+      // упор оставлял излом кромки у пунктира: edge G1, конверт — 11 острых вершин против 8).
+      const a = along*P.gain, top = P.cap > 0 ? P.cap : give, kn = PULL_KNEE*top;
+      const want = a <= kn ? a : kn + (top - kn)*Math.tanh((a - kn)/(top - kn));
+      e = P.cap > 0 ? pullTearLimit(P, ux, uy, want) : want;
       P.limKin = P.cap > 0 ? e : give;
-      P.atLimit = along*P.gain > P.limKin + 1;
       P.followed = true;
     } else {
       // Под махом быстрее порога шлепка язык короткий (PULL_FAST_CAP): длинный, отпущенный на подъёме,
@@ -4526,10 +4523,16 @@ function pullTo(p, gain, fast, follow){
   } else { P.limKin = P.cap > 0 ? Infinity : 0; P.atLimit = false; }
   P.e = P.cap > 0 ? e : 0;
   P.ux = ux; P.uy = uy;
-  pullPlace(P, ux, uy, e, follow && P.cap > 0);
+  pullPlace(P, ux, uy, e);
+  if(follow && P.cap > 0 && len > 1e-9){
+    // У предела (cap, разрыв или пунктир в секторе хвата) палец уходит вперёд края — край дрожит в рисунке.
+    const g = action.edgeNode, d = (px[g]-P.bx[g])*ux + (py[g]-P.by[g])*uy;
+    P.atLimit = Math.max(0, dx*ux + dy*uy)*P.gain - d > 0.03*gestureScale;
+  }
 }
-// Расстановка узлов тяги: секторные зажимы к пунктиру; follow=true освобождает секторы языка.
-function pullPlace(P, ux, uy, e, follow){
+// Расстановка узлов тяги: секторные зажимы к пунктиру. Сборка 84: языка за пунктиром нет и пока
+// палец держит — держимая форма и есть зафиксированная.
+function pullPlace(P, ux, uy, e){
   const dx = ux*e*P.k, dy = uy*e*P.k;
   // Ход зажат ПО УГЛУ: в каждом секторе кромка идёт наружу не дальше контура мишени × (1+PULL_OVER).
   // Запас считался только в точке хвата, и соседи уезжали за пунктир (ревью 17.11, P6: 1,21 мишени).
@@ -4557,10 +4560,6 @@ function pullPlace(P, ux, uy, e, follow){
     if(w > 0 && e > 0){
       const f = P.ab[i], b0 = Math.floor(f), t = f - b0, i0 = ((b0 % RIM_BINS) + RIM_BINS) % RIM_BINS;
       k = S2[i0] + (S2[(i0+1)%RIM_BINS] - S2[i0])*t;
-      if(follow){
-        const tf = Math.max(0, Math.min(1, P.tongue[i0] + (P.tongue[(i0+1)%RIM_BINS] - P.tongue[i0])*t));
-        k += (1-k)*tf;   // секторы языка идут за пальцем и через пунктир; к соседям — плавный переход
-      }
     }
     px[i] = P.bx[i] + dx*w*k; py[i] = P.by[i] + dy*w*k; prx[i]=px[i]; pry[i]=py[i]; vx[i]=0; vy[i]=0;
   }
@@ -4572,10 +4571,8 @@ function pullRestore(){
 }
 function pullCommit(){
   const P = action.pull;
-  // Тяга за пальцем — только пока палец держит. Коммит — прежняя расстановка (tanh, зажатая к
-  // пунктиру) для той же точки пальца: длины покоя от неё, иначе предел разрыва и язык за
-  // пунктиром коротили соседние секторы (серия 7008: 0,833 мишени; диагноз — runs/api-review/a-pull.md).
-  if(P && P.followed && P.lastP) pullTo(P.lastP, null, null, false);
+  // Сборка 84: коммит — та самая форма, что держал палец (зажатая к пунктиру, не дальше cap).
+  // Переигровка прежней tanh-расстановки на отпускании отбрасывала край на 10–134 px (живой замер).
   // Короткая тяга — по ходу ПАЛЬЦА, а не края: край отстаёт (резинка, коридор скоростей), и по
   // его ходу быстрая тяга у самого порога шлепка откатывалась бы целиком.
   if(!P || P.e <= 0 || P.raw < PULL_MIN*gestureScale){
