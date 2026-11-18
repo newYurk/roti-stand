@@ -260,14 +260,34 @@ function _flatPath(ctx, qs) {
 function _flatStroke(ctx, qs, tint, width, edge) {
   if (tint.edge) { ctx.strokeStyle = tint.edge; ctx.lineWidth = width + 2 * edge; _flatPath(ctx, qs); ctx.stroke(); }
   ctx.strokeStyle = tint.fill; ctx.lineWidth = width; _flatPath(ctx, qs); ctx.stroke();
+  if (tint.gloss) {             // блик сгущёнки: узкая светлая нить по верхней стороне струи
+    ctx.save(); ctx.translate(0, -width * 0.2);
+    ctx.strokeStyle = tint.gloss; ctx.lineWidth = Math.max(0.6, width * 0.28); _flatPath(ctx, qs); ctx.stroke();
+    ctx.restore();
+  }
+}
+// Сгущёнка в щели реза (tint.sag, сборка 92): нить не рвётся над щелью, а провисает в неё — от края одного куска
+// до края соседнего дугой вниз (щель ниже верха кусков), в тени щели темнее. Только между кусками: если концы
+// дальше SAG_MAX ширин струи — это не щель, а палец сходил с роти, там разрыв.
+const SAG_MAX = 6;
+function _sag(ctx, a, b, tint, width) {
+  const gap = Math.hypot(b.x - a.x, b.y - a.y);
+  if (gap < 0.5 || gap > SAG_MAX * width + 6) return false;
+  const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2 + Math.max(width * 1.2, gap * 0.7);
+  ctx.strokeStyle = tint.sag; ctx.lineWidth = Math.max(0.8, width * 0.75);
+  ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.quadraticCurveTo(mx, my, b.x, b.y); ctx.stroke();
+  return true;
+}
+function _flatSegments(ctx, segs, tint, width, edge) {
+  for (let i = 0; i < segs.length; i++) {
+    if (tint.sag && i > 0) { const a = segs[i - 1][segs[i - 1].length - 1], b = segs[i][0]; if (a && b) _sag(ctx, a, b, tint, width); }
+  }
+  for (const qs of segs) _flatStroke(ctx, qs, tint, width, edge);
 }
 function _strokeFlat(ctx, trail) {
   ctx.globalAlpha = 1;
-  const w = _flatWidth(trail.tint), edge = Math.max(1, w * 0.18);
-  for (const seg of _segments(trail.pts)) {
-    const qs = _thin(seg.map(p => _screen(p.x, p.y, p.face)), w / 2);
-    _flatStroke(ctx, qs, trail.tint, w, edge);
-  }
+  const w = _flatWidth(trail.tint), edge = Math.max(trail.tint.gloss ? 0.6 : 1, w * 0.18);
+  _flatSegments(ctx, _segments(trail.pts).map(seg => _thin(seg.map(p => _screen(p.x, p.y, p.face)), w / 2)), trail.tint, w, edge);
 }
 
 function _clipFace(ctx, face) {
@@ -410,7 +430,29 @@ function _fall(x, y, w) {
   });
 }
 
+// Сгущёнка (tint.zig, сборка 92; ревью сборки 89 п. 5: «ложится одной непрозрачной полосой, как зубная паста»):
+// из банки льют, покачивая рукой, — нить ложится за пальцем зигзагом поперёк хода. Палец ведёт середину зигзага;
+// размах и шаг — доли роти (pose.scale), направление хода сглажено, чтобы дрожь пальца не крутила зигзаг.
+function _zigStamp(trail, x, y, sp) {
+  const pose = typeof dishPose === "function" ? dishPose() : { scale: 80 };
+  const prev = trail._lastFinger;
+  trail._lastFinger = { x, y };
+  if (!prev) { trail._arc = 0; _stampOne(trail, x, y, sp); return; }
+  const dx = x - prev.x, dy = y - prev.y, dist = Math.hypot(dx, dy);
+  if (dist < 1e-9) return;
+  const d = trail._dir || { x: dx / dist, y: dy / dist };
+  const nx = d.x * 0.6 + dx / dist * 0.4, ny = d.y * 0.6 + dy / dist * 0.4, nl = Math.hypot(nx, ny) || 1;
+  trail._dir = { x: nx / nl, y: ny / nl };
+  const A = pose.scale * trail.tint.zig[0], P = pose.scale * trail.tint.zig[1];
+  const n = Math.min(40, Math.max(1, Math.ceil(dist / Math.max(1.5, pose.scale * 0.008))));
+  for (let i = 1; i <= n; i++) {
+    trail._arc += dist / n;
+    const z = A * Math.sin(trail._arc / P * Math.PI * 2);
+    _stampOne(trail, prev.x + dx * i / n - trail._dir.y * z, prev.y + dy * i / n + trail._dir.x * z, sp);
+  }
+}
 function _stamp(trail, x, y, sp) {
+  if (trail.tint && trail.tint.zig) { _zigStamp(trail, x, y, sp); return; }
   const prev = trail._lastTable;
   trail._lastTable = { x, y };
   if (prev) {
@@ -639,12 +681,16 @@ function drizzlePaint(g, screen, k) {
   g.save(); g.lineJoin = "round"; g.lineCap = "round";
   for (const trail of _trails) {
     g.strokeStyle = trail.tint ? trail.tint.fill : DRIZZLE_COLOR_FILL;
+    if (trail.tint) {
+      const lw = Math.max(trail.tint.thin ? 1.2 : 2, _flatBase(trail.tint) / Math.max(1e-6, pose.scale) * k);
+      _flatSegments(g, _segments(trail.pts).map(seg => _thin(seg.map(at), lw / 2)), trail.tint, lw, Math.max(0.6, lw * 0.18));
+      continue;
+    }
     for (const seg of _segments(trail.pts)) {
       let w = 0; for (const p of seg) w += p.w;
-      const lw = Math.max(trail.tint && trail.tint.thin ? 1.2 : 2, (trail.tint ? _flatBase(trail.tint) : w / seg.length * 1.6) / Math.max(1e-6, pose.scale) * k);
+      const lw = Math.max(2, w / seg.length * 1.6 / Math.max(1e-6, pose.scale) * k);
       g.lineWidth = lw;
-      const qs = trail.tint ? _thin(seg.map(at), lw / 2) : seg.map(at);
-      if (trail.tint) { _flatStroke(g, qs, trail.tint, lw, Math.max(0.6, lw * 0.18)); continue; }
+      const qs = seg.map(at);
       _flatPath(g, qs);
       g.stroke();
     }

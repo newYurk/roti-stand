@@ -11,7 +11,7 @@
 // до 400%+ и лист «рвётся» в середине от любого движения. Замер это обнаружил сразу.
 // Число узлов сохранено (1 060 после обрезки по кругу; прежняя оценка «~1150» была на глаз,
 // пересчитано 07.09.2026), однородность рёбер восстановлена.
-const BUILD = "2026-11-18 · доводка: ровная корка без заплаток, мягкая тень уголка, резы одной ширины; Сом показывает на роти · 90";
+const BUILD = "2026-11-18 · еда: банан горкой, яйцо с белком, маргарин разводом, сгущёнка из банки; доводка корки · 92";
 const GRID = 38;                   // 38x38, в круг попадает 1 060 узлов (посчитано, не оценка)
 let SUBSTEPS = 8;                  // T2: 8–10 подшагов, 1 итерация
 let DAMP = 0.986;
@@ -490,9 +490,13 @@ function addBananaSlice(x, y, opts){
   if(bananas.length>=BANANA_MAX) return false;
   if(!onMaterial({x,y})) return false;
   const b=dishBounds(), span=Math.min(b.right-b.left,b.bottom-b.top);
-  const slice=span*.05, rr=slice*(.88+Math.random()*.22);
+  // Сборка 92 (партия «еда»): кучка (banana.js) кладёт кружки разного размера внахлёст — opts.k задаёт размер,
+  // opts.heap разрешает нахлёст (центры не ближе 0,55 радиуса: кружок на кружке, а не стопка монет). Одиночный
+  // ломтик — как был: свой размер и зазор.
+  const slice=span*.05, rr=slice*(opts && opts.k>0 ? opts.k : .88+Math.random()*.22);
+  const near=opts && opts.heap ? .55 : 1.35;
   for(const f of bananas){
-    if(Math.hypot(f.x-x,f.y-y)<rr*1.35) return false;
+    if(Math.hypot(f.x-x,f.y-y)<rr*near) return false;
   }
   const ring=Array.from({length:12},(_,j)=>({x:x+Math.cos(j*Math.PI/6)*rr,y:y+Math.sin(j*Math.PI/6)*rr}));
   const added=[];
@@ -534,11 +538,7 @@ function addEgg(x, y, opts){
     if(Math.hypot(f.x-x,f.y-y)<rr*.48) return false;
   }
   const id=dish.filling.length ? dish.filling[dish.filling.length-1].id+1 : 0;
-  const ring=Array.from({length:14},(_,j)=>{
-    const a=j*Math.PI/7;
-    const wob=0.76+0.24*(0.5+0.5*Math.sin(j*1.7+id*0.9));
-    return {x:x+Math.cos(a)*rr*wob, y:y+Math.sin(a)*rr*wob};
-  });
+  const ring=fillingRing({kind:"egg",id,x,y,radius:rr});
   const added=[];
   for(const face of dish.faces){
     if(face.kind!=="dough") continue;
@@ -563,10 +563,12 @@ function addEgg(x, y, opts){
 window.addEgg = addEgg;
 window.canPlaceEgg = canPlaceEgg;
 function fillingRing(t){
-  const n=t.kind==="egg"?14:12, ring=[];
+  // Сборка 92: лужица яйца — 24 точки и плавный овал (было 14 точек с рваным «колебанием»: обрезка по рёбрам
+  // кольца всё равно выпуклая, и белок выходил гранёным многоугольником). Растекание неровное — от нахлёста лужиц.
+  const n=t.kind==="egg"?24:12, ring=[];
   for(let j=0;j<n;j++){
     const a=j*2*Math.PI/n;
-    const wob=t.kind==="egg" ? (0.76+0.24*(0.5+0.5*Math.sin(j*1.7+t.id*0.9))) : 1;
+    const wob=t.kind==="egg" ? (0.86+0.14*(0.5+0.5*Math.sin(2*a+t.id*0.9))) : 1;
     ring.push({x:t.x+Math.cos(a)*t.radius*wob, y:t.y+Math.sin(a)*t.radius*wob});
   }
   return ring;
@@ -879,8 +881,11 @@ const FAT_SPREAD = 1.1;                  // растекание: клеток²
 // резал ранние мазки, хотя пузырьки рисовались те же. CRISP_GAIN — хруст в секунду при шипении по всей кромке.
 let CRISP_GAIN = 3.6;
 const FIZZ_MIN = 0.06, FIZZ_STEP = 0.035, FIZZ_OUT = 0.04;   // порог жира у кромки; шаг точек вдоль кромки; проба чуть снаружи
-const BUTTER_MIN = 0.3, BUTTER_PER_STAMP = 0.001;   // мазок вдоль стороны роти снимает с куска 5–7 % (было ~2 % — убыль не читалась)
-let butterLeft = 1;                      // доля куска: 1 — целый; меньше BUTTER_MIN не тает (ресурсом он не стал)
+const BUTTER_MIN = 0.3, BUTTER_PER_STAMP = 0.0016;  // мазок вдоль стороны роти снимает с куска 8–11 % (сборка 92; было 5–7 % — убыль не читалась на кадрах)
+// Доля куска: 1 — целый. Кусок бесконечный (ресурсом он не стал): дотаял до BUTTER_MIN — после мазка рядом кладут
+// новый (butterRenew), без строки и звука. Сборка 92: раньше огрызок BUTTER_MIN так и лежал до конца вечера.
+let butterLeft = 1;
+function butterRenew(){ if(butterLeft<=BUTTER_MIN+1e-9) butterLeft=1; }
 let fatGesture = null, fatUnder = 0, dishCrisp = 0, smearSoundAt = 0;
 let fatCanvas = null, fatCtx = null, fatDrawnAt = 0, fatDirty = false;
 function butterSpot(){
@@ -953,10 +958,28 @@ function smearAt(q){
   butterLeft=Math.max(BUTTER_MIN,butterLeft-BUTTER_PER_STAMP);
   return true;
 }
+// След пальца (сборка 92, ревью сборки 89 п. 5: «блики читаются как пузыри воды или стеклянные капли, а не как
+// жир»). Там, где прошёл палец, на стали лежит плоский глянцевый развод: широкая мокрая полоса с бликом вдоль, она
+// тускнеет вместе с лужицей (FAT_TAU) и чуть расходится. Только картинка: жар, хруст и шипение по-прежнему
+// считает fatMap. Точки — координаты стола; {gap:true} — палец прошёл под роти (там жир не лёг).
+const FAT_STREAK_MAX = 400;
+let fatStreak = [], fatStreakEnd = null;
+function smearStreakPush(q,wrote){
+  const now=performance.now(), last=fatStreak[fatStreak.length-1];
+  if(!wrote){ if(last && !last.gap) fatStreak.push({gap:true}); return; }
+  fatStreak.push({x:q.x,y:q.y,t:now});
+  if(fatStreak.length>FAT_STREAK_MAX) fatStreak.splice(0,fatStreak.length-FAT_STREAK_MAX);
+}
 function smearStroke(a,b){
   const len=Math.hypot(b.x-a.x,b.y-a.y), n=Math.max(1,Math.ceil(len/(PAN_R*.03)));
   let wrote=false;
-  for(let k=1;k<=n;k++) wrote=smearAt({x:a.x+(b.x-a.x)*k/n,y:a.y+(b.y-a.y)*k/n})||wrote;
+  // новый мазок (палец не продолжает прежний) — разрыв в следе
+  if(fatStreakEnd!==a && fatStreak.length && !fatStreak[fatStreak.length-1].gap) fatStreak.push({gap:true});
+  fatStreakEnd=b;
+  for(let k=1;k<=n;k++){
+    const q={x:a.x+(b.x-a.x)*k/n,y:a.y+(b.y-a.y)*k/n}, w=smearAt(q);
+    smearStreakPush(q,w); wrote=w||wrote;
+  }
   if(wrote && performance.now()-smearSoundAt>120){ smearSoundAt=performance.now(); audioSmear(); }
 }
 let fatTmp = null;
@@ -976,7 +999,7 @@ function updateFat(dt){
   let max=0; const k=Math.exp(-dt/FAT_TAU);
   for(let i=0;i<fatMap.length;i++){ fatMap[i]=fatTmp[i]*k; if(fatMap[i]>max) max=fatMap[i]; }
   fatDirty=true;
-  if(max<.02){ fatMap=null; fatUnder=0; return; }
+  if(max<.02){ fatMap=null; fatUnder=0; fatStreak=[]; return; }
   // Хруст растёт, только пока роти жарится на таве (не в полёте, не под крышкой, не в руке).
   if(!dish || dish.mode!=="fold" || phase!=="PAN" || dishFlight || fryHold || (dishGesture && dishGesture.slide)) return;
   fatUnder=edgeFat();
@@ -2980,11 +3003,13 @@ function setTilt(t){     // рама с другой камерой; без ра
 // Мякоть ломтика и его бок (порция — один ломтик). Ярко-жёлтая горка читалась желтком (17.09).
 const FILL_COLORS = [[236,218,158],[232,213,150],[239,222,166]];
 const SECTION_FILL = [232,176,58];
+const BANANA_TILT = [0.12,0.32];   // наклон кружка в горке: подъём края — доля радиуса на экране (сборка 92)
 const BANANA_FLESH = [[253,234,156],[249,228,146],[254,239,170]], BANANA_RIM = "rgba(196,156,78,.5)", BANANA_SEED = "rgba(128,96,54,.45)";
-const EGG_COLORS = [[252,196,48],[255,210,62],[240,184,40]];
 const EGG_SECTION = [236,178,42];
 const EGG_RIM = "rgba(196,140,28,.55)";
 const EGG_GLOSS = "rgba(255,248,210,.38)";
+const EGG_WHITE_RGB = [250,248,236], EGG_WHITE_A = .46, EGG_WHITE = `rgba(${EGG_WHITE_RGB},${EGG_WHITE_A})`;   // белок: плёнка, сквозь неё видно тесто (сборка 92)
+const EGG_YOLK = [247,176,34], EGG_YOLK_RUN = "rgba(250,190,52,.55)";
 // Высота стопки под каждой гранью и верх материала на сетке 48×48. Грани идут снизу
 // вверх; грань поднимается на высоту того, что уже лежит под её центром. Кэш — по массиву
 // граней, как у торца: снимок геометрии неизменяем. zb/zt — настоящие миллиметры (карточка,
@@ -3243,7 +3268,7 @@ function drawDishFaces(g,faces,screen,H,zk,shadow=true,shift=null,noShadow=null)
   // треугольников: один общий путь из тысяч наложенных контуров растеризуется в разы дольше.
   const tone=(f,k)=>{
     let color=f.kind==="filling"
-      ? (f.fill==="egg" ? EGG_COLORS[Math.round(f.tone)%3] : FILL_COLORS[Math.round(f.tone)%3])
+      ? (f.fill==="egg" ? EGG_WHITE_RGB : FILL_COLORS[Math.round(f.tone)%3])
       : dishCrustColor(f);
     return k===1 ? color : color.map(c=>Math.min(255,c*k));
   };
@@ -3303,7 +3328,7 @@ function drawDishFaces(g,faces,screen,H,zk,shadow=true,shift=null,noShadow=null)
     const lit=H && !flat ? (turn && H.lightAtAngle ? H.lightAtAngle(k,turn) : H.lightAt(k)) : 1;
     ink=f.kind==="filling" ? 1 : Math.max(.88, lit);
     g.fillStyle=rgb(tone(f, ink));
-    g.globalAlpha=f.kind==="filling" ? 1
+    g.globalAlpha=f.kind==="filling" ? (f.fill==="egg" ? EGG_WHITE_A : 1)
       : H ? Math.min(.95,.72+doughMM(f.tone)*.3)*doughSet(f)
       : Math.max(.48,Math.min(.92,.48+doughMM(f.tone)*.3));
     if(H){ const hs=H.vert(k); top(k,m=>hs[m]*zk); } else top(k,()=>0);
@@ -3320,16 +3345,18 @@ function drawDishFaces(g,faces,screen,H,zk,shadow=true,shift=null,noShadow=null)
   }
   g.globalAlpha=1;
   for(const k of open){
+    if(faces[k].fill==="egg") continue;   // сборка 92: открытое яйцо — плёнка белка (drawEggFilm), без стенок и граней
     // бок ломтика — не выше его собственной толщины: на склоне он иначе стоял кексом до низа
     const f=faces[k], hs=H.vert(k), base=f.points.map((p,m)=>Math.max(Math.min(hs[m],H.atBase(p)),hs[m]-fillHeight(f,p)*FILL_VIS-.15));
     g.fillStyle=rgb(tone(f,.88));
     drawFaceWalls(g,f.points,faceScreen(f),hs,zk,base);
   }
-  for(const k of open) paint(k);
+  for(const k of open) if(faces[k].fill!=="egg") paint(k);
   g.globalAlpha=1; g.imageSmoothingEnabled=smooth;
   if(H && open.length){
     drawEggFilm(g,faces,open,screen,H,zk);
     drawBananaSlices(g,faces,open,screen,H,zk);
+    drawEggYolk(g,faces,open,screen,H,zk);
   }
 }
 // Ломтик поверх открытой порции (порция и есть ломтик): обрезка по её открытым граням и куску
@@ -3345,69 +3372,87 @@ function drawBananaSlices(g,faces,open,screen,H,zk){
     groups.get(gk).list.push(k);
   }
   for(const {f,list} of groups.values()){
+    // Сборка 92 (партия «еда»): кружок в горке лежит с наклоном — край, которым он лёг на соседа, выше.
+    // Наклон — от номера кружка (направление и 10–25°), в экранных px: подъём точки = tk·r·cos(угол к наклону).
+    // Обрезка по граням порции поднимается тем же наклоном, иначе приподнятый край срезало бы.
+    const hs0=Math.sin(f.source*12.9898+4.1)*43758.5453, hk=hs0-Math.floor(hs0);
+    const tAng=f.source*2.39996+.7, tk=BANANA_TILT[0]+(BANANA_TILT[1]-BANANA_TILT[0])*hk, td={x:Math.cos(tAng),y:Math.sin(tAng)};
+    const R=f.pr, c=f.pc, r=R*.97;
+    const e0=screen({x:c.x+r,y:c.y},f), e1=screen({x:c.x-r,y:c.y},f), rs=Math.hypot(e0.x-e1.x,e0.y-e1.y)/2;
+    const tz=p=>tk*rs*((p.x-c.x)*td.x+(p.y-c.y)*td.y)/r;
     g.save(); g.beginPath();
     for(const k of list){
       const ps=faces[k].points, hs=H.vert(k);
-      const p=screen(ps[0],faces[k]); g.moveTo(p.x,p.y-hs[0]*zk);
-      for(let m=1;m<ps.length;m++){ const q=screen(ps[m],faces[k]); g.lineTo(q.x,q.y-hs[m]*zk); }
+      const p=screen(ps[0],faces[k]); g.moveTo(p.x,p.y-hs[0]*zk-tz(ps[0]));
+      for(let m=1;m<ps.length;m++){ const q=screen(ps[m],faces[k]); g.lineTo(q.x,q.y-hs[m]*zk-tz(ps[m])); }
       g.closePath();
     }
     g.clip();
-    const R=f.pr, spots=[[0,0,.97,f.source]];
-    for(const [ox,oy,rk,j] of spots){
-      const c={x:f.pc.x+ox,y:f.pc.y+oy}, r=R*rk, lift=H.at(c)*zk;
-      const ring=[];
-      for(let j=0;j<14;j++){ const a=j*Math.PI/7; const q=screen({x:c.x+Math.cos(a)*r,y:c.y+Math.sin(a)*r},f); ring.push(q); }
-      g.beginPath(); g.moveTo(ring[0].x,ring[0].y-lift);
-      for(let j=1;j<ring.length;j++) g.lineTo(ring[j].x,ring[j].y-lift);
-      g.closePath();
-      g.strokeStyle=BANANA_RIM; g.lineWidth=Math.max(.5,Math.hypot(ring[0].x-ring[7].x,ring[0].y-ring[7].y)*.04);
-      g.fillStyle=rgb(BANANA_FLESH[(j+f.source)%3]); g.fill(); g.stroke();
-      // семечки: три тёмные точки треугольником у середины
-      g.fillStyle=BANANA_SEED;
-      for(let j=0;j<3;j++){
-        const a=(j*120+f.source*53)*Math.PI/180, q=screen({x:c.x+Math.cos(a)*r*.16,y:c.y+Math.sin(a)*r*.16},f);
-        const d=Math.max(.4,Math.hypot(ring[0].x-ring[7].x,ring[0].y-ring[7].y)*.026);
-        g.beginPath(); g.ellipse(q.x,q.y-lift,d,d*.7,0,0,Math.PI*2); g.fill();
-      }
+    const lift=H.at(c)*zk, ring=[];
+    for(let j=0;j<14;j++){ const a=j*Math.PI/7, m={x:c.x+Math.cos(a)*r,y:c.y+Math.sin(a)*r}, q=screen(m,f); ring.push({x:q.x,y:q.y-lift-tz(m)}); }
+    const path=dy=>{ g.beginPath(); g.moveTo(ring[0].x,ring[0].y+dy); for(let j=1;j<ring.length;j++) g.lineTo(ring[j].x,ring[j].y+dy); g.closePath(); };
+    const flesh=BANANA_FLESH[f.source%3], th=Math.max(.8,rs*.16);
+    // срез кружка: тот же контур ниже на толщину — светлая мякоть в тени, видна там, где кружок поднят
+    path(th); g.fillStyle=rgb(flesh.map(v=>Math.round(v*.78))); g.fill();
+    path(0); g.strokeStyle=BANANA_RIM; g.lineWidth=Math.max(.5,rs*.08);
+    g.fillStyle=rgb(flesh); g.fill(); g.stroke();
+    // семечки: три тёмные точки треугольником у середины
+    g.fillStyle=BANANA_SEED;
+    for(let j=0;j<3;j++){
+      const a=(j*120+f.source*53)*Math.PI/180, m={x:c.x+Math.cos(a)*r*.16,y:c.y+Math.sin(a)*r*.16}, q=screen(m,f);
+      const d=Math.max(.4,rs*.052);
+      g.beginPath(); g.ellipse(q.x,q.y-lift-tz(m),d,d*.7,0,0,Math.PI*2); g.fill();
     }
     g.restore();
   }
 }
-function drawEggFilm(g,faces,open,screen,H,zk){
+// Яйцо (сборка 92, ревью сборки 89 п. 5: «плоские жёлтые полигоны, белка нет»). Яйцо разбивают на кучку банана:
+// белок — полупрозрачная плёнка, растекается между кружками и чуть за кучку; желток один, на середине, лопнул и
+// подтёк. Лужицы — по-прежнему настоящая начинка (addEgg): конверт их прячет, на срезе жёлтая полоса. Белок
+// рисуется ПОД кружками банана (виден между ними) одной заливкой на все лужицы куска — иначе нахлёст лужиц темнел
+// ступеньками; желток — ПОВЕРХ кружков (drawEggYolk).
+function eggGroups(faces,open,screen){
   const groups=new Map();
   for(const k of open){
     const f=faces[k]; if(f.fill!=="egg" || !f.pc || !(f.pr>0)) continue;
     const probe=screen(f.points[0],f), bare=screen(f.points[0]);
-    const gk=f.source+"|"+f.turned+"|"+Math.round(probe.x-bare.x)+","+Math.round(probe.y-bare.y);
+    const gk=f.turned+"|"+Math.round(probe.x-bare.x)+","+Math.round(probe.y-bare.y);
     if(!groups.has(gk)) groups.set(gk,{f,list:[]});
     groups.get(gk).list.push(k);
   }
-  for(const {f,list} of groups.values()){
-    g.save(); g.beginPath();
-    for(const k of list){
-      const ps=faces[k].points, hs=H.vert(k);
-      const p=screen(ps[0],faces[k]); g.moveTo(p.x,p.y-hs[0]*zk);
-      for(let m=1;m<ps.length;m++){ const q=screen(ps[m],faces[k]); g.lineTo(q.x,q.y-hs[m]*zk); }
-      g.closePath();
-    }
-    g.clip();
-    const R=f.pr, c=f.pc, lift=H.at(c)*zk;
-    const ring=[];
-    for(let j=0;j<16;j++){
-      const a=j*Math.PI/8;
-      const wob=0.78+0.22*(0.5+0.5*Math.sin(j*1.7+f.source*0.9));
-      ring.push(screen({x:c.x+Math.cos(a)*R*wob,y:c.y+Math.sin(a)*R*wob},f));
-    }
-    g.beginPath(); g.moveTo(ring[0].x,ring[0].y-lift);
-    for(let j=1;j<ring.length;j++) g.lineTo(ring[j].x,ring[j].y-lift);
+  return groups;
+}
+function eggClip(g,faces,list,screen,H,zk){
+  g.beginPath();
+  for(const k of list){
+    const ps=faces[k].points, hs=H.vert(k);
+    const p=screen(ps[0],faces[k]); g.moveTo(p.x,p.y-hs[0]*zk);
+    for(let m=1;m<ps.length;m++){ const q=screen(ps[m],faces[k]); g.lineTo(q.x,q.y-hs[m]*zk); }
     g.closePath();
-    g.fillStyle=rgb(EGG_COLORS[f.source%3]); g.fill();
-    g.strokeStyle=EGG_RIM; g.lineWidth=Math.max(.6,Math.hypot(ring[0].x-ring[8].x,ring[0].y-ring[8].y)*.035);
-    g.stroke();
-    const hi=screen({x:c.x-R*.22,y:c.y-R*.28},f);
-    const d=Math.max(1.2,Math.hypot(ring[0].x-ring[8].x,ring[0].y-ring[8].y)*.18);
-    g.fillStyle=EGG_GLOSS; g.beginPath(); g.ellipse(hi.x,hi.y-lift,d,d*.55,-.4,0,Math.PI*2); g.fill();
+  }
+}
+function drawEggFilm(g,faces,open,screen,H,zk){
+  for(const {list} of eggGroups(faces,open,screen).values()){
+    // одна заливка на весь путь: лужица — это много кусочков граней листа, обводка рисовала бы их сетку
+    eggClip(g,faces,list,screen,H,zk);
+    g.fillStyle=EGG_WHITE; g.fill();
+  }
+}
+function drawEggYolk(g,faces,open,screen,H,zk){
+  let first=Infinity;
+  for(const f of dish && dish.filling || []) if(f.kind==="egg" && f.id<first) first=f.id;
+  for(const {list} of eggGroups(faces,open,screen).values()){
+    const fy=list.map(k=>faces[k]).find(f=>f.source===first); if(!fy) continue;
+    const c=fy.pc, R=fy.pr*.44, lift=H.at(c)*zk+zk*.6;
+    const at=(dx,dy)=>{ const q=screen({x:c.x+dx,y:c.y+dy},fy); return {x:q.x,y:q.y-lift}; };
+    const o=at(0,0), ex=at(R,0), ey=at(0,R), rx=Math.hypot(ex.x-o.x,ex.y-o.y), ry=Math.hypot(ey.x-o.x,ey.y-o.y);
+    g.save(); eggClip(g,faces,list,screen,H,zk); g.clip();
+    // подтёк лопнувшего желтка — в сторону от середины, полупрозрачный
+    const a=fy.source*1.7+.9, run=at(Math.cos(a)*R*1.5,Math.sin(a)*R*1.5);
+    g.fillStyle=EGG_YOLK_RUN; g.beginPath(); g.ellipse((o.x+run.x)/2,(o.y+run.y)/2,rx*1.45,ry*.95,Math.atan2(run.y-o.y,run.x-o.x),0,Math.PI*2); g.fill();
+    g.fillStyle=rgb(EGG_YOLK); g.beginPath(); g.ellipse(o.x,o.y,rx,ry,0,0,Math.PI*2); g.fill();
+    g.strokeStyle=EGG_RIM; g.lineWidth=Math.max(.6,rx*.08); g.stroke();
+    g.fillStyle=EGG_GLOSS; g.beginPath(); g.ellipse(o.x-rx*.32,o.y-ry*.38,rx*.34,ry*.2,-.3,0,Math.PI*2); g.fill();
     g.restore();
   }
 }
@@ -3560,15 +3605,21 @@ function drawLiftedEdge(g,screen,d,sx,sy){
 // Купол: светлая выпуклость с тенью и бликом, выше с ростом (условность: ×3 по высоте, как всё).
 function drawDomes(g,screen,H,zk){
   // Пологий купол того же теста: тень у подножия справа-снизу, чуть светлее верх, узкий блик.
+  // Сборка 92 (ревью сборки 89: «блики читаются как пузыри воды или стеклянные капли»): купол — цвет теста под
+  // ним (верхняя грань в этой точке), почти непрозрачный, блик мягкий. Было: полупрозрачный кремовый овал с белым
+  // бликом — на золотой корке он выглядел стеклянной каплей, и его принимали за маргарин.
   for(const d of domes){
+    let top=null;
+    for(let i=dish.faces.length-1;i>=0;i--){ const f=dish.faces[i]; if(f.kind==="dough" && pointInFace(f.points,d.x,d.y)){ top=f; break; } }
+    const col=top ? dishCrustColor(top) : [238,226,192];
     const c=screen(d), lift=H ? H.at(d)*zk : 0, up=(.6+1.6*d.grow)*zk*RELIEF_K;
     const e=screen({x:d.x+d.r,y:d.y}), f=screen({x:d.x,y:d.y+d.r});
     const rx=Math.hypot(e.x-c.x,e.y-c.y), ry=Math.hypot(f.x-c.x,f.y-c.y), y0=c.y-lift;
     g.fillStyle="rgba(60,38,16,.18)";
     g.beginPath(); g.ellipse(c.x+rx*.12,y0+ry*.18,rx*1.02,ry*1.02,0,0,Math.PI*2); g.fill();
-    g.fillStyle="rgba(238,226,192,.55)";
+    g.fillStyle=`rgba(${col.map(v=>Math.min(255,Math.round(v*1.05))).join(",")},.94)`;
     g.beginPath(); g.ellipse(c.x,y0-up*.5,rx*.96,ry*.96+up*.3,0,0,Math.PI*2); g.fill();
-    g.fillStyle="rgba(250,244,226,.4)";
+    g.fillStyle="rgba(255,244,214,.22)";
     g.beginPath(); g.ellipse(c.x-rx*.28,y0-up*.8-ry*.28,rx*.42,ry*.26,-.35,0,Math.PI*2); g.fill();
   }
 }
@@ -4228,7 +4279,7 @@ function build(){
   phase = "TABLE"; xf = null;
   dish = null; dishGesture = null; dishFlight = null; dishMove = null; dishTwist = null; dishPinch = null; dishSpread = 1; dishTouches.clear(); syncDishUI(); syncStepButtons();
   lastSlapDir = null; sameSlapN = 0; pullN = 0; resetCorners();
-  panPress = []; domes = []; fatMap = null; fatGesture = null;
+  panPress = []; domes = []; fatMap = null; fatGesture = null; fatStreak = [];
   { const card = document.getElementById("card"); if(card) card.hidden = true; }
   cook = new Float32Array(N); dry = new Float32Array(N);
   // Контакт с плитой пятнистый, а не идеальный: под листом микрозазоры, складки, плёнка
@@ -6643,7 +6694,7 @@ function onUp(id, cx, cy, t){
   dishTouches.delete(id);
   if(dishPinch && dishPinch.ids && dishPinch.ids.includes(id)) dishPinch=null;
   if(dishTwist && ((dishTwist.ids && dishTwist.ids.includes(id)) || dishTwist.id===id)){ endTwist(true); return; }
-  if(fatGesture && fatGesture.id===id){ fatGesture=null; return; }
+  if(fatGesture && fatGesture.id===id){ fatGesture=null; butterRenew(); return; }
   if(dishGesture && dishGesture.id===id){
     // touchend несёт последнюю точку: быстрый участок может прийти только в нём.
     const L=dishGesture.samples[dishGesture.samples.length-1];
@@ -6681,7 +6732,7 @@ function onCancel(id){
   // iOS может отменить касания, когда забирает жест двумя пальцами себе: поворот к этому моменту
   // уже сделан пальцами — фиксируем его, а не выбрасываем (отменить можно кнопкой).
   if(dishTwist && ((dishTwist.ids && dishTwist.ids.includes(id)) || dishTwist.id===id)){ twistDbg.cancels++; endTwist(dishTwist.input==="touch"); return; }
-  if(fatGesture && fatGesture.id===id){ fatGesture=null; return; }
+  if(fatGesture && fatGesture.id===id){ fatGesture=null; butterRenew(); return; }
   if(dishGesture && dishGesture.id===id){ releasePress(dishGesture); dishGesture=null; return; }
   if(action.two && (id===action.two.a.id || id===action.two.b.id)){ cancelCarry(); return; }
   if(action.pointerId !== id) return;
@@ -7518,6 +7569,30 @@ function drawFatAndButter(g, sx, sy){
     g.save(); g.imageSmoothingEnabled=true; g.imageSmoothingQuality="high"; g.globalCompositeOperation="lighter";
     g.drawImage(fatCanvas,c.x-rx,c.y-ry,rx*2,ry*2); g.restore();
   }
+  drawFatStreak(g,sx,sy);
+}
+// Развод маргарина по следу пальца: мокрая полоса (сталь под жиром темнее и теплее), по ней узкий блик. Ширина — кисть мазка (FAT_BRUSH), расходится с возрастом; тускнеет как лужица.
+function drawFatStreak(g,sx,sy){
+  if(!fatStreak.length) return;
+  const now=performance.now(), runs=[]; let cur=[];
+  for(const q of fatStreak){
+    if(q.gap){ if(cur.length) runs.push(cur); cur=[]; continue; }
+    if((now-q.t)/1000>FAT_TAU*2.2) continue;
+    cur.push(q);
+  }
+  if(cur.length) runs.push(cur);
+  if(!runs.length) return;
+  const W=FAT_BRUSH*PAN_R*1.5*sx;
+  g.save(); g.lineCap="round"; g.lineJoin="round";
+  for(const run of runs){
+    const age=(now-run[run.length-1].t)/1000, a=Math.exp(-age/FAT_TAU), w=W*(1+.35*Math.min(1,age/FAT_TAU));
+    const pts=run.map(q=>({x:prX(q.x,q.y)*sx,y:prY(q.x,q.y)*sy}));
+    const path=dy=>{ g.beginPath(); pts.forEach((p,i)=>i ? g.lineTo(p.x,p.y+dy) : g.moveTo(p.x,p.y+dy)); if(pts.length===1) g.lineTo(pts[0].x+.01,pts[0].y+dy); };
+    path(0); g.strokeStyle=`rgba(255,226,140,${(.28*a).toFixed(3)})`; g.lineWidth=w; g.stroke();          // жир: тёплая плёнка
+    path(0); g.strokeStyle=`rgba(30,20,6,${(.16*a).toFixed(3)})`; g.lineWidth=w*.7; g.stroke();           // мокрая сталь темнее
+    path(-w*.12); g.strokeStyle=`rgba(255,246,214,${(.42*a).toFixed(3)})`; g.lineWidth=Math.max(1,w*.1); g.stroke();   // блик
+  }
+  g.restore();
 }
 // Кусок маргарина рисуется ПОВЕРХ листа (то, что видно, то и берётся) и убывает с каждым мазком.
 function drawButterBlock(g, sx, sy){

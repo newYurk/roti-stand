@@ -272,7 +272,7 @@ test('P4', 'after «нарезано» the roti slides onto the paper tray by it
   return { summary: out.join(' · ') };
 });
 
-test('P5', 'the milk: a touch of the bottle takes it, a finger led over the roti lays a thin white stripe (0.7 of the jam, dark edge), the bottle goes back after one stripe; the stripe lies on the roti and goes up with the tray; a second touch of the bottle puts it back unused', () => {
+test('P5', 'the milk: a touch of the tin takes it, a finger led over the roti lays a thin creamy translucent stream with a highlight (0.5 of the jam, dark edge), the tin goes back after one stream; the stripe lies on the roti and goes up with the tray; a second touch of the tin puts it back unused', () => {
   const h = evening({ storage: saveMid(0, { sh: { bananas: 2 } }) });
   onPan(h); h.frames(3); const c = sheetMid(h); tap(h, c); tap(h, c); finish(h);
   const M = h.J('milkSpots()'); assert.equal(M.can, true);
@@ -280,9 +280,13 @@ test('P5', 'the milk: a touch of the bottle takes it, a finger led over the roti
   tap(h, M.at); assert.equal(h.run('milkArmed'), false, 'touched again: put back'); assert.equal(h.run('drizzleStrokes'), 0, 'no stripe from the bottle touches');
   tap(h, M.at); milkStroke(h); h.frames(3);
   assert.equal(h.run('drizzleStrokes'), 1, 'one stripe on the roti'); assert.equal(h.run('milkArmed'), false, 'the bottle went back after the stripe');
-  assert.equal(h.run('_trails[0].tint.milk'), true, 'the stripe is milk'); assert.equal(h.run('_trails[0].tint.fill.startsWith("rgba(255, 255")'), true, 'white');
-  assert.equal(typeof h.run('_trails[0].tint.edge'), 'string', 'with a dark edge under the white (build 85b)');
-  const wk = h.run('_flatWidth(_trails[0].tint)/_flatWidth(null)'); assert.ok(Math.abs(wk - 0.7) < 1e-6, `thinner than the jam (×${wk})`);
+  assert.equal(h.run('_trails[0].tint.milk'), true, 'the stripe is milk');
+  // build 92: creamy and translucent with a highlight (was opaque white, «like toothpaste»)
+  const fill = h.run('_trails[0].tint.fill').match(/[\d.]+/g).map(Number);
+  assert.ok(fill[0] > fill[2] + 20 && fill[3] < 0.95 && fill[3] > 0.5, `creamy, translucent (${h.run('_trails[0].tint.fill')})`);
+  assert.equal(typeof h.run('_trails[0].tint.gloss'), 'string', 'with a highlight');
+  assert.equal(typeof h.run('_trails[0].tint.edge'), 'string', 'with a dark edge (build 85b)');
+  const wk = h.run('_flatWidth(_trails[0].tint)/_flatWidth(null)'); assert.ok(Math.abs(wk - 0.5) < 1e-6, `thinner than the jam (×${wk})`);
   // the stripe goes with the tray: its points stay inside the drawn roti while the finger carries it up
   const inside = () => h.J(`(()=>{const p=dishShownPose(),pts=_trails[0].pts.filter(q=>q&&!q.break);
     const S=pts.map(q=>_screen(q.x,q.y,q.face)),H=dish.hull.map(q=>({x:prX(p.x+q.x*p.scale,p.y+q.y*p.scale),y:prY(p.x+q.x*p.scale,p.y+q.y*p.scale)}));
@@ -322,6 +326,45 @@ test('P5', 'the milk: a touch of the bottle takes it, a finger led over the roti
     along.push(`${w}: ${S.segs} pieces of stripe on ${S.pieces} pieces (${S.cols} columns), widest break ${S.gap.toFixed(1)} px, ${S.span.toFixed(0)} of ${(R.r.x - R.l.x).toFixed(0)} px`);
   }
   return { summary: `stripe ${before.n} points, ×${wk} of the jam width; went up ${(before.y - mid.y).toFixed(0)} px with the tray, inside the roti all the way; along the cut: ${along.join(' · ')}` };
+});
+
+test('P9', 'build 92 — the food looks like food: the heap is slices of different sizes overlapping, the egg has one yolk and a white past the heap, the milk tin is drawn (not the bottle), the milk stream lies as a zigzag across a straight finger and sags into the cut gaps (390×844, 375×667)', () => {
+  const out = [];
+  for (const [w, hh] of [[390, 844], [375, 667]]) {
+    const h = evening({ storage: saveMid(0, { sh: { bananas: 2 } }), w, hh });
+    onPan(h); h.frames(3); const c = sheetMid(h); tap(h, c);
+    const B = h.J(`(()=>{const F=dish.filling.filter(f=>(f.kind||"banana")==="banana");let ov=0;
+      for(let i=0;i<F.length;i++)for(let j=i+1;j<F.length;j++)if(Math.hypot(F[i].x-F[j].x,F[i].y-F[j].y)<F[i].radius+F[j].radius-1e-6)ov++;
+      const r=F.map(f=>f.radius);return {n:F.length,ov,rk:Math.max(...r)/Math.min(...r)}})()`);
+    assert.ok(B.ov >= 6, `${w}: slices overlap (${B.ov} overlapping pairs)`);
+    assert.ok(B.rk > 1.25, `${w}: of different sizes (largest/smallest ${B.rk.toFixed(2)})`);
+    tap(h, c);
+    const E = h.J(`(()=>{const F=dish.filling,B=F.filter(f=>(f.kind||"banana")==="banana"),E=F.filter(f=>f.kind==="egg");
+      const ext=(L,s)=>Math.max(...L.map(f=>s*(f.x+f.y)/Math.SQRT2+f.radius));
+      return {past:ext(E,1)>ext(B,1)&&ext(E,-1)>ext(B,-1)}})()`);
+    assert.ok(E.past, `${w}: the egg white runs a little past the heap`);
+    h.run('__yolk=0,__white=0;{const y=drawEggYolk;drawEggYolk=function(){__yolk++;return y.apply(this,arguments)};const f=drawEggFilm;drawEggFilm=function(){__white++;return f.apply(this,arguments)}}');
+    h.run('draw()'); assert.ok(h.run('__yolk') > 0 && h.run('__white') > 0, `${w}: the white and the yolk are drawn`);
+    finish(h);
+    h.run('drizzleDraw(cv.getContext("2d"))'); assert.equal(h.run('milkShown'), 'tin', `${w}: the milk is a tin standing by the tray`);
+    tap(h, h.J('milkSpots()').at);
+    h.run('drizzleDraw(cv.getContext("2d"))'); assert.equal(h.run('milkShown'), 'pour', `${w}: taken — the tin tilts to pour`);
+    const R = rotiBox(h), y = R.c.y + (R.b.y - R.c.y) * 0.3;
+    drive(h, line({ x: R.l.x + (R.c.x - R.l.x) * 0.2, y }, { x: R.r.x - (R.r.x - R.c.x) * 0.2, y }, { v: 260, hold: 60 }), { settle: 12 });
+    h.frames(3); assert.equal(h.run('drizzleStrokes'), 1);
+    // the stream against the straight finger line: it swings to both sides, more than once
+    const Z = h.J(`(()=>{const k=cv.getBoundingClientRect().height/cv.height,r=cv.getBoundingClientRect();
+      const S=_trails[0].pts.filter(q=>q&&!q.break).map(q=>{const s=_screen(q.x,q.y,q.face);return {x:r.left+s.x*k,y:r.top+s.y*k}});
+      const my=S.reduce((a,s)=>a+s.y,0)/S.length;let flips=0,prev=0,amp=0;
+      for(const s of S){const d=s.y-my;amp=Math.max(amp,Math.abs(d));const sg=Math.abs(d)>1?Math.sign(d):0;if(sg&&prev&&sg!==prev)flips++;if(sg)prev=sg}
+      return {flips,amp}})()`);
+    assert.ok(Z.flips >= 3 && Z.amp > 2.5, `${w}: a zigzag (${Z.flips} swings, ±${Z.amp.toFixed(1)} CSS px)`);
+    h.run('__sag=0;{const s=_sag;_sag=function(){const r=s.apply(this,arguments);if(r)__sag++;return r}}'); h.run('drizzleDraw(cv.getContext("2d"))');
+    assert.ok(h.run('__sag') >= 1, `${w}: it sags into the cut gap it crossed (${h.run('__sag')} per frame)`);
+    assert.equal(h.run('loopErrs'), 0); assert.deepEqual(h.errors, []);
+    out.push(`${w}: ${B.n} slices, ${B.ov} overlaps, sizes ×${B.rk.toFixed(2)}; zigzag ${Z.flips} swings ±${Z.amp.toFixed(1)} px; sags ${h.run('__sag')}`);
+  }
+  return { summary: out.join(' · ') };
 });
 
 test('P6', 'the roti in the hand is drawn at 60 % and hangs 40 px above the finger; the release is judged by the finger: roti over the counter but finger below it — not served; finger over the counter — served (390×844, 375×667)', () => {
