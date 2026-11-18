@@ -4138,7 +4138,7 @@ function pullTo(p, gain, fast, follow){
   const P = action.pull; let dx = p.x-action.down.x, dy = p.y-action.down.y; const len = Math.hypot(dx,dy);
   if(gain != null) P.gain = gain;
   if(fast != null) P.fast = Math.max(0, Math.min(1, fast));
-  P.raw = len; P.dx = dx; P.dy = dy;
+  P.raw = len; P.dx = dx; P.dy = dy; P.lastP = { x:p.x, y:p.y };
   let e = 0, ux = P.nx, uy = P.ny;
   if(len > 1e-9 && (dx*P.nx + dy*P.ny)/len >= PULL_OUT_COS){
     // Край идёт по направлению пальца, но не дальше PULL_SKEW от радиуса хвата, а ход — проекция
@@ -4215,18 +4215,16 @@ function pullRestore(){
 }
 function pullCommit(){
   const P = action.pull;
+  // Тяга за пальцем — только пока палец держит. Коммит — прежняя расстановка (tanh, зажатая к
+  // пунктиру) для той же точки пальца: длины покоя от неё, иначе предел разрыва и язык за
+  // пунктиром коротили соседние секторы (серия 7008: 0,833 мишени; диагноз — runs/api-review/a-pull.md).
+  if(P && P.followed && P.lastP) pullTo(P.lastP, null, null, false);
   // Короткая тяга — по ходу ПАЛЬЦА, а не края: край отстаёт (резинка, коридор скоростей), и по
   // его ходу быстрая тяга у самого порога шлепка откатывалась бы целиком.
   if(!P || P.e <= 0 || P.raw < PULL_MIN*gestureScale){
     const blocked = !!P && P.cap <= 0 && P.raw > 0;
     pullRestore(); lastDecision = blocked ? "сторона дотянута — тяни, где до пунктира далеко" : "тяга коротка";
     clearAction(); return;
-  }
-  // Сборка 81: язык мог уйти за пальцем за пунктир — коммит возвращает его к пунктиру: узлы
-  // встают с общими зажимами и ходом не дальше cap; остаточное растяжение — в длинах покоя.
-  if(P.followed && P.cap > 0 && P.e > P.cap){
-    pullPlace(P, P.ux, P.uy, P.cap, false);
-    P.e = P.cap;
   }
   for(const cc of cons){ if(cc.broken) continue;
     const o = Math.hypot(P.bx[cc.a]-P.bx[cc.b], P.by[cc.a]-P.by[cc.b]), n = Math.hypot(px[cc.a]-px[cc.b], py[cc.a]-py[cc.b]);
