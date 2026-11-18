@@ -11,7 +11,7 @@
 // до 400%+ и лист «рвётся» в середине от любого движения. Замер это обнаружил сразу.
 // Число узлов сохранено (1 060 после обрезки по кругу; прежняя оценка «~1150» была на глаз,
 // пересчитано 07.09.2026), однородность рёбер восстановлена.
-const BUILD = "2026-11-18 · строки не спорят с Сом, уголок показывает изнанку, конверт тоньше; еда; доводка · 93";
+const BUILD = "2026-11-18 · лист без заплат у дыр, гладкий, белок молочный · 94";
 const GRID = 38;                   // 38x38, в круг попадает 1 060 узлов (посчитано, не оценка)
 let SUBSTEPS = 8;                  // T2: 8–10 подшагов, 1 итерация
 let DAMP = 0.986;
@@ -3022,7 +3022,9 @@ const BANANA_FLESH = [[253,234,156],[249,228,146],[254,239,170]], BANANA_RIM = "
 const EGG_SECTION = [236,178,42];
 const EGG_RIM = "rgba(196,140,28,.55)";
 const EGG_GLOSS = "rgba(255,248,210,.38)";
-const EGG_WHITE_RGB = [250,248,236], EGG_WHITE_A = .46, EGG_WHITE = `rgba(${EGG_WHITE_RGB},${EGG_WHITE_A})`;   // белок: плёнка, сквозь неё видно тесто (сборка 92)
+// белок: плёнка, сквозь неё видно тесто (сборка 92). Сборка 94: молочный, не серый — чистый белый на 0,46 поверх
+// бежевого теста давал холодный серо-голубой (ревью 18.11, кадр d); тёплее и плотнее — сливочная плёнка.
+const EGG_WHITE_RGB = [255,249,232], EGG_WHITE_A = .7, EGG_WHITE = `rgba(${EGG_WHITE_RGB},${EGG_WHITE_A})`;
 const EGG_YOLK = [247,176,34], EGG_YOLK_RUN = "rgba(250,190,52,.55)";
 // Высота стопки под каждой гранью и верх материала на сетке 48×48. Грани идут снизу
 // вверх; грань поднимается на высоту того, что уже лежит под её центром. Кэш — по массиву
@@ -3259,13 +3261,41 @@ function envelopeSurface(H,faces){
 }
 // Боковая стенка грани: четырёхугольник между точками на высоте base и на высоте вершины.
 // Рисуется до верхов — внутри конверта стенки закрывает поверхность, остаётся только край.
-function drawFaceWalls(g,ps,screen,hs,zk,base){
+function drawFaceWalls(g,ps,screen,hs,zk,base,open){
   for(let k=0;k<ps.length;k++){
+    if(open && !open[k]) continue;
     const m=(k+1)%ps.length, a=screen(ps[k]), b=screen(ps[m]);
     const ha=hs[k]*zk, hb=hs[m]*zk, la=base ? base[k]*zk : 0, lb=base ? base[m]*zk : 0;
     if(ha-la<.2/RELIEF_K && hb-lb<.2/RELIEF_K) continue;   // порог — доля прежней высоты, иначе бока тонкого пропадают
     g.beginPath(); g.moveTo(a.x,a.y-la); g.lineTo(b.x,b.y-lb); g.lineTo(b.x,b.y-hb); g.lineTo(a.x,a.y-ha); g.closePath(); g.fill();
   }
+}
+// Сборка 94 (ревью 18.11, кадры c, d): стенка кромки рисовалась по ВСЕМ сторонам грани кромки, в том числе по
+// общим с соседней гранью и по дальним, отвёрнутым от глаза. Верх сырого листа полупрозрачный — и сквозь него
+// светились треугольные «заплаты» вокруг дыр и «пила» вдоль кромки. Стенка нужна только на открытой стороне
+// (её не делит другая грань теста) и только если сторона смотрит к зрителю (внешняя нормаль — вниз по экрану).
+const faceEdgeUse = new WeakMap();
+function wallEdgesOpen(faces,i,screen){
+  let use=faceEdgeUse.get(faces);
+  const ek=(p,q)=>{ const a=p.x.toFixed(4)+","+p.y.toFixed(4), b=q.x.toFixed(4)+","+q.y.toFixed(4); return a<b ? a+"|"+b : b+"|"+a; };
+  if(!use || use.n!==faces.length){
+    use={n:faces.length,map:new Map(),shared:new WeakMap()};   // стороны считаются раз на набор граней
+    for(const f of faces){ if(f.kind!=="dough") continue; const ps=f.points;
+      for(let k=0;k<ps.length;k++){ const key=ek(ps[k],ps[(k+1)%ps.length]); use.map.set(key,(use.map.get(key)||0)+1); } }
+    faceEdgeUse.set(faces,use);
+  }
+  const ps=faces[i].points, n=ps.length, sp=ps.map(p=>screen(p));
+  let sh=use.shared.get(faces[i]);
+  if(!sh){ sh=ps.map((p,k)=>(use.map.get(ek(p,ps[(k+1)%n]))||0)>1); use.shared.set(faces[i],sh); }
+  let cx=0, cy=0; for(const q of sp){ cx+=q.x; cy+=q.y; } cx/=n; cy/=n;
+  const open=new Array(n);
+  for(let k=0;k<n;k++){
+    const m=(k+1)%n;
+    if(sh[k]){ open[k]=false; continue; }
+    const a=sp[k], b=sp[m], ny=b.x-a.x, nx=-(b.y-a.y), side=nx*(cx-a.x)+ny*(cy-a.y);
+    open[k]=(side<0 ? ny : -ny)>0;               // внешняя нормаль смотрит вниз по экрану — к зрителю
+  }
+  return open;
 }
 // Сырой лист на таве полупрозрачный (сквозь него темнеет сталь) и за 2–3 с схватывается — становится
 // матовым: доля SET_RAW…1 растёт с сушкой стороны на стали до SET_DRY (сборка 78; раньше лист на таве
@@ -3323,17 +3353,18 @@ function drawDishFaces(g,faces,screen,H,zk,shadow=true,shift=null,noShadow=null)
     for(let i=0;i<faces.length;i++){
       if(faces[i].kind!=="dough" || !H.rim(i) || Math.max(...H.vert(i))<WALL_MIN_MM) continue;
       g.fillStyle=rgb(tone(faces[i],.66));
-      drawFaceWalls(g,faces[i].points,faceScreen(faces[i]),H.vert(i),zk);
-      if(H.zb[i]<=.3 && dish && dish.thermal) crust.push(i);
+      const open=wallEdgesOpen(faces,i,faceScreen(faces[i]));
+      drawFaceWalls(g,faces[i].points,faceScreen(faces[i]),H.vert(i),zk,undefined,open);
+      if(H.zb[i]<=.3 && dish && dish.thermal) crust.push([i,open]);
     }
     // Корочка низа по краю: нижняя полоса стенки — цвет стороны на стали. Так жарку снизу видно
     // сверху, как продавец смотрит на кромку (владелица 17.09: «держала долго — ничего не поджарилось»).
-    for(const i of crust){
+    for(const [i,open] of crust){
       const f=faces[i], hs=H.vert(i), band=hs.map(h=>Math.min(h,Math.max(2.2/Math.max(zk,1e-6),.55*h)));
       // Сборка 91 (ревью 18.11, п. 3): полоса — в тени стенки (×WALL_CRUST_K), иначе сырой низ светлее верха
       // и читался белым основанием «книги»; цвет стороны на стали в ней остаётся.
       g.fillStyle=rgb(dishCookColor(f,f.turned ? 1 : 0,false).map(v=>v*WALL_CRUST_K));
-      drawFaceWalls(g,f.points,faceScreen(f),band,zk);
+      drawFaceWalls(g,f.points,faceScreen(f),band,zk,undefined,open);
     }
   }
   // Прозрачность накладывает настоящие слои друг на друга, а не смешивает каждый слой с
@@ -7261,6 +7292,80 @@ function drawRimRoll(g, Pnt, sx){
   g.strokeStyle = RIM_ROLL; g.lineWidth = 2*w; g.stroke();
   g.restore(); return true;
 }
+// ─── Лист без граней и заплат (сборка 94, ревью 18.11, кадр c) ───
+// Ячейки листа одного цвета на ячейку давали полосы-грани растяжения, а у дыр рваный край рисовался
+// «толще» (+0,28) — непрозрачные светлые прямоугольники вокруг каждой дыры. Теперь целые ячейки
+// рисуются в отдельный слой (половинное разрешение), слой ложится на стол с размытием в полшага сетки
+// и обрезается по нарисованной кромке (rimLoop). Чтобы размытие не разбавляло край прозрачностью,
+// снаружи кромки и в дырах слой подбит средним цветом листа. Только рисунок: толщина, физика, разрыв
+// не трогаются. Без ctx.filter (старый Safari) слой рисуется в 1/8 и растягивается сглаживанием.
+let softCv = null, softG = null;
+function sheetCellPx(sx){ return Math.max(R0, sheetRadius())*2/(GRID-1)*sx; }   // шаг сетки на экране
+function drawSheetSoft(g, Pnt, Hmap, sx, bodyC, bodyR2, W, H){
+  const L = rimLoop; if(!L || L.length < 8) return false;
+  const hasFilter = typeof g.filter === "string", k = hasFilter ? 0.5 : 0.125;
+  const cw = Math.max(1, Math.ceil(W*k)), ch = Math.max(1, Math.ceil(H*k));
+  if(!softCv){ softCv = document.createElement("canvas"); softG = softCv.getContext("2d"); }
+  if(softCv.width !== cw || softCv.height !== ch){ softCv.width = cw; softCv.height = ch; }
+  const s = softG, blur = sheetCellPx(sx)*0.55;
+  s.setTransform(1,0,0,1,0,0); s.clearRect(0, 0, cw, ch); s.setTransform(k,0,0,k,0,0);
+  let st = 0, sn = 0;
+  for(let i=0;i<N;i++){ if(conDeg && conDeg[i] <= 0) continue; st += Hmap[i]; sn++; }
+  const pad = tableSkin(sn ? st/sn : 0.72, 1), padHole = tableSkin(sn ? st/sn : 0.72, 0);   // у дыры — без светлой кромки
+  const outline = (c)=>{ c.beginPath(); for(let j=0;j<L.length;j++){ const p = Pnt(L[j]); j ? c.lineTo(p.x,p.y) : c.moveTo(p.x,p.y); } c.closePath(); };
+  const inBody = (i)=> (px[i]-bodyC.x)**2 + (py[i]-bodyC.y)**2 < bodyR2;
+  for(let q=0;q<quads.length;q++){
+    const qc = quadCons[q], [a,b2,c,d] = quads[q];
+    const torn = qc[0].broken || (qc[1]&&qc[1].broken) || (qc[2]&&qc[2].broken) || (qc[3]&&qc[3].broken);
+    if(torn){
+      if(!(inBody(a) && inBody(b2) && inBody(c) && inBody(d))) continue;   // выеденный край: теста нет и в слое
+      s.fillStyle = padHole;                            // дыра в слое закрыта: её рисуем поверх чётко
+    } else s.fillStyle = tableSkin((Hmap[a]+Hmap[b2]+Hmap[c]+Hmap[d])/4, rimEdgeQ ? rimEdgeQ[q] : 0);
+    const Pa=Pnt(a), Pb=Pnt(b2), Pc=Pnt(c), Pd=Pnt(d);
+    s.beginPath(); s.moveTo(Pa.x,Pa.y); s.lineTo(Pb.x,Pb.y); s.lineTo(Pc.x,Pc.y); s.lineTo(Pd.x,Pd.y); s.closePath(); s.fill();
+  }
+  // подбивка снаружи кромки — только вне листа (evenodd), чтобы внутри альфа не складывалась
+  s.save(); outline(s); s.rect(-W, -H, 3*W, 3*H); s.clip("evenodd");
+  outline(s); s.lineJoin = "round"; s.strokeStyle = pad; s.lineWidth = blur*4; s.stroke();
+  s.restore();
+  g.save(); outline(g); g.clip();
+  if(hasFilter) g.filter = `blur(${blur.toFixed(1)}px)`;
+  g.drawImage(softCv, 0, 0, cw, ch, 0, 0, cw/k, ch/k);
+  g.restore();
+  return true;
+}
+// Кромка дыры (сборка 94): рваная ломаная по цепочкам buildHoleChains — между узлами по две точки,
+// сдвинутые поперёк на постоянный для узла шум, — и полупрозрачная плёнка теста по ней: тонкое тесто
+// у разрыва просвечивает, а не скатывается в светлый валик.
+function drawHoleRims(g, Pnt, sx, bodyC, bodyR2){
+  if(holeVer !== brokenCount()) buildHoleChains();
+  if(!holeChains || !holeChains.length) return;
+  const cell = sheetCellPx(sx);
+  const nz = (a, b)=>{ const v = Math.sin(a*12.9898 + b*78.233)*43758.5453; return v - Math.floor(v) - 0.5; };
+  const inBody = (i)=> (px[i]-bodyC.x)**2 + (py[i]-bodyC.y)**2 < bodyR2;
+  const pc = DOUGH_PALE.join(","), pw = DOUGH.join(",");   // плёнка над тёмной дырой — тёплая, не серая
+  g.save(); g.lineJoin = "round"; g.lineCap = "round";
+  for(const { nodes, cyclic } of holeChains){
+    const n = nodes.length, segs = cyclic ? n : n-1, P = [];
+    for(let i=0;i<segs;i++){
+      const ia = nodes[i], ib = nodes[(i+1)%n], A = Pnt(ia), B = Pnt(ib);
+      const dx = B.x-A.x, dy = B.y-A.y, l = Math.hypot(dx, dy) || 1, nx = -dy/l, ny = dx/l;
+      P.push(A);
+      for(const f of [1/3, 2/3]){
+        const o = nz(ia + f, ib)*cell*0.45;
+        P.push({ x:A.x+dx*f+nx*o, y:A.y+dy*f+ny*o });
+      }
+      if(!cyclic && i === segs-1) P.push(B);
+    }
+    if(P.length < 3) continue;
+    const path = ()=>{ g.beginPath(); g.moveTo(P[0].x, P[0].y); for(let i=1;i<P.length;i++) g.lineTo(P[i].x, P[i].y); if(cyclic) g.closePath(); };
+    if(cyclic && nodes.every(inBody)){ path(); g.fillStyle = "#100a06"; g.fill(); }   // зубцы дыры наружу
+    path();
+    g.strokeStyle = `rgba(${pw},0.3)`; g.lineWidth = cell*0.5; g.stroke();
+    g.strokeStyle = `rgba(${pc},0.5)`; g.lineWidth = Math.max(1, cell*0.14); g.stroke();
+  }
+  g.restore();
+}
 function pathSheetOutline(g, sx, ox, sy, oy, extraY){
   const c = centerOfSheet();
   const bins = 28;
@@ -7400,6 +7505,9 @@ function draw(){
                 r0*1.03*sx, r0*1.04*TILT*sy, 0, 0, Math.PI*2);
       g.fill();
     }
+    // Сборка 94: целый лист на столе — одним размытым слоем (drawSheetSoft), без граней ячеек и без
+    // «заплат» у дыр; дыры поверх него — тёмные ячейки и рваная кромка (drawHoleRims).
+    const softSheet = !onPan && !pixelated && !(sheetLooksDisc() && !xf) && drawSheetSoft(g, Pnt, Hmap, sx, bodyC, bodyR2, W, H);
     if(!(sheetLooksDisc() && !onPan && !xf))
     for(let q=0;q<quads.length;q++){
       const qc = quadCons[q];
@@ -7416,6 +7524,7 @@ function draw(){
         // Сквозная дыра — тень ПОД листом, темнее и стола, и любого тонкого теста.
         g.fillStyle = onPan ? "#1c1712" : "#100a06";
       } else {
+        if(softSheet) continue;                        // целые ячейки уже в мягком слое
         // Тонкий, но целый лист остаётся видимым. Дыру задают разорванные связи:
         // отдельный визуальный порог создавал исчезающие дырки без разрыва (#94).
         // Рваный край собирается толще — у настоящего теста кромка разрыва скатывается.
@@ -7437,6 +7546,7 @@ function draw(){
       g.lineTo(Pd.x, Pd.y);
       g.closePath(); g.fill();
     }
+    if(softSheet) drawHoleRims(g, Pnt, sx, bodyC, bodyR2);
     if(!onPan && !xf && stepNo >= 2) drawRimRoll(g, Pnt, sx);   // сборка 88: валик кромки на всех шагах растяжки
     drawCornerFlash(g, sx, sy);
     // дуга хвата и палец видны только пока жест взводится: ARMED подсвечивает
@@ -7545,6 +7655,9 @@ function drawStretchTarget(g, sx, sy){
   const arc = (a0, a1, n, k)=>{ g.beginPath(); for(let i=0;i<=n;i++){ const p = at(a0 + (a1-a0)*i/n, k); if(i) g.lineTo(p.x,p.y); else g.moveTo(p.x,p.y); } g.stroke(); };
   arc(0, Math.PI*2, 96);
   g.setLineDash([]);
+  // Сборка 94 (ревью 18.11, кадр c): у готового листа эти дуги читались оранжевой рамкой выделения.
+  // Они нужны, пока углы дотягиваются (шаг 2); на шаге 3 жест уже другой — нести на таву.
+  if(stepNo >= 3) return;
   for(let k=0;k<4;k++){
     if(!cornerDone[k]) continue;
     const th = cornerAngle(k);
