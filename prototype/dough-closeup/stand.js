@@ -11,7 +11,7 @@
 // до 400%+ и лист «рвётся» в середине от любого движения. Замер это обнаружил сразу.
 // Число узлов сохранено (1 060 после обрезки по кругу; прежняя оценка «~1150» была на глаз,
 // пересчитано 07.09.2026), однородность рёбер восстановлена.
-const BUILD = "2026-11-18 · Сом стучит костяшками, маргарин виден, уголок без кольца, сгущёнка щедрее; лист без заплат · 95";
+const BUILD = "2026-11-18 · яйцо одной лужицей, дыры насквозь · 96";
 const GRID = 38;                   // 38x38, в круг попадает 1 060 узлов (посчитано, не оценка)
 let SUBSTEPS = 8;                  // T2: 8–10 подшагов, 1 итерация
 let DAMP = 0.986;
@@ -445,6 +445,19 @@ function startDish(){
   dish.seed=crustSeedNow();   // узор пятен — от номера роти (сборка 86)
   fryStageNow = 0; fryJumpAt = 0;
   dish.holes=quadCons.filter(cs=>cs.some(c=>c.broken)).length;   // рваные ячейки листа при посадке
+  // Сборка 96: рваные ячейки и замкнутые петли дыр — в координатах блюда, для рисунка открытого листа на таве
+  // (clipOutDishHoles, drawDishHoleRims). Не перечисляемые: в историю/JSON не идут, складка их не несёт.
+  {
+    const loc=i=>({x:(dX[i]-panC.x)/targetR,y:(dY[i]-panC.y)/targetR});
+    const cells=[], loops=[];
+    for(let q=0;q<quads.length;q++) if(quadCons[q].some(c=>c.broken)) cells.push(quads[q].map(loc));
+    if(cells.length){
+      if(holeVer !== brokenCount()) buildHoleChains();
+      for(const ch of holeChains || []) if(ch.cyclic) loops.push({ids:ch.nodes.slice(),pts:ch.nodes.map(loc)});
+    }
+    Object.defineProperties(dish,{holeCells:{value:cells,writable:true,configurable:true},holeLoops:{value:loops,writable:true,configurable:true},
+      holeCell:{value:Math.max(R0,sheetRadius())*2/(GRID-1)/targetR,writable:true,configurable:true}});
+  }
   rebuildDishContact(); dish.hull=dishHull(); dish.env=envelopeFrame(); syncDishUI();
 }
 // Heat belongs to material, not to a geometry snapshot. Undo never rewinds cooking.
@@ -618,6 +631,9 @@ function separateFillings(tokens){
   for(let k=0;k<3;k++){
     for(let i=0;i<tokens.length;i++) for(let j=i+1;j<tokens.length;j++){
       const a=tokens[i], b=tokens[j];
+      // Сборка 96: яйцо жидкое — его лужицы не расталкиваются ни друг с другом, ни с ломтиками: иначе первая же
+      // складка разносила лужицу на отдельные диски. Расталкиваются только кружки банана.
+      if(a.kind==="egg" || b.kind==="egg") continue;
       const dx=b.x-a.x, dy=b.y-a.y, d=Math.hypot(dx,dy), min=(a.radius+b.radius)*0.92;
       if(d>=min || d<1e-6) continue;
       const p=(min-d)*0.5, ux=dx/d, uy=dy/d;
@@ -3362,6 +3378,8 @@ function drawDishFaces(g,faces,screen,H,zk,shadow=true,shift=null,noShadow=null)
     // На столе тень гуще и длиннее: куски читаются отдельными брусками (владелица 17.09: «плоско»).
     const onTable=dish && dish.mode!=="fold";
     g.fillStyle=onTable ? "rgba(12,7,3,.5)" : "rgba(18,10,4,.34)";
+    const holesOut=shadow && dishHolesOpen(faces);
+    if(holesOut){ g.save(); clipOutDishHoles(g,screen); }
     for(let i=0;i<faces.length && shadow;i++){
       if(faces[i].kind!=="dough" || H.zb[i]>.3 || (noShadow && noShadow(faces[i]))) continue;
       const hs=H.vert(i), drop=zk*RELIEF_K*Math.max(...hs)*(onTable ? .45 : .25);
@@ -3370,6 +3388,7 @@ function drawDishFaces(g,faces,screen,H,zk,shadow=true,shift=null,noShadow=null)
       for(let k=1;k<ps.length;k++){ const q=screen(ps[k],faces[i]); g.lineTo(q.x+drop,q.y); }
       g.closePath(); g.fill();
     }
+    if(holesOut) g.restore();
     const crust=[];
     for(let i=0;i<faces.length;i++){
       if(faces[i].kind!=="dough" || !H.rim(i) || Math.max(...H.vert(i))<WALL_MIN_MM) continue;
@@ -3409,8 +3428,25 @@ function drawDishFaces(g,faces,screen,H,zk,shadow=true,shift=null,noShadow=null)
   // ложится поверх уже нарисованного.
   const buried=crustBuried(faces,H);
   const open=[], smooth=g.imageSmoothingEnabled; g.imageSmoothingEnabled=true;   // текстура пятен — сглаженно
+  // Сборка 96 (разбор 18.11, п. 1): белок — одна растёкшаяся лужица (drawEggBlob) вокруг всех лужиц яйца, рисуется
+  // на месте первого куска яйца в стопке: клапан, легший сверху, её закрывает (сырой — просвечивает). Куски яйца
+  // как грани не красятся (раньше — каждый своей заливкой 0,7, и проступали отдельные диски). Не под клапаном —
+  // в open: по ним рисуется желток. Без лужицы (предпросмотр складки, нарезанный роти) — одна заливка по кускам
+  // (drawEggFilm), куски под клапаном — тоже одной заливкой на месте первого.
+  const under=H ? eggUnderFlap(faces) : null, blob=H && eggBlobOn(faces);
+  let underDone=false, blobDone=false;
   for(let k=0;k<faces.length;k++){
-    if(H && faces[k].kind==="filling" && H.exposed(k)) open.push(k); else paint(k);
+    const f=faces[k];
+    if(H && f.fill==="egg" && f.kind==="filling"){
+      if(blob){ if(!blobDone){ blobDone=true; drawEggFilm(g,faces,null,screen,H,zk,true); } if(!under[k]) open.push(k); continue; }
+      if(!under[k]){ open.push(k); continue; }
+      if(underDone) continue;
+      underDone=true;
+      const list=[]; for(let j=0;j<faces.length;j++) if(under[j]) list.push(j);
+      eggClip(g,faces,list,screen,H,zk); g.globalAlpha=1; g.fillStyle=EGG_WHITE_UNDER; g.fill();
+      continue;
+    }
+    if(H && f.kind==="filling" && H.exposed(k)) open.push(k); else paint(k);
   }
   g.globalAlpha=1;
   for(const k of open){
@@ -3423,7 +3459,7 @@ function drawDishFaces(g,faces,screen,H,zk,shadow=true,shift=null,noShadow=null)
   for(const k of open) if(faces[k].fill!=="egg") paint(k);
   g.globalAlpha=1; g.imageSmoothingEnabled=smooth;
   if(H && open.length){
-    drawEggFilm(g,faces,open,screen,H,zk);
+    if(!blob) drawEggFilm(g,faces,open,screen,H,zk);
     drawBananaSlices(g,faces,open,screen,H,zk);
     drawEggYolk(g,faces,open,screen,H,zk);
   }
@@ -3480,12 +3516,82 @@ function drawBananaSlices(g,faces,open,screen,H,zk){
 // подтёк. Лужицы — по-прежнему настоящая начинка (addEgg): конверт их прячет, на срезе жёлтая полоса. Белок
 // рисуется ПОД кружками банана (виден между ними) одной заливкой на все лужицы куска — иначе нахлёст лужиц темнел
 // ступеньками; желток — ПОВЕРХ кружков (drawEggYolk).
+// Лужица белка (сборка 96): контур — луч из желтка до дальнего края каждой лужицы яйца (dish.filling), сглаженный
+// по кругу, чтобы промежутки между лужицами залились; край неровный — медленный шум по углу от номера желтка.
+// Обрезка: по выпуклой оболочке листа и мимо дыр открытого листа (clipOutDishHoles). Данные начинки (лужицы,
+// срез, конверт) прежние — меняется только рисунок.
+const EGG_BLOB_N = 48, EGG_BLOB_SMOOTH = 4;
+function eggBlobOn(faces){
+  return !!(dish && faces===dish.faces && !(dish.cuts && dish.cuts.length) && (dish.filling||[]).some(f=>f.kind==="egg"));
+}
+function eggBlobLocal(){
+  const E=dish.filling.filter(f=>f.kind==="egg"); if(!E.length) return null;
+  let y0=E[0]; for(const f of E) if(f.id<y0.id) y0=f;
+  const o={x:y0.x,y:y0.y}, n=EGG_BLOB_N, r=new Float64Array(n);
+  for(let j=0;j<n;j++){
+    const a=j*2*Math.PI/n, ux=Math.cos(a), uy=Math.sin(a);
+    let best=0;
+    for(const f of E){
+      const cx=f.x-o.x, cy=f.y-o.y, t=cx*ux+cy*uy, d2=f.radius*f.radius-(cx*cx+cy*cy-t*t);
+      if(d2>0) best=Math.max(best,t+Math.sqrt(d2));
+    }
+    r[j]=best;
+  }
+  const sm=new Float64Array(n);
+  for(let j=0;j<n;j++){ let m=0; for(let w=-EGG_BLOB_SMOOTH;w<=EGG_BLOB_SMOOTH;w++) m=Math.max(m,r[(j+w+n)%n]*Math.cos(w*2*Math.PI/n)); sm[j]=m; }
+  const pts=[];
+  for(let j=0;j<n;j++){
+    const a=j*2*Math.PI/n, wob=1+.05*Math.sin(3*a+y0.id*1.3)+.035*Math.sin(5*a+y0.id*2.1)+.02*Math.sin(9*a+y0.id);
+    const R=Math.max(r[j],(sm[j]+sm[(j+1)%n]+sm[(j+n-1)%n])/3)*wob;
+    pts.push({x:o.x+Math.cos(a)*R,y:o.y+Math.sin(a)*R});
+  }
+  return {o,pts,R:Math.max(...r)};
+}
+function drawEggBlob(g,screen,H,zk){
+  const B=eggBlobLocal(); if(!B) return;
+  g.save(); g.globalAlpha=1;
+  if(dishHolesOpen(dish.faces)) clipOutDishHoles(g,screen);
+  if(dish.hull && dish.hull.length>2){ g.beginPath(); pathPoly(g,dish.hull.map(p=>screen(p)),true); g.clip(); }
+  const up=p=>{ const q=screen(p); return {x:q.x,y:q.y-H.at(p)*zk}; };
+  const P=B.pts.map(up), o=up(B.o);
+  g.beginPath(); pathPoly(g,P,true);
+  let R=1; for(const q of P) R=Math.max(R,Math.hypot(q.x-o.x,q.y-o.y));
+  if(typeof g.createRadialGradient!=="function") g.fillStyle=EGG_WHITE;   // макет холста в проверках
+  else {
+    const gr=g.createRadialGradient(o.x,o.y,0,o.x,o.y,R), c=EGG_WHITE_RGB.join(",");
+    gr.addColorStop(0,`rgba(${c},${EGG_WHITE_MID})`); gr.addColorStop(.5,`rgba(${c},${(EGG_WHITE_MID+EGG_WHITE_EDGE)/2})`);
+    gr.addColorStop(1,`rgba(${c},${EGG_WHITE_EDGE})`);
+    g.fillStyle=gr;
+  }
+  g.fill();
+  g.restore();
+}
+// Какие куски яйца лежат под клапаном теста: середина куска внутри грани клапана, что выше в стопке.
+// Раз на набор граней (WeakMap): грани меняются только складкой, резом, начинкой.
+const EGG_WHITE_UNDER = `rgba(${EGG_WHITE_RGB},.42)`;
+const eggUnderCache = new WeakMap();
+function eggUnderFlap(faces){
+  let u=eggUnderCache.get(faces); if(u) return u;
+  u=new Uint8Array(faces.length);
+  const flaps=[];
+  faces.forEach((f,k)=>{ if(f.kind!=="dough" || !f.flap) return;
+    let x0=Infinity,y0=Infinity,x1=-Infinity,y1=-Infinity; for(const p of f.points){ x0=Math.min(x0,p.x); x1=Math.max(x1,p.x); y0=Math.min(y0,p.y); y1=Math.max(y1,p.y); }
+    flaps.push({k,f,x0,y0,x1,y1}); });
+  if(flaps.length) faces.forEach((f,k)=>{
+    if(f.fill!=="egg" || f.kind!=="filling") return;
+    let x=0,y=0; for(const p of f.points){ x+=p.x; y+=p.y; } x/=f.points.length; y/=f.points.length;
+    for(const F of flaps) if(F.k>k && x>=F.x0 && x<=F.x1 && y>=F.y0 && y<=F.y1 && pointInFace(F.f.points,x,y)){ u[k]=1; break; }
+  });
+  eggUnderCache.set(faces,u); return u;
+}
 function eggGroups(faces,open,screen){
   const groups=new Map();
   for(const k of open){
     const f=faces[k]; if(f.fill!=="egg" || !f.pc || !(f.pr>0)) continue;
-    const probe=screen(f.points[0],f), bare=screen(f.points[0]);
-    const gk=f.turned+"|"+Math.round(probe.x-bare.x)+","+Math.round(probe.y-bare.y);
+    // Сборка 96: группа — только сторона (turned), не сдвиг куска: после складки лужицы едут каждая своим сдвигом
+    // (scootFillings), и группа «на сдвиг» снова делила яйцо на отдельные диски. Каждый кусок и так рисуется
+    // со своим сдвигом (screen(p,f)), так что общая заливка через щель реза не перекидывается.
+    const gk=String(!!f.turned);
     if(!groups.has(gk)) groups.set(gk,{f,list:[]});
     groups.get(gk).list.push(k);
   }
@@ -3500,11 +3606,25 @@ function eggClip(g,faces,list,screen,H,zk){
     g.closePath();
   }
 }
-function drawEggFilm(g,faces,open,screen,H,zk){
+// Сборка 96 (разбор 18.11, п. 1): лужицы внахлёст (banana.js, EGG_SPOTS) — одна лужица; плёнка гуще у желтка и
+// тоньше к краю (растеклась), а не ровный непрозрачный диск. Середина градиента — лужица желтка.
+const EGG_WHITE_MID = .66, EGG_WHITE_EDGE = .34;
+function drawEggFilm(g,faces,open,screen,H,zk,blob=false){
+  if(blob){ drawEggBlob(g,screen,H,zk); return; }   // одна лужица (сборка 96)
+  let first=Infinity;
+  for(const f of dish && dish.filling || []) if(f.kind==="egg" && f.id<first) first=f.id;
   for(const {list} of eggGroups(faces,open,screen).values()){
     // одна заливка на весь путь: лужица — это много кусочков граней листа, обводка рисовала бы их сетку
     eggClip(g,faces,list,screen,H,zk);
-    g.fillStyle=EGG_WHITE; g.fill();
+    const fy=list.map(k=>faces[k]).find(f=>f.source===first) || faces[list[0]];
+    const o=screen(fy.pc,fy), oy=o.y-H.at(fy.pc)*zk;
+    let R=1;
+    for(const k of list){ const f=faces[k]; for(const p of f.points){ const q=screen(p,f); R=Math.max(R,Math.hypot(q.x-o.x,q.y-oy)); } }
+    if(typeof g.createRadialGradient!=="function"){ g.fillStyle=EGG_WHITE; g.fill(); continue; }   // макет холста в проверках
+    const gr=g.createRadialGradient(o.x,oy,0,o.x,oy,R), c=EGG_WHITE_RGB.join(",");
+    gr.addColorStop(0,`rgba(${c},${EGG_WHITE_MID})`); gr.addColorStop(.45,`rgba(${c},${(EGG_WHITE_MID+EGG_WHITE_EDGE)/2})`);
+    gr.addColorStop(1,`rgba(${c},${EGG_WHITE_EDGE})`);
+    g.fillStyle=gr; g.fill();
   }
 }
 function drawEggYolk(g,faces,open,screen,H,zk){
@@ -4188,8 +4308,10 @@ function drawPressDents(g,screen,H,zk,pose,sx,sy){
 // Бледная разметка конверта: середина листа в половину его размера — сюда кладётся начинка и сюда
 // ложатся кромки клапанов. Сторона, которая уже завёрнута, свою линию теряет; у готового конверта
 // разметки нет.
+// Сборка 96 (разбор 18.11, п. 3): пунктир — только на открытом листе. После первого сгиба он лежал поверх
+// сложенного клапана и читался чертежом на роти; оставшиеся стороны видны и без него — кромка сама и есть край.
 function drawFoldGuide(g,screen,sx){
-  const E=dish.env; if(!E || envelopeDone() || phase!=="PAN") return;
+  const E=dish.env; if(!E || envelopeDone() || phase!=="PAN" || dish.folds>0 || E.done.some(Boolean)) return;
   const at=(a,b)=>screen({x:E.c.x+E.u.x*a+E.v.x*b,y:E.c.y+E.u.y*a+E.v.y*b});
   const x1=E.h[0]/2, x0=-E.h[1]/2, y1=E.h[2]/2, y0=-E.h[3]/2;
   const lines=[[x1,y0,x1,y1],[x0,y0,x0,y1],[x0,y1,x1,y1],[x0,y0,x1,y0]];   // сгибы сторон +u, −u, +v, −v
@@ -4253,6 +4375,7 @@ function drawDish(g,sx,sy){
     // Сборка 90: у граней шапки нет и тени на таве — она ложилась правее выреза тёмной полосой с жёстким краем
     drawDishFaces(g,faces,screen,H,zk,true,pieceShiftLive(faces),cap ? f=>{ let x=0,y=0; for(const p of f.points){ x+=p.x; y+=p.y; } return pointInFace(cap.P,x/f.points.length,y/f.points.length); } : null);
     if(!moving && !slide && faces===dish.faces) drawMargarineGloss(g,screen,H,zk,sx);
+    if(!moving && !slide && !T && faces===dish.faces) drawDishHoleRims(g,screen,H,zk);
     if(lift && !cap) drawLiftedEdge(g,screen,lift,sx,sy);
     // Rebuild expensive boundary intersections only after a committed geometry
     // change. During a drag the existing flat preview remains immediate.
@@ -7338,7 +7461,7 @@ function drawRimRoll(g, Pnt, sx){
 // и обрезается по нарисованной кромке (rimLoop). Чтобы размытие не разбавляло край прозрачностью,
 // снаружи кромки и в дырах слой подбит средним цветом листа. Только рисунок: толщина, физика, разрыв
 // не трогаются. Без ctx.filter (старый Safari) слой рисуется в 1/8 и растягивается сглаживанием.
-let softCv = null, softG = null;
+let softCv = null, softG = null, softFull = null, softFullG = null;
 function sheetCellPx(sx){ return Math.max(R0, sheetRadius())*2/(GRID-1)*sx; }   // шаг сетки на экране
 function drawSheetSoft(g, Pnt, Hmap, sx, bodyC, bodyR2, W, H){
   const L = rimLoop; if(!L || L.length < 8) return false;
@@ -7367,43 +7490,126 @@ function drawSheetSoft(g, Pnt, Hmap, sx, bodyC, bodyR2, W, H){
   s.save(); outline(s); s.rect(-W, -H, 3*W, 3*H); s.clip("evenodd");
   outline(s); s.lineJoin = "round"; s.strokeStyle = pad; s.lineWidth = blur*4; s.stroke();
   s.restore();
-  g.save(); outline(g); g.clip();
-  if(hasFilter) g.filter = `blur(${blur.toFixed(1)}px)`;
-  g.drawImage(softCv, 0, 0, cw, ch, 0, 0, cw/k, ch/k);
-  g.restore();
+  // Сборка 96: с дырами слой сперва собирается в полный размер, из него вырезаются дыры (cutSheetHoles), и уже
+  // он ложится на стол — сквозь дыру видна доска. Без дыр — как было, прямо на стол.
+  const holed = brokenCount() > 0;
+  let dst = g;
+  if(holed){
+    if(!softFull){ softFull = document.createElement("canvas"); softFullG = softFull.getContext("2d"); }
+    if(softFull.width !== W || softFull.height !== H){ softFull.width = W; softFull.height = H; }
+    dst = softFullG; dst.setTransform(1,0,0,1,0,0); dst.clearRect(0, 0, W, H);
+  }
+  dst.save(); outline(dst); dst.clip();
+  if(hasFilter) dst.filter = `blur(${blur.toFixed(1)}px)`;
+  dst.drawImage(softCv, 0, 0, cw, ch, 0, 0, cw/k, ch/k);
+  dst.restore();
+  if(holed){
+    cutSheetHoles(dst, Pnt, sx, bodyC, bodyR2);
+    g.drawImage(softFull, 0, 0);
+  }
   return true;
 }
 // Кромка дыры (сборка 94): рваная ломаная по цепочкам buildHoleChains — между узлами по две точки,
 // сдвинутые поперёк на постоянный для узла шум, — и полупрозрачная плёнка теста по ней: тонкое тесто
 // у разрыва просвечивает, а не скатывается в светлый валик.
+// Сборка 96 (разбор 18.11, п. 2): дыра сквозная — в ней доска (на таве — сталь), а не чёрная заливка. Слой листа
+// вырезается по этой же ломаной (drawSheetSoft), здесь — только плёнка кромки и узкая тень листа на доске внутри дыры.
+function holeNoise(a, b){ const v = Math.sin(a*12.9898 + b*78.233)*43758.5453; return v - Math.floor(v) - 0.5; }
+function holeRagged(nodes, cyclic, pt, cell){
+  const n = nodes.length, segs = cyclic ? n : n-1, P = [];
+  for(let i=0;i<segs;i++){
+    const ia = nodes[i], ib = nodes[(i+1)%n], A = pt(ia), B = pt(ib);
+    const dx = B.x-A.x, dy = B.y-A.y, l = Math.hypot(dx, dy) || 1, nx = -dy/l, ny = dx/l;
+    P.push(A);
+    for(const f of [1/3, 2/3]){
+      const o = holeNoise(ia + f, ib)*cell*0.45;
+      P.push({ x:A.x+dx*f+nx*o, y:A.y+dy*f+ny*o });
+    }
+    if(!cyclic && i === segs-1) P.push(B);
+  }
+  return P;
+}
+function pathPoly(g, P, close){ g.moveTo(P[0].x, P[0].y); for(let i=1;i<P.length;i++) g.lineTo(P[i].x, P[i].y); if(close) g.closePath(); }
+// Плёнка кромки дыры и тень листа на том, что под ним: P — ломаная на экране, cell — шаг сетки на экране.
+function strokeHoleRim(g, P, cyclic, cell){
+  const pc = DOUGH_PALE.join(","), pw = DOUGH.join(",");
+  g.save(); g.lineJoin = "round"; g.lineCap = "round";
+  if(cyclic){   // тень листа внутри дыры: лист лежит поверх, его край чуть затеняет доску/сталь у дальней стороны
+    g.save(); g.beginPath(); pathPoly(g, P, true); g.clip();
+    g.translate(0, cell*0.12); g.beginPath(); pathPoly(g, P, true);
+    g.strokeStyle = "rgba(10,6,2,0.22)"; g.lineWidth = cell*0.25; g.stroke();
+    g.restore();
+  }
+  g.beginPath(); pathPoly(g, P, cyclic);
+  g.strokeStyle = `rgba(${pw},0.3)`; g.lineWidth = cell*0.5; g.stroke();
+  g.strokeStyle = `rgba(${pc},0.5)`; g.lineWidth = Math.max(1, cell*0.14); g.stroke();
+  g.restore();
+}
 function drawHoleRims(g, Pnt, sx, bodyC, bodyR2){
   if(holeVer !== brokenCount()) buildHoleChains();
   if(!holeChains || !holeChains.length) return;
-  const cell = sheetCellPx(sx);
-  const nz = (a, b)=>{ const v = Math.sin(a*12.9898 + b*78.233)*43758.5453; return v - Math.floor(v) - 0.5; };
-  const inBody = (i)=> (px[i]-bodyC.x)**2 + (py[i]-bodyC.y)**2 < bodyR2;
-  const pc = DOUGH_PALE.join(","), pw = DOUGH.join(",");   // плёнка над тёмной дырой — тёплая, не серая
-  g.save(); g.lineJoin = "round"; g.lineCap = "round";
+  const cell = sheetCellPx(sx), L = rimLoop;
+  g.save();
+  if(L && L.length >= 8){ g.beginPath(); pathPoly(g, L.map(Pnt), true); g.clip(); }   // кромка дыры не выходит за лист
   for(const { nodes, cyclic } of holeChains){
-    const n = nodes.length, segs = cyclic ? n : n-1, P = [];
-    for(let i=0;i<segs;i++){
-      const ia = nodes[i], ib = nodes[(i+1)%n], A = Pnt(ia), B = Pnt(ib);
-      const dx = B.x-A.x, dy = B.y-A.y, l = Math.hypot(dx, dy) || 1, nx = -dy/l, ny = dx/l;
-      P.push(A);
-      for(const f of [1/3, 2/3]){
-        const o = nz(ia + f, ib)*cell*0.45;
-        P.push({ x:A.x+dx*f+nx*o, y:A.y+dy*f+ny*o });
-      }
-      if(!cyclic && i === segs-1) P.push(B);
-    }
+    const P = holeRagged(nodes, cyclic, Pnt, cell);
     if(P.length < 3) continue;
-    const path = ()=>{ g.beginPath(); g.moveTo(P[0].x, P[0].y); for(let i=1;i<P.length;i++) g.lineTo(P[i].x, P[i].y); if(cyclic) g.closePath(); };
-    if(cyclic && nodes.every(inBody)){ path(); g.fillStyle = "#100a06"; g.fill(); }   // зубцы дыры наружу
-    path();
-    g.strokeStyle = `rgba(${pw},0.3)`; g.lineWidth = cell*0.5; g.stroke();
-    g.strokeStyle = `rgba(${pc},0.5)`; g.lineWidth = Math.max(1, cell*0.14); g.stroke();
+    strokeHoleRim(g, P, cyclic, cell);
   }
   g.restore();
+}
+// Дыры на таве (сборка 96, разбор 18.11, п. 2): при посадке лист запоминает свои рваные ячейки и замкнутые петли
+// дыр в координатах блюда (startDish). Пока лист открыт (не сложен, не перевёрнут): тень листа на стали в рваные
+// ячейки не падает — в дыре и в выеденном крае чистая сталь, без тёмного пятна, вылезавшего за кромку на 375×667;
+// у замкнутой дыры — та же плёнка кромки, что на столе. Петля, задевшая кромку, плёнки не получает.
+function dishHolesOpen(faces){
+  return !!(dish && faces===dish.faces && dish.mode==="fold" && !dish.folds && !dish.flips && dish.holeCells && dish.holeCells.length);
+}
+function clipOutDishHoles(g, screen){
+  g.beginPath(); g.rect(-1e4,-1e4,3e4,3e4);
+  for(const c of dish.holeCells) pathPoly(g, c.map(p=>screen(p)), true);
+  g.clip("evenodd");
+}
+function drawDishHoleRims(g, screen, H, zk){
+  if(!dishHolesOpen(dish.faces) || !dish.holeLoops) return;
+  const a=screen({x:0,y:0}), b=screen({x:dish.holeCell||0,y:0}), cell=Math.hypot(b.x-a.x,b.y-a.y);
+  for(const L of dish.holeLoops){
+    // шум кромки — от номеров узлов сетки, как на столе: рваный край тот же, что был до переноса
+    const at=new Map(L.ids.map((id,i)=>[id,L.pts[i]]));
+    const pt=id=>{ const p=at.get(id), q=screen(p); return {x:q.x,y:q.y-(H ? H.at(p)*zk : 0)}; };
+    const P=holeRagged(L.ids, true, pt, cell);
+    if(P.length >= 3) strokeHoleRim(g, P, true, cell);
+  }
+}
+// Что вырезать из слоя листа на столе: замкнутые дыры внутри тела — по рваной ломаной; рваные ячейки, не
+// попавшие ни в одну такую петлю (дыра дорвалась до кромки), — своими четырёхугольниками.
+function cutSheetHoles(c, Pnt, sx, bodyC, bodyR2){
+  if(holeVer !== brokenCount()) buildHoleChains();
+  const inBody = (i)=> (px[i]-bodyC.x)**2 + (py[i]-bodyC.y)**2 < bodyR2;
+  const cell = sheetCellPx(sx), loops = [];
+  c.beginPath();
+  for(const { nodes, cyclic } of holeChains || []){
+    if(!cyclic || !nodes.every(inBody)) continue;
+    const P = holeRagged(nodes, true, Pnt, cell); if(P.length < 3) continue;
+    pathPoly(c, P, true); loops.push(nodes.map(Pnt));
+  }
+  for(let q=0;q<quads.length;q++){
+    const qc = quadCons[q]; if(!qc.some(cc=>cc.broken)) continue;
+    const [a,b2,cc,d] = quads[q];
+    if(!(inBody(a) && inBody(b2) && inBody(cc) && inBody(d))) continue;   // выеденный край: в слое его и так нет
+    const Pa=Pnt(a), Pb=Pnt(b2), Pc=Pnt(cc), Pd=Pnt(d), m={x:(Pa.x+Pb.x+Pc.x+Pd.x)/4,y:(Pa.y+Pb.y+Pc.y+Pd.y)/4};
+    if(loops.some(L=>pointInFace(L,m.x,m.y) || pointInPoly(L,m.x,m.y))) continue;
+    c.moveTo(Pa.x,Pa.y); c.lineTo(Pb.x,Pb.y); c.lineTo(Pc.x,Pc.y); c.lineTo(Pd.x,Pd.y); c.closePath();
+  }
+  c.save(); c.globalCompositeOperation = "destination-out"; c.fillStyle = "#000"; c.fill(); c.restore();
+}
+function pointInPoly(P, x, y){
+  let inside = false;
+  for(let i=0, j=P.length-1; i<P.length; j=i++){
+    const a = P[i], b = P[j];
+    if((a.y > y) !== (b.y > y) && x < (b.x-a.x)*(y-a.y)/(b.y-a.y) + a.x) inside = !inside;
+  }
+  return inside;
 }
 function pathSheetOutline(g, sx, ox, sy, oy, extraY){
   const c = centerOfSheet();
@@ -7554,14 +7760,10 @@ function draw(){
       const torn = qc[0].broken || (qc[1]&&qc[1].broken) || (qc[2]&&qc[2].broken) || (qc[3]&&qc[3].broken);
       let t= (Hmap[a]+Hmap[b2]+Hmap[c]+Hmap[d])/4;
       if(torn){
-        const inside =
-          (px[a]-bodyC.x)**2+(py[a]-bodyC.y)**2 < bodyR2 &&
-          (px[b2]-bodyC.x)**2+(py[b2]-bodyC.y)**2 < bodyR2 &&
-          (px[c]-bodyC.x)**2+(py[c]-bodyC.y)**2 < bodyR2 &&
-          (px[d]-bodyC.x)**2+(py[d]-bodyC.y)**2 < bodyR2;
-        if(!inside) continue;                          // выеденный край: теста просто нет
-        // Сквозная дыра — тень ПОД листом, темнее и стола, и любого тонкого теста.
-        g.fillStyle = onPan ? "#1c1712" : "#100a06";
+        // Сборка 96 (разбор 18.11, п. 2): дыра сквозная — ячейку не рисуем, в ней то, что под листом: доска на
+        // столе, сталь на таве (было: тёмная заливка «тень под листом», читалась чёрным прожогом).
+        // Выеденный край — тоже пусто, как и было.
+        continue;
       } else {
         if(softSheet) continue;                        // целые ячейки уже в мягком слое
         // Тонкий, но целый лист остаётся видимым. Дыру задают разорванные связи:

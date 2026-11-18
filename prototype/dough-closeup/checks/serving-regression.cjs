@@ -458,6 +458,60 @@ test('P8', 'a short tap is the filling even when a long frame falls between touc
   return { summary: out.join(' · ') };
 });
 
+test('P10', 'build 96 — the egg is one puddle, holes are see-through, the dashes go after the first fold: without bananas the first tap is the egg (5 puddles as before), drawn as ONE white around all of them (every puddle centre inside its outline, no clover dips); on the table a torn sheet has no dark fill — the layer is cut out (destination-out); on the tava the open sheet keeps its torn cells, its shadow is clipped out of them, no dark fill; the fold guide strokes 4 sides on the open sheet and none after one fold (390×844, 375×667)', () => {
+  const out = [];
+  for (const [w, hh] of [[390, 844], [375, 667]]) {
+    const h = evening({ storage: saveMid(0), w, hh });   // mid-evening, the shelf has no bananas
+    stretched(h);
+    const torn = h.J(`(()=>{const c=centerOfSheet(),R=sheetRadius();const hole=(fx,fy,rk)=>{let b=-1,bd=1e9;for(let i=0;i<N;i++){const d=Math.hypot(px[i]-c.x-fx*R,py[i]-c.y-fy*R);if(d<bd){bd=d;b=i}}
+      const rad=Math.max(R0,R)*2/(GRID-1)*rk;let n=0;for(const k of cons){if(k.broken)continue;if(Math.hypot((px[k.a]+px[k.b])/2-px[b],(py[k.a]+py[k.b])/2-py[b])<rad&&breakCon(k))n++}return n};
+      return [hole(.35,.3,1.6),hole(0,.97,1.8)]})()`);
+    assert.ok(torn[0] > 0 && torn[1] > 0, `${w}: two holes torn (${torn})`);
+    h.frames(2);
+    h.run(`__fills=[];__ops=[];__eo=0;{const g=cv.getContext("2d");let v="",o="source-over";
+      Object.defineProperty(g,"fillStyle",{get:()=>v,set:x=>{v=x;__fills.push(String(x))},configurable:true});
+      Object.defineProperty(g,"globalCompositeOperation",{get:()=>o,set:x=>{o=x;__ops.push(String(x))},configurable:true});
+      const c=g.clip;g.clip=function(r){if(r==="evenodd")__eo++;return c.apply(this,arguments)};
+      __cut=0;const cs=cutSheetHoles;cutSheetHoles=function(c){__cut++;const o=c.globalCompositeOperation;const r=cs.apply(this,arguments);__ops.push("cut:"+o);return r}}`);
+    const dark = () => h.J('__fills.filter(x=>x==="#100a06"||x==="#1c1712").length');
+    h.run('__fills.length=0;__ops.length=0;draw()');
+    const loops = h.J('(buildHoleChains(),holeChains.filter(c=>c.cyclic).length)');
+    assert.ok(loops >= 1, `${w}: a closed hole inside the sheet (${loops})`);
+    assert.equal(dark(), 0, `${w}: no dark fill in the holes on the table`);
+    assert.ok(h.run('__cut') >= 1, `${w}: the sheet layer is cut out at the holes (cutSheetHoles ${h.run('__cut')})`);
+    toPan(h);
+    const D = h.J('({cells:dish.holeCells.length,loops:dish.holeLoops.length,open:dishHolesOpen(dish.faces)})');
+    assert.ok(D.cells > 0 && D.loops >= 1 && D.open, `${w}: the tava sheet keeps its holes ${JSON.stringify(D)}`);
+    h.run('__fills.length=0;__eo=0;draw()');
+    assert.equal(dark(), 0, `${w}: no dark fill in the holes on the tava`);
+    assert.ok(h.run('__eo') >= 1, `${w}: the shadow on the steel is clipped out of the holes`);
+    tap(h, sheetMid(h));
+    const kinds = h.J('dish.filling.map(f=>f.kind||"banana")');
+    assert.ok(kinds.length === 5 && kinds.every(k => k === 'egg'), `${w}: no bananas — the first tap is the egg, 5 puddles (${kinds})`);
+    h.run(`__blob=0;__gs=0;{const f=drawEggFilm;drawEggFilm=function(){if(arguments[6])__blob++;return f.apply(this,arguments)};
+      const d=drawFoldGuide;drawFoldGuide=function(){const g=arguments[0],s=g.stroke;let n=0;g.stroke=function(){n++;return s.apply(this,arguments)};try{return d.apply(this,arguments)}finally{g.stroke=s;__gs+=n}}}`);
+    h.run('draw()');
+    assert.equal(h.run('__blob'), 1, `${w}: one white for the whole egg`);
+    assert.equal(h.run('__gs'), 4, `${w}: the fold guide on the open sheet`);
+    const B = h.J(`(()=>{const B=eggBlobLocal(),E=dish.filling.filter(f=>f.kind==="egg");const r=B.pts.map(p=>Math.hypot(p.x-B.o.x,p.y-B.o.y));
+      return {inside:E.every(f=>pointInPoly(B.pts,f.x,f.y)),rk:Math.min(...r)/Math.max(...r)}})()`);
+    assert.ok(B.inside, `${w}: every puddle centre is inside the one white`);
+    assert.ok(B.rk > 0.6, `${w}: no clover dips between the puddles (min/max radius ${B.rk.toFixed(2)})`);
+    const e = h.J(`(()=>{const E=dish.env,a=E.v,d={x:a.x,y:a.y},hk=E.h[2];
+      const hu=dish.hull.reduce((m,p)=>Math.max(m,(p.x-E.c.x)*d.x+(p.y-E.c.y)*d.y),0)/hk;
+      return [__harness.dishToClient({x:E.c.x+d.x*hk*hu*.97,y:E.c.y+d.y*hk*hu*.97}),__harness.dishToClient(E.c)]})()`);
+    drive(h, line(e[0], { x: e[0].x + (e[1].x - e[0].x) * 0.85, y: e[0].y + (e[1].y - e[0].y) * 0.85 }, { v: 170, hold: 150, stop: 60, seed: 5 }));
+    assert.equal(h.run('dish.folds'), 1, `${w}: one fold`);
+    h.run('__gs=0;__blob=0;draw()');
+    assert.equal(h.run('__gs'), 0, `${w}: no dashes after the first fold`);
+    assert.equal(h.run('__blob'), 1, `${w}: the white is still one puddle after the fold`);
+    assert.equal(h.run('dishHolesOpen(dish.faces)'), false, `${w}: folded — the open-sheet hole drawing is off`);
+    assert.equal(h.run('loopErrs'), 0); assert.deepEqual(h.errors, []);
+    out.push(`${w}: torn ${torn.join('+')} links, ${loops} closed hole(s), tava cells ${D.cells}; egg 5 puddles in one white (min/max radius ${B.rk.toFixed(2)})`);
+  }
+  return { summary: out.join(' · ') };
+});
+
 const okN = results.filter(r => r.status === 'PASS').length;
 try { const dir = path.join(path.dirname(H.sourcePath), '..', '..', 'runs', 'checks'); fs.mkdirSync(dir, { recursive: true }); fs.writeFileSync(path.join(dir, 'serving-results.json'), JSON.stringify(results, null, 1)); } catch (e) {}
 console.log(`\nserving: ${okN}/${results.length} passed`);
