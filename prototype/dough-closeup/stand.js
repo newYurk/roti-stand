@@ -11,7 +11,7 @@
 // до 400%+ и лист «рвётся» в середине от любого движения. Замер это обнаружил сразу.
 // Число узлов сохранено (1 060 после обрезки по кругу; прежняя оценка «~1150» была на глаз,
 // пересчитано 07.09.2026), однородность рёбер восстановлена.
-const BUILD = "2026-11-18 · уход в фон отменяет жест и струю · 100";
+const BUILD = "2026-11-18 · отладочная панель не врёт · 101";
 const GRID = 38;                   // 38x38, в круг попадает 1 060 узлов (посчитано, не оценка)
 let SUBSTEPS = 8;                  // T2: 8–10 подшагов, 1 итерация
 let DAMP = 0.986;
@@ -7101,6 +7101,7 @@ function dishInputLocal(cx, cy){
   return unproject((cx-r.left)*cv.width/r.width, (cy-r.top)*cv.height/r.height + tableLiftCanvas());
 }
 function onDown(id, cx, cy, t){
+  dbgDown++;   // считается ДО всех ранних выходов (тишина после подачи, вечер, масло): иначе «↓0» при живом вводе (#89)
   if(performance.now()<inputQuietUntil) return;
   // Кусок маргарина отвечает и на пустой таве (сборка 78): мазок по стали оставляет лужицу. В вечере —
   // при зажжённой лампе и снятой крышке, в том числе пока стол свободен (там рамка вечера забирает касания).
@@ -7109,7 +7110,6 @@ function onDown(id, cx, cy, t){
   // Нажатие сразу после поворота колесом фиксирует поворот и идёт дальше как обычный жест
   // (иначе первый рез или складка после прокрутки пропадали).
   if(dish && dishTwist && dishTwist.input==="wheel") endTwist(true);
-  dbgDown++;
   // iOS усыпляет AudioContext в фоне. Касание блюда тоже будит звук, иначе после
   // возврата шипение на таве молчало бы до «заново».
   if(dish){ audioWake();
@@ -7147,12 +7147,14 @@ function onDown(id, cx, cy, t){
   const tDown = performance.now();
   audioWake();
   if(AC){
-    const lat = (AC.baseLatency||0)*1000 + (AC.outputLatency||0)*1000 + (performance.now()-tDown);
-    latencies.push(lat); if(latencies.length>60) latencies.shift();
+    const hw = (AC.baseLatency||0)*1000 + (AC.outputLatency||0)*1000;
+    // Браузер не назвал задержку (Safari отдаёт 0/undefined): это «нет данных», а не «0 мс».
+    const lat = hw + (performance.now()-tDown);
+    if(hw > 0) latencies.push(lat); if(latencies.length>60) latencies.shift();
   }
   const p = toLocal(cx, cy);
   const w = zone("work");
-  if(phase !== "TABLE"){ dbgKind = "тава"; return; }   // лист на таве: жесты жарки — следующий этап
+  if(phase !== "TABLE") return;   // лист на таве: жесты жарки — следующий этап
   // Отсекается только зона тавы, и по той оси, которая делит стол: в альбоме правее
   // теста, в портрете выше него. Сверху/снизу (в альбоме) и слева/справа (в портрете)
   // границ нет намеренно — любое касание берёт лист за ближайший край.
@@ -7160,6 +7162,7 @@ function onDown(id, cx, cy, t){
   armAction(id, p, t, {x:cx,y:cy});                  // только выбор края: тесто НЕ двигается
 }
 function onMove(id, cx, cy, t){
+  dbgMove++;   // каждое движение, дошедшее до обработчика, а не только движения внутри жеста (#89)
   if(typeof eveningMove==="function" && eveningMove(id, cx, cy, t)) return;
   if(dishTouches.has(id)) dishTouches.set(id,toLocal(cx,cy));
   if(dishPinch && dishPinch.ids && dishPinch.ids.includes(id)){
@@ -7173,17 +7176,16 @@ function onMove(id, cx, cy, t){
     if(T.id===id){ twistTo(tableAngle(T.center,toLocal(cx,cy))); return; }
   }
   if(fatGesture && fatGesture.id===id){ const p=toLocal(cx,cy); smearStroke(fatGesture.last,p); fatGesture.last=p; return; }
-  if(dishGesture && dishGesture.id===id){ dbgMove++; moveDishGesture(dishInputLocal(cx,cy),{x:cx,y:cy},t); return; }
+  if(dishGesture && dishGesture.id===id){ moveDishGesture(dishInputLocal(cx,cy),{x:cx,y:cy},t); return; }
   if(action.two){                                    // два пальца несут лист: ведёт середина между ними
     const T = action.two, f = id===T.a.id ? T.a : id===T.b.id ? T.b : null;
     if(!f) return;
     f.p = toLocal(cx, cy); f.c = {x:cx,y:cy};
-    const m = twoMid(); dbgMove++;
+    const m = twoMid();
     updateActionMove(m.p, t, m.c);
     return;
   }
   if(action.pointerId !== id) return;
-  dbgMove++;
   if(action.off && action.state === "CARRY"){        // остался один палец из двух: ведёт ту же точку
     const p = toLocal(cx, cy), o = action.off;
     updateActionMove({x:p.x+o.x, y:p.y+o.y}, t, {x:cx+o.cx, y:cy+o.cy});
@@ -8422,15 +8424,21 @@ function shade(t){ const c = mix(t); return `rgb(${c[0]},${c[1]},${c[2]})`; }
 // ─────────────────────────── цикл
 // `fps=null` и `worst=0` означают «ещё не мерили», и печатаются прочерком: ноль в приборе
 // читается как «идеально», а «60 fps» до первого измерения — просто неправда (#89).
-let last=performance.now(), fps=null, acc=0, frameCount=0, worst=0, warmup=0;   // не `frames`: совпадает с window.frames
+let last=performance.now(), fps=null, acc=0, frameCount=0, worst=0, warmup=6;   // не `frames`: совпадает с window.frames
 function resetMeters(){
-  worst=0; fps=null; acc=0; frameCount=0; warmup=6; tossOk=0; tossTry=0;
+  worst=0; fps=null; acc=0; frameCount=0; warmup=6; tossOk=0; tossTry=0; paused=0;
   // `latencies` тоже: без этого «звук N мс» — бегущая медиана за всю сессию и по всем
   // видам сразу, и как число вида A или B её читать нельзя (найдено проверкой 08.09).
   latencies.length = 0;
 }
 let loopErrs = 0, paused = 0;
 function loop(now){
+  // Следующий кадр заказан первым делом: исключение в остальном теле (в том числе в строке прибора)
+  // раньше обрывало цепочку rAF и замораживало игру, а прибор молчал.
+  requestAnimationFrame(loop);
+  try{ loopBody(now); }catch(err){ loopErrs++; if(loopErrs < 4) console.error("кадр упал (вне симуляции):", err); }
+}
+function loopBody(now){
   cvDims();
   // Настоящее время кадра — для измерений; обрезанное — только для устойчивости симуляции.
   // Раньше счётчик копил обрезанное dt и потому не умел показывать меньше 30 fps:
@@ -8519,19 +8527,18 @@ function loop(now){
   const hit  = measured.filter(l=>l.predicted).length;
   stats.textContent =
     `сборка: ${BUILD}\n` +
-    `${variant}/${condition}  попыток ${done}/30  распознано ${done?Math.round(hit/done*100):0}%\n` +
+    `${variant}/${condition}  попыток ${done}/30  распознано ${done?Math.round(hit/done*100)+"%":"—"}\n` +
     `${stackedLayout()?"портрет · замер с альбомным не сравнить":"альбом"}\n` +
     `шаг ${stepNo}  ${action.state!=="RESTING"?"◆ "+action.state:"○ покой"}  ` +
     `${dish ? dishStatus() : phase==="PAN" ? "тава · сушка "+md.toFixed(2)+" · цвет "+mc.toFixed(2) : "стол"}  мах: ${lastDecision}` +
     `${tossTry ? "  перенесено "+tossOk+" из "+tossTry : ""}  ` +
-    `лист ${pct}%${ready}${ragged}  жестов ${gestures.length}  ` +
-    `[касаний ${rawTouch} · указателей ${rawPointer} · до теста ↓${dbgDown} ↔${dbgMove} · ${dbgKind}${loopErrs?" · сбоев "+loopErrs:""}${dish?` · пальцев на поле ${dishTouches.size} · поворот: ${dishTwist ? dishTwist.input+" "+Math.round(dishTwist.angle*180/Math.PI)+"°" : twistDbg.last}${twistDbg.gestures?" · жестов Safari "+twistDbg.gestures:""}${twistDbg.cancels?" · отмен касаний "+twistDbg.cancels:""}`:""}]  ` +
+    `лист ${fillNow>0 || (phase==="TABLE" && stepNo>=2 && !dish) ? pct+"%" : "—"}${ready}${ragged}  жестов ${gestures.length}  ` +
+    `[касаний ${rawTouch||"нет"} · указателей ${rawPointer||"нет"} · до теста ↓${dbgDown} ↔${dbgMove} · ${dbgKind} · сбоев ${loopErrs}${dish?` · пальцев на поле ${dishTouches.size} · поворот: ${dishTwist ? dishTwist.input+" "+Math.round(dishTwist.angle*180/Math.PI)+"°" : twistDbg.last}${twistDbg.gestures?" · жестов Safari "+twistDbg.gestures:""}${twistDbg.cancels?" · отмен касаний "+twistDbg.cancels:""}`:""}]  ` +
     `${tornAt?"рваный":pressed?"нажато":"—"}  ` +
     `${tuneChanged()?`⚙ ощущение своё (${TUNE.com}/${TUNE.creep}/${TUNE.brk}, исходное ${TUNE_DEFAULT.com}/${TUNE_DEFAULT.creep}/${TUNE_DEFAULT.brk})  `:""}` +
     `${mixedTune?"смешанный лист · для замера «заново»  ":""}` +
     `${fps===null?"—":fps.toFixed(0)} fps  худший кадр ${worst?(worst*1000).toFixed(0)+" мс":"—"}  ` +
     `задержка ${latencies.length?median(latencies).toFixed(0)+" мс":"—"}${paused?"  пауз "+paused:""}`;
-  requestAnimationFrame(loop);
 }
 
 // Пересборка листа стоит игроку всей работы, поэтому она только при РЕАЛЬНОЙ смене
