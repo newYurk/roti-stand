@@ -127,10 +127,15 @@ function toTable(h) {
 const rotiBox = h => h.J(`(()=>{const b=dish.cutBounds,up=tableLiftCanvas()*cv.getBoundingClientRect().height/cv.height,
   P=(x,y)=>{const q=__harness.dishToClient({x,y});return {x:q.x,y:q.y-up}};
   return {c:P(dish.cutCenter.x,dish.cutCenter.y),l:P(b.left,dish.cutCenter.y),r:P(b.right,dish.cutCenter.y),t:P(dish.cutCenter.x,b.top),b:P(dish.cutCenter.x,b.bottom)}})()`);
+// Build 80: «нарезано» is three edge-to-edge cuts of two directions (1 + 2); one cut no longer serves.
 function cut(h) {
-  const B = rotiBox(h), dx = (B.r.x - B.l.x) * 0.2;
+  const B = rotiBox(h), w = B.r.x - B.l.x, dx = w * 0.2, dy = (B.b.y - B.t.y) * 0.2;
   drive(h, line({ x: B.l.x - dx, y: B.c.y }, { x: B.r.x + dx, y: B.c.y }, { v: 380, hold: 60 }));
   assert.equal(h.run('dish.cuts.length'), 1, 'one cut through the envelope');
+  assert.equal(h.run('cutEnough()'), false, 'one cut is not «нарезано»');
+  for (const k of [-1, 1]) drive(h, line({ x: B.c.x + k * w / 6, y: B.t.y - dy }, { x: B.c.x + k * w / 6, y: B.b.y + dy }, { v: 380, hold: 60 }));
+  assert.equal(h.run('dish.cuts.length'), 3, 'three cuts, each from edge to edge');
+  assert.equal(h.run('cutEnough()'), true, 'two across one: «нарезано»');
 }
 function serve(h, to) {
   const B = rotiBox(h);
@@ -264,7 +269,7 @@ test('F2', 'one ladder and plain words: the line says nothing about frying until
   until(h, 'fryStep(meanCook())>=2'); h.frames(2); note();
   assert.equal(live(h), 'край румяный — мах от края');
   edgeStroke(h, { v: 700 }); for (let i = 0; i < 40; i++) { h.frames(1); note(); }
-  assert.equal(h.run('flipLearned'), true);
+  assert.equal(h.run('learned.flip'), 1, 'the flick is learned (build 80: learned.flip, was flipLearned)');
   let ready = null, n = 0;
   while (n++ < 60 * 40) { h.frames(1); note(); if (live(h).startsWith('поджарилось')) { ready = h.J('guestSides()'); break; } }
   assert.ok(ready, 'the line says it is ready');
@@ -282,8 +287,9 @@ test('F2', 'one ladder and plain words: the line says nothing about frying until
   assert.deepEqual(h.J('[0,0.079,0.08,0.279,0.28,0.549,0.55,1.099,1.1,1.4].map(c=>cookWord(c)+"/"+guestStepOf(c))'),
     ['сырое/0', 'сырое/0', 'бледное/1', 'бледное/1', 'приготовленное/2', 'приготовленное/2', 'зажаренное/3', 'зажаренное/3', 'горелое/4', 'горелое/4']);
   // a new evening teaches the flick again
-  h.run('eveNewEvening("check")'); h.frames(2); assert.equal(h.run('flipLearned'), false);
-  return { summary: `lines seen: ${all.filter(m => !/Сторона|Прямоугольник/.test(m)).join(' | ')}` };
+  h.run('eveNewEvening("check")'); h.frames(2); assert.deepEqual(h.J('learned'), {}, 'a new evening: every hint is back');
+  for (const m of all) assert.ok(m.length <= h.run('LINE_MAX'), `one short line, at most ${h.run('LINE_MAX')} characters (build 80): ${m} (${m.length})`);
+  return { summary: `lines seen: ${all.filter(m => !/завёрнуто|две другие/.test(m)).join(' | ')}` };
 });
 
 test('F3', 'the flick on the finished envelope: 700 px/s turns it (850 on an open sheet as before); 450 px/s — the edge lifts and drops back, nothing changes; a fast inward stroke turns, never folds; folds stay 4; no «на стол» advice after a failed flick', () => {
@@ -301,7 +307,7 @@ test('F3', 'the flick on the finished envelope: 700 px/s turns it (850 on an ope
   assert.equal(r.outcome, 'flip-almost', `450 px/s (measured ${r.speed}): «almost»`);
   assert.equal(h.run('!!dishFlight&&dishFlight.almost'), true, 'the edge is in the air');
   h.tick(2, 1 / 60, true);
-  assert.notEqual(live(h), 'На стол — возьми роти за середину и неси');
+  assert.notEqual(live(h), 'на стол — бери за середину');
   h.frames(30);
   assert.equal(h.run('dishFlight'), null, 'and drops back'); assert.equal(h.run('dish.flips'), 0); assert.equal(h.run('dish.faces===__f0'), true, 'the material did not change');
   out.push(`450→${r.outcome} (${r.speed} px/s)`);
@@ -310,10 +316,10 @@ test('F3', 'the flick on the finished envelope: 700 px/s turns it (850 on an ope
   edgeStroke(h, { side: 'bottom', v: 450, to: { x: w.x, y: w.y } });
   r = lastPan(h); h.frames(30);
   assert.ok(r.outcome === 'flip-almost' || r.outcome === 'none'); assert.equal(h.run('dish.flips'), 0);
-  assert.notEqual(live(h), 'На стол — возьми роти за середину и неси', 'no «на стол» advice right after a failed flick');
+  assert.notEqual(live(h), 'на стол — бери за середину', 'no «на стол» advice right after a failed flick');
   // a slow drag from the edge to the table still gets the advice
   edgeStroke(h, { side: 'bottom', v: 150, to: { x: w.x, y: w.y } }); h.frames(2);
-  assert.equal(live(h), 'На стол — возьми роти за середину и неси', 'a slow drag from the edge to the table: the advice');
+  assert.equal(live(h), 'на стол — бери за середину', 'a slow drag from the edge to the table: the advice');
   assert.equal(h.run('dish.folds'), 4);
   // inward strokes on the finished envelope: slow — nothing, fast — a flip; never a fold
   edgeStroke(h, { dir: 'in', v: 170, n: 14 }); h.frames(40);
