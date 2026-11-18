@@ -427,7 +427,7 @@ test('V10', 'one short line at a time: no percent, no arrow, no «лепесто
     seen.twitch = `${(far * 100).toFixed(1)} % of the radius, ${t} frames`; }
   stretch(h); say('готово — за середину и на таву', 'ball 1, stretched');
   toPan(h); say('коснись середины — ляжет банан');
-  tap(h, h.spots().pan); assert.equal(h.run('dish.filling.length'), 1, 'a tap in the middle lays the banana'); say('веди от края к середине');
+  tap(h, h.spots().pan); { const n = h.run('dish.filling.length'); assert.ok(n >= 10 && n <= 14, `a tap in the middle lays the banana heap (${n} slices; build 85)`); } say('веди от края к середине');
   envelope(h, [2, 3]); say('теперь две другие стороны'); envelope(h, [0, 1]); assert.equal(h.run('envelopeDone()'), true); say('конверт готов');
   h.frames(60 * 3); say('', 'both sides raw: silence');
   while (h.run('fryStep(meanCook())') < 2) h.frames(10);
@@ -568,7 +568,10 @@ test('V12', 'a cut counts only from edge to edge; «нарезано» after thr
   // across: 2 + 1 is «нарезано»
   drive(h, line({ x: B.c.x - w / 6, y: B.t.y - hh * 0.2 }, { x: B.c.x - w / 6, y: B.b.y + hh * 0.2 }, { v: 380, hold: 60 }));
   assert.deepEqual(h.J('cutFamilies()'), [2, 1]); assert.equal(h.run('cutEnough()'), true); assert.equal(msg(), 'нарезано — за середину и неси');
-  drive(h, line({ x: B.c.x + w / 6, y: B.t.y - hh * 0.2 }, { x: B.c.x + w / 6, y: B.b.y + hh * 0.2 }, { v: 380, hold: 60 }));
+  // build 85: «нарезано» slides the roti onto the paper tray at the near edge — the fourth cut is aimed at it there
+  { const T = rotiBox(h), tw = T.r.x - T.l.x, th = T.b.y - T.t.y;
+    assert.equal(h.run('dish.tray'), true, '«нарезано»: the roti is on the tray');
+    drive(h, line({ x: T.c.x + tw / 6, y: T.t.y - th * 0.2 }, { x: T.c.x + tw / 6, y: T.b.y + th * 0.2 }, { v: 380, hold: 60 })); }
   assert.deepEqual(h.J('cutFamilies()'), [2, 2], '2 + 2: the nine squares of the street vendor'); assert.equal(h.run('dish.cuts.length'), 4);
   h.tick(2, 1 / 60, true); assert.equal(h.run('loopErrs'), 0);
   serve(h); assert.equal(h.eve().rotiDone, 1, 'cut through, it is served');

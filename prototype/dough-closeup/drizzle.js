@@ -178,11 +178,11 @@ function _tableFromLocal(mx, my, face) {
   let p = { x: mx + o.x, y: my + o.y };
   if (typeof dishTwist !== "undefined" && dishTwist && typeof rotAbout === "function")
     p = rotAbout(p, dishTwist.pivot, Math.cos(dishTwist.angle), Math.sin(dishTwist.angle));
-  const pose = typeof dishPose === "function" ? dishPose() : { x: 0, y: 0, scale: 1 };
-  // роти в руке (несут на стойку): стенд рисует его со сдвигом жеста — нить идёт вместе с ним
-  const g = typeof dishGesture !== "undefined" ? dishGesture : null;
-  const sl = g && g.slide ? { x: g.slide.x * pose.scale, y: g.slide.y * pose.scale - (g.carry ? 0.05 * pose.scale : 0) } : { x: 0, y: 0 };
-  return { x: pose.x + sl.x + p.x * pose.scale, y: pose.y + sl.y + p.y * pose.scale };
+  // роти в руке (несут наверх, уменьшен и над пальцем), съезжает на лоток или летит на стол: нить идёт
+  // вместе с ним — поза та же, в которой его рисует стенд (dishShownPose, сборка 85)
+  const pose = typeof dishShownPose === "function" ? dishShownPose()
+    : typeof dishPose === "function" ? dishPose() : { x: 0, y: 0, scale: 1 };
+  return { x: pose.x + p.x * pose.scale, y: pose.y + p.y * pose.scale };
 }
 
 function _screen(mx, my, face) {
@@ -224,7 +224,14 @@ function _segments(pts) {
 // Плоская полоса (варенье): одна ровная линия одного цвета через все грани, без обрезки по грани и
 // без каймы — на мелких треугольниках листа обрезанная нить рвалась в клочья.
 // Ширина одна на всю полосу и не зависит от скорости пальца (быстрый штрих был волосом, медленный — комками).
-function _flatWidth() { return Math.max(4, (typeof PAN_R === "number" ? PAN_R : 80) * 0.05); }
+// Сгущёнка (milk.js, сборка 85) — та же плоская полоса, но тоньше: tint.thin — доля ширины варенья.
+// В руке роти уменьшен (dishShownPose) — полоса уже в той же доле.
+function _flatBase(tint) { return Math.max(4, (typeof PAN_R === "number" ? PAN_R : 80) * 0.05) * (tint && tint.thin ? tint.thin : 1); }
+function _flatWidth(tint) {
+  const w = _flatBase(tint);
+  if (typeof dishShownPose !== "function" || typeof dishPose !== "function" || typeof dish === "undefined" || !dish) return w;
+  return Math.max(1.5, w * dishShownPose().scale / Math.max(1e-6, dishPose().scale));
+}
 // Точки чаще, чем через полширины полосы, пропускаются: дрожь медленного пальца шла по краю зубцами.
 function _thin(pts, min) {
   const out = [];
@@ -238,7 +245,7 @@ function _strokeFlat(ctx, trail) {
   ctx.globalAlpha = 1;
   ctx.strokeStyle = trail.tint.fill;
   for (const seg of _segments(trail.pts)) {
-    ctx.lineWidth = _flatWidth();
+    ctx.lineWidth = _flatWidth(trail.tint);
     ctx.beginPath();
     const qs = _thin(seg.map(p => _screen(p.x, p.y, p.face)), ctx.lineWidth / 2);
     qs.forEach((q, i) => { if (i) ctx.lineTo(q.x, q.y); else ctx.moveTo(q.x, q.y); });
@@ -583,7 +590,7 @@ function drizzlePaint(g, screen, k) {
     g.strokeStyle = trail.tint ? trail.tint.fill : DRIZZLE_COLOR_FILL;
     for (const seg of _segments(trail.pts)) {
       let w = 0; for (const p of seg) w += p.w;
-      g.lineWidth = Math.max(2, (trail.tint ? _flatWidth() : w / seg.length * 1.6) / Math.max(1e-6, pose.scale) * k);
+      g.lineWidth = Math.max(trail.tint && trail.tint.thin ? 1.2 : 2, (trail.tint ? _flatBase(trail.tint) : w / seg.length * 1.6) / Math.max(1e-6, pose.scale) * k);
       g.beginPath();
       const qs = trail.tint ? _thin(seg.map(at), g.lineWidth / 2) : seg.map(at);
       qs.forEach((q, i) => { if (i) g.lineTo(q.x, q.y); else g.moveTo(q.x, q.y); });

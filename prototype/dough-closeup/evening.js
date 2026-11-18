@@ -372,7 +372,8 @@ function eveningDraw(g, sx, sy, layer){
     box(C.x0, C.y1 - Math.max(1, 2*u), C.x1 - C.x0, Math.max(1, 2*u), "#1d150e");
     const cm = { x:(C.x0 + C.x1)/2, y:(C.y0 + C.y1)/2 }, ry = Math.min(11*u, (C.y1 - C.y0)*0.32);
     const onCounter = EVE.rotiDone - (typeof guestTook === "function" ? guestTook() : 0) - (typeof nightTook === "function" ? nightTook() : 0);   // отданные гостю и псу на стойке не лежат
-    for(let i=0;i<onCounter;i++) ell({ x:cm.x + (i - 1)*66*u, y:cm.y }, 25*u, ry, "#c9a15a");
+    // сборка 85: роти уходит на стойку в бумажном лотке — лоток под ним
+    for(let i=0;i<onCounter;i++){ box(cm.x + (i - 1)*66*u - 30*u, cm.y - ry*1.25, 60*u, ry*2.5, "#e8dcc2"); ell({ x:cm.x + (i - 1)*66*u, y:cm.y }, 25*u, ry, "#c9a15a"); }
     // радио
     const R = G.radio;
     box(R.x0 + R.w*0.78, R.y0 - 9*u, Math.max(1, 1.5*u), 9*u, "#8b7f6e");

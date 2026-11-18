@@ -90,12 +90,15 @@ function nbShot(){
   if(typeof dish === "undefined" || !dish || !dish.faces || !dish.faces.length) return null;
   const c = document.createElement("canvas"); c.width = c.height = NB_SHOT_PX;
   const g = c.getContext && c.getContext("2d"); if(!g) return null;
-  const b = dishBounds(), w = Math.max(1e-6, b.right - b.left, b.bottom - b.top), k = NB_SHOT_PX*0.80/w;
+  // Роти в лотке (сборка 85): кадр берёт по лотку, лоток — бумажный прямоугольник под роти, как на столе.
+  const T = dish.tray && typeof trayRect === "function" ? trayRect() : null;
+  const b = T || dishBounds(), w = Math.max(1e-6, b.right - b.left, b.bottom - b.top), k = NB_SHOT_PX*(T ? 0.90 : 0.80)/w;
   const cx = (b.left + b.right)/2, cy = (b.top + b.bottom)/2, zk = k/ROTI_R_MM*0.6;
   g.fillStyle = "#3a2c1e"; g.fillRect(0, 0, NB_SHOT_PX, NB_SHOT_PX);
   const screen = p => ({ x:NB_SHOT_PX/2 + (p.x - cx)*k, y:NB_SHOT_PX*0.52 + (p.y - cy)*k });
+  if(T && typeof drawTray === "function") drawTray(g, screen, NB_SHOT_PX/160);
   nbFriedSide(() => drawDishFaces(g, dish.faces, screen, stackHeights(dish.faces), zk, true, pieceShiftLive(dish.faces)));
-  if(typeof drizzlePaint === "function") drizzlePaint(g, screen, k);   // полоса варенья (шаг 5) видна и на снимке
+  if(typeof drizzlePaint === "function") drizzlePaint(g, screen, k);   // полоса варенья (шаг 5) и сгущёнки (сборка 85) видна и на снимке
   if(typeof c.toDataURL !== "function") return null;
   for(const q of NB_SHOT_Q){
     const url = c.toDataURL("image/jpeg", q);

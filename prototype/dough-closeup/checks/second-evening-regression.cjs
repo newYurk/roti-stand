@@ -270,7 +270,10 @@ function saveMid(done, { n = 2, sh = {}, gone = true, som = { jar: false, early:
     shelf: { v: 1, n, bananas: 0, jam: 0, jar: false, empty: false, banBall: 0, jamBall: 0, som, jarIn: som.jar ? 'wait' : null, begun: true, events: [], ...sh } })]];
 }
 const sheetMid = h => h.J('(()=>{const b=dishBounds();return __harness.dishToClient({x:(b.left+b.right)/2,y:(b.top+b.bottom)/2})})()');
-const bananasOn = h => h.run('(dish.filling||[]).length');
+// build 85: one tap lays a heap of 10–14 slices, the second tap pours the egg — banana slices are counted by kind
+const bananasOn = h => h.run('(dish.filling||[]).filter(f=>(f.kind||"banana")==="banana").length');
+const eggOn = h => h.run('(dish.filling||[]).filter(f=>f.kind==="egg").length');
+const heap = n => n >= 10 && n <= 14;
 // a jam stroke: a finger led across the cut roti lying on the table (inside it, a little off the cut line)
 function jamStroke(h, dy = 0.3, v = 260) {
   const B = rotiBox(h), y = B.c.y + (B.b.y - B.c.y) * dy, a = { x: B.l.x + (B.c.x - B.l.x) * 0.3, y }, b = { x: B.r.x - (B.r.x - B.c.x) * 0.3, y };
@@ -335,10 +338,11 @@ test('S2', 'bananas: a bunch for two roti — 2 → 1 → gone as drawn; many sl
     onPan(h); h.frames(3);
     // build 80: the stand writes the hint line itself (one short line), evening.js no longer rewrites it
     const c = sheetMid(h); tap(h, c);
-    assert.equal(bananasOn(h), 1, `roti ${i + 1}: a touch of the middle lays a banana`);
+    assert.ok(heap(bananasOn(h)), `roti ${i + 1}: a touch of the middle lays a banana heap (${bananasOn(h)} slices)`);
+    const laid = bananasOn(h);
     assert.equal(h.SHF().bananas, 1 - i, 'the first slice takes one banana off the bunch');
     tap(h, { x: c.x + 26, y: c.y + 4 }); tap(h, { x: c.x - 26, y: c.y - 4 });
-    assert.equal(bananasOn(h), 3, 'more slices on the same roti'); assert.equal(h.SHF().bananas, 1 - i, '… cost nothing more');
+    assert.equal(bananasOn(h), laid, 'more taps lay no more banana'); assert.ok(eggOn(h) > 0, 'the second tap pours the egg'); assert.equal(h.SHF().bananas, 1 - i, '… and cost nothing more');
     seen.push(h.shelfDrawn().bananas);
     finish(h); serve(h); assert.equal(h.eve().rotiDone, i + 1);
   }
@@ -606,7 +610,7 @@ test('S8', 'without shelf.js the evening goes as in step 4 (bananas are not rati
   h.frames = (n = 1) => { for (let i = 0; i < n; i++) { h.advance(1000 / 60); h.run(FRAME); } };
   assert.equal(h.run('typeof shelfDraw'), 'undefined');
   onPan(h); h.frames(3); tap(h, sheetMid(h));
-  assert.equal(bananasOn(h), 1, 'no shelf.js: the banana is laid as before');
+  assert.ok(heap(bananasOn(h)), 'no shelf.js: the banana heap is laid as before');
   finish(h); serve(h); assert.equal(h.eve().rotiDone, 1);
   assert.deepEqual(h.saved().shelf, s.shelf, 'the shelf block of the save is not lost'); assert.equal(h.saved().n, 4);
   const bn = h0.run('BUILD').match(/· (\d+)$/)[1];

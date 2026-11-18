@@ -206,7 +206,9 @@ const corners = (h, k = 1.12) => h.J(`(()=>{const b=dishBounds(),cx=(b.left+b.ri
   return [[1,-1],[-1,-1],[-1,1],[1,1]].map(([sx,sy])=>__harness.dishToClient({x:cx+sx*hw,y:cy+sy*hh}))})()`);
 const wet = (h, min) => h.run(`fatMap?Array.from(fatMap).filter(v=>v>${min}).length:0`);
 const lum = c => 0.299 * c[0] + 0.587 * c[1] + 0.114 * c[2];
-function fried(h, { banana = true } = {}) { light(h); onPan(h); if (banana) tap(h, h.spots().pan); envelope(h); }
+// Build 85: a tap now lays the whole heap (12 slices), and more filling fries slower (the model counts its volume). The
+// model times below were set on a roti with ONE slice: that slice is laid by script, as the old tap did.
+function fried(h, { banana = true } = {}) { light(h); onPan(h); if (banana) h.run('{const b=dishBounds();addBananaSlice((b.left+b.right)/2,(b.top+b.bottom)/2)}'); envelope(h); }
 
 test('F1', 'times by the model: the steel side is «приготовленное» in ~20 s and «горелое» in ~60 s; without a flip the top of a quickly folded envelope stays raw; after a flick the new bottom is «бледное» within seconds', () => {
   const h = guest(); fried(h);

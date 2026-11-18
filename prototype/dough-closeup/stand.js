@@ -11,7 +11,7 @@
 // до 400%+ и лист «рвётся» в середине от любого движения. Замер это обнаружил сразу.
 // Число узлов сохранено (1 060 после обрезки по кругу; прежняя оценка «~1150» была на глаз,
 // пересчитано 07.09.2026), однородность рёбер восстановлена.
-const BUILD = "2026-11-17 · светлое тесто, 8–10 шлепков, гладкий край дыры; жарка видна и решает; картинки тёти Сом · 83";
+const BUILD = "2026-11-18 · подача: банан кучкой и яйцо, лоток и сгущёнка, роти над пальцем · 85";
 const GRID = 38;                   // 38x38, в круг попадает 1 060 узлов (посчитано, не оценка)
 let SUBSTEPS = 8;                  // T2: 8–10 подшагов, 1 итерация
 let DAMP = 0.986;
@@ -363,7 +363,7 @@ function dishBounds(faces=dish.faces){
   const xs=pts.map(p=>p.x), ys=pts.map(p=>p.y);
   return {left:Math.min(...xs),right:Math.max(...xs),top:Math.min(...ys),bottom:Math.max(...ys)};
 }
-function dishPose(){
+function dishPose(board){                // board — поза на доске, без лотка (доска не ездит)
   if(dish.mode==="fold") return {x:panC.x,y:panC.y,scale:targetR};
   const w=zone("work"), b=dishTwist ? twistBoundsCached() : dish.cutBounds;
   const cc=dishTwist ? {x:(b.left+b.right)/2,y:(b.top+b.bottom)/2} : dish.cutCenter;
@@ -372,6 +372,13 @@ function dishPose(){
   // 0,70 → 0,60 высоты) — на 375×667 он был в полтора раза крупнее, чем на таве, и подходил к её борту
   // (плейтест 17.11, п. 19); теперь вокруг него помещается доска.
   const scale=Math.min(targetR*1.25,w.w*.72/(b.right-b.left)/perspective,w.h*.60/(b.bottom-b.top));
+  if(dish.tray && dish.cutBounds && !board){
+    // Нарезанный роти на лотке (сборка 85): мельче на TRAY_SCALE и правым краем лотка у правого края стола, на
+    // высоте доски. У ближнего края слева лежит пёс (night.js, его зона отпускания), у дальнего — тава (отпущенный
+    // там роти снова жарится) и граница «нижней трети», по которой пёс поднимает голову.
+    const T=trayRect(), s=scale*TRAY_SCALE, xr=w.x+w.w*(1-TRAY_EDGE);
+    return {x:xr-(T.right-dish.cutCenter.x+cc.x)*s, y:w.cy-cc.y*s, scale:s};
+  }
   return {x:w.cx-cc.x*scale,y:w.cy-cc.y*scale,scale};
 }
 function dishLocal(p){
@@ -1713,6 +1720,7 @@ function updateDishTwist(dt){
   }
 }
 function syncDishUI(){
+  syncTray();
   document.getElementById("gDish").hidden=!dish;
   document.getElementById("gStep").hidden=!!dish;
   { const b = document.getElementById("tear"); if(b) b.hidden=!!dish; }
@@ -1737,7 +1745,7 @@ function syncDishUI(){
        : (dish.filling && dish.filling.length
          ? (fillingUnderSheet() ? "начинка под листом · мах наружу — перевернуть обратно · от стороны к середине — складка"
            : "начинка на листе · веди от каждой стороны к середине — четыре складки дают конверт")
-         : "положи банан и яйцо в пунктирный квадрат, потом заверни четыре стороны к середине"))
+         : "коснись середины — банан, ещё раз — яйцо; потом заверни четыре стороны к середине"))
     : dish.mode==="served" ? "Подано · «следующий роти» — новый кусочек"
     : "Нарезка: проведи через конверт · "+TWIST_HINT;
   const ban=document.getElementById("bananaMode");
@@ -1934,6 +1942,7 @@ function moveDishGesture(p,client,time){
   if(g.zone==="serve"){                       // нарезанный роти в руке: идёт за пальцем на стойку
     if(g.moved && !g.carry){ g.carry=true; g.carryFrom={x:g.end.x,y:g.end.y}; dish.message=""; }
     if(g.carry) g.slide={x:g.end.x-g.carryFrom.x,y:g.end.y-g.carryFrom.y};
+    if(g.carry && client) g.hand=toLocal(client.x,client.y-CARRY_ABOVE_CSS);   // роти висит над пальцем (dishShownPose)
     return;
   }
   if((g.zone==="middle" || g.zone==="edge") && !g.carry && g.foldSide>=0 && g.moved && client){
@@ -2004,8 +2013,57 @@ function updateDishMove(){
   if(!dishMove) return;
   const age=(performance.now()-dishMove.t0)/1000;
   if(age<dishMove.T) return;
-  dishMove=null; if(age<=MOVE_T+0.5) audioSlap(1.0);   // после возврата из фона — без шлепка
+  const quiet=dishMove.quiet;
+  dishMove=null; if(!quiet && age<=MOVE_T+0.5) audioSlap(1.0);   // после возврата из фона — без шлепка
   syncDishUI();
+}
+// ─── Лоток и роти в руке (сборка 85; плейтест 17.11 п. 14, ревью сборки 79 п. 6)
+// Нарезанный роти («нарезано», cutEnough) сам съезжает с доски на бумажный лоток у правого края стола: стол
+// свободен, и видно, что роти готов. Лоток — плоский прямоугольник цвета бумаги по габариту роти с полем
+// TRAY_PAD; он в координатах блюда, поэтому едет вместе с роти: в руке, к Сом, на стойку, псу. Съезд — тот же
+// перелёт dishMove, только тихий и без подскока (quiet): не украшение, а смена места. Отменили рез, и
+// «нарезано» пропало, — роти съезжает обратно на доску; вернули на таву — лоток остаётся на столе (его нет).
+// В руке (несут наверх) роти нарисован в CARRY_SHOW своего размера и висит серединой на CARRY_ABOVE_CSS выше
+// пальца: видно, куда несёшь. Отпускание по-прежнему судится по пальцу (eveningCounterHit, guestRefuses,
+// nightDogHit берут точку касания), зоны Сом, стойки и пса не менялись. Числа стартовые.
+const TRAY_PAD = 0.10, TRAY_SCALE = 0.85, TRAY_EDGE = 0.04, TRAY_T = 0.30;
+const TRAY_PAPER = "#e8dcc2", TRAY_RIM = "#c9b48e";
+const CARRY_SHOW = 0.60, CARRY_ABOVE_CSS = 40;
+function trayRect(){
+  const b=dish && dish.cutBounds; if(!b) return null;
+  const p=TRAY_PAD*Math.max(b.right-b.left,b.bottom-b.top);
+  return {left:b.left-p,right:b.right+p,top:b.top-p,bottom:b.bottom+p};
+}
+function syncTray(){
+  if(!dish) return;
+  const want=dish.mode==="cut" && !!dish.cutBounds && cutEnough();
+  if(want===!!dish.tray) return;
+  const from=dish.mode==="cut" && !dishMove ? dishShownPose() : null;
+  dish.tray=want;
+  if(from) dishMove={from,t0:performance.now(),T:TRAY_T,quiet:true};
+}
+// Поза, в которой роти нарисован сейчас: перелёт, рука (уменьшен и над пальцем), сдвиг на лопатке.
+// Её же берёт drizzle.js, чтобы нить сгущёнки и варенья шла вместе с роти.
+function dishShownPose(){
+  const pose=dishPose(), g=dishGesture;
+  if(dishMove){
+    const u=Math.max(0,Math.min(1,(performance.now()-dishMove.t0)/1000/dishMove.T)), e=u*u*(3-2*u), f=dishMove.from;
+    return {x:f.x+(pose.x-f.x)*e, y:f.y+(pose.y-f.y)*e-(dishMove.quiet ? 0 : Math.sin(Math.PI*u)*.25*pose.scale), scale:f.scale+(pose.scale-f.scale)*e};
+  }
+  if(!g || !g.slide) return pose;
+  if(g.zone==="serve" && g.carry && g.hand && dish.cutCenter){
+    const s=pose.scale*CARRY_SHOW, cc=dish.cutCenter;
+    return {x:g.hand.x-cc.x*s, y:g.hand.y-cc.y*s, scale:s};
+  }
+  return {x:pose.x+g.slide.x*pose.scale, y:pose.y+g.slide.y*pose.scale-(g.carry ? .05*pose.scale : 0), scale:pose.scale};
+}
+window.dishShownPose = dishShownPose;
+function drawTray(g,screen,sx){
+  const T=trayRect(); if(!T) return;
+  const q=[screen({x:T.left,y:T.top}),screen({x:T.right,y:T.top}),screen({x:T.right,y:T.bottom}),screen({x:T.left,y:T.bottom})];
+  g.save(); g.fillStyle=TRAY_PAPER; g.strokeStyle=TRAY_RIM; g.lineWidth=Math.max(1,2*sx); g.lineJoin="round";
+  g.beginPath(); q.forEach((p,i)=>i ? g.lineTo(p.x,p.y) : g.moveTo(p.x,p.y)); g.closePath(); g.fill(); g.stroke();
+  g.restore();
 }
 // Переворот на таве — тот же глагол «поднять и шлёпнуть»: коснуться края и резко махнуть
 // (вариант A для пробы владелицы, #21). Удержание здесь не используется — оно закреплено
@@ -3453,7 +3511,7 @@ function drawFoldGuide(g,screen,sx){
 const BOARD_PAD = 0.16, BOARD_MAX = 0.47;
 function boardRect(){
   const b=dish.cutBounds; if(!b) return null;
-  const pose=dishPose(), w=zone("work"), pad=BOARD_PAD*Math.max(b.right-b.left,b.bottom-b.top);
+  const pose=dishPose(true), w=zone("work"), pad=BOARD_PAD*Math.max(b.right-b.left,b.bottom-b.top);
   const hw=Math.min(w.w*BOARD_MAX,((b.right-b.left)/2+pad)*pose.scale), hh=Math.min(w.h*BOARD_MAX,((b.bottom-b.top)/2+pad)*pose.scale);
   // Роти на столе стоит серединой в середине рабочей зоны (dishPose). Его верх нарисован выше плоскости стола
   // на высоту кусков (tableLiftCanvas) — дальний край доски отодвинут на столько же, иначе поле сверху пропадало.
@@ -3469,19 +3527,16 @@ function drawBoard(g,sx,sy){
 function drawDish(g,sx,sy){
   let pose=dishPose(), moving=false;
   if(dishFlight){ drawDishFlight(g,sx,sy,pose); return; }
-  if(dishMove){
-    // Перелёт на стол: плавно от места на таве к позе нарезки, с небольшим подъёмом.
-    const u=Math.max(0,Math.min(1,(performance.now()-dishMove.t0)/1000/dishMove.T)), e=u*u*(3-2*u), f=dishMove.from;
-    pose={x:f.x+(pose.x-f.x)*e, y:f.y+(pose.y-f.y)*e-Math.sin(Math.PI*u)*.25*pose.scale, scale:f.scale+(pose.scale-f.scale)*e};
-    moving=true;
-  }
+  // Перелёт на стол (с небольшим подъёмом) и съезд на лоток — плавно от прежнего места к новому (dishShownPose).
+  if(dishMove){ pose=dishShownPose(); moving=true; }
   let slide=dishGesture && dishGesture.slide;
   if(!slide && dishBack && dish.mode==="fold"){        // отпущен над тавой: роти возвращается на место
     const u=(performance.now()-dishBack.t0)/1000/BACK_T, e=1-(1-u)*(1-u);
     if(u>=0 && u<1) slide={x:dishBack.slide.x*(1-e),y:dishBack.slide.y*(1-e)}; else dishBack=null;
   }
-  // в руке роти чуть приподнят над сталью
-  if(slide) pose={x:pose.x+slide.x*pose.scale, y:pose.y+slide.y*pose.scale-(dishGesture&&dishGesture.carry ? .05*pose.scale : 0), scale:pose.scale};
+  // в руке роти чуть приподнят над сталью; нарезанный в руке — уменьшен и над пальцем (dishShownPose)
+  if(dishGesture && dishGesture.slide) pose=dishShownPose();
+  else if(slide) pose={x:pose.x+slide.x*pose.scale, y:pose.y+slide.y*pose.scale, scale:pose.scale};
   if(dish.mode!=="fold") drawBoard(g,sx,sy);          // доска лежит на столе: роти на неё прилетает и с неё уносится
   const faces=dishGesture&&dishGesture.preview ? dishGesture.preview.faces : dish.faces;
   const T=dishTwist, tc=T ? Math.cos(T.angle) : 1, ts=T ? Math.sin(T.angle) : 0;
@@ -3489,6 +3544,7 @@ function drawDish(g,sx,sy){
   const lift=dishGesture && dish.mode==="fold" && dishGesture.anchor && !dishGesture.preview && !dishGesture.press ? dishGesture : null;
   const H=faces===dish.faces ? stackHeights(faces) : previewHeights(faces), zk=pose.scale*Z_EXAG/ROTI_R_MM*VIEW_UP*sy;
   if(lift) drawSpatula(g,screen,lift,sx,sy);
+  if(dish.mode!=="fold" && dish.tray) drawTray(g,screen,sx);   // лоток под роти, едет вместе с ним
   if(dish.mode!=="fold" && !moving && !slide && faces===dish.faces) drawDishTable(g,screen,faces,H,zk,sx,sy);   // в руке (на стойку) — плоский вид: рельеф не пересчитывается каждый кадр
   else {
     drawDishFaces(g,faces,screen,H,zk,true,pieceShiftLive(faces));
