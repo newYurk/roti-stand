@@ -12,7 +12,7 @@
    только выезд листа. Сама тетрадь открывается один раз за вечер, после первого ответа Сом, на 1,2 с. */
 
 const NB_V = 1;
-const NB_EVENINGS = 7, NB_PER_EVENING = 3;             // хранится 7 вечеров по три роти — до 21 снимка
+const NB_EVENINGS = 7, NB_PER_EVENING = 3;             // хранится 7 оконченных вечеров по три роти и идущий — до 24 снимков
 const NB_SHOT_PX = 240, NB_SHOT_BYTES = 30*1024;       // снимок: сторона в пикселях и предел веса JPEG
 const NB_SHOT_Q = [0.72, 0.58, 0.44, 0.30];            // качество JPEG по убыванию, пока не уложится в предел
 const NB_SLIDE_S = 0.18, NB_PEEK_S = 1.2, NB_SWIPE = 40;   // выезд листа, показ «сама», свайп (CSS px)
@@ -34,7 +34,7 @@ function notebookState(){ return { ...NB, events:nbEvents }; }
 // В выгрузку журнала картинки не кладутся: только кто съел и сколько весит снимок.
 function notebookExport(){
   return { state:{ cur:NB.cur, peeked:NB.peeked, open:nbMode, page:nbPage,
-    evenings:NB.evenings.map(e => ({ ts:e.ts, snaps:e.snaps.map(s => ({ to:s.to, crisp:s.crisp, step:s.step, kb:nbKb(s.img), ts:s.ts })) })) }, events:nbEvents };
+    evenings:NB.evenings.map(e => ({ ts:e.ts, n:e.n, snaps:e.snaps.map(s => ({ to:s.to, crisp:s.crisp, step:s.step, kb:nbKb(s.img), ts:s.ts })) })) }, events:nbEvents };
 }
 function nbBytes(url){ return typeof url === "string" ? Math.floor((url.length - url.indexOf(",") - 1)*3/4) : 0; }
 function nbKb(url){ return +(nbBytes(url)/1024).toFixed(1); }
@@ -43,8 +43,10 @@ function nbLoad(){
   if(!s || s.v !== NB_V || !Array.isArray(s.evenings)) return;
   const snap = x => x && (x.to === "som" || x.to === "counter" || x.to === "dog")
     ? { to:x.to, img:typeof x.img === "string" && x.img.startsWith("data:image/") ? x.img : null, crisp:+x.crisp || 0, step:Math.round(+x.step) || 0, ts:x.ts } : null;
-  const evenings = s.evenings.map(e => ({ ts:e && e.ts, snaps:(e && Array.isArray(e.snaps) ? e.snaps : []).map(snap).filter(Boolean).slice(0, NB_PER_EVENING) }))
-    .filter(e => e.snaps.length).slice(-NB_EVENINGS);
+  // n — номер вечера (shelf.js, шаг 5): по нему ночной кадр находит «вчера». Пока идёт вечер, страниц на одну
+  // больше: семь оконченных и сегодняшняя.
+  const evenings = s.evenings.map(e => ({ ts:e && e.ts, ...(e && +e.n > 0 ? { n:Math.round(+e.n) } : {}), snaps:(e && Array.isArray(e.snaps) ? e.snaps : []).map(snap).filter(Boolean).slice(0, NB_PER_EVENING) }))
+    .filter(e => e.snaps.length).slice(-(NB_EVENINGS + (s.cur ? 1 : 0)));
   NB = { v:NB_V, cur:!!s.cur && evenings.length > 0, peeked:!!s.peeked, evenings };
   if(Array.isArray(s.events)) nbEvents = s.events.slice(-60);
 }
@@ -92,6 +94,7 @@ function nbShot(){
   g.fillStyle = "#3a2c1e"; g.fillRect(0, 0, NB_SHOT_PX, NB_SHOT_PX);
   const screen = p => ({ x:NB_SHOT_PX/2 + (p.x - cx)*k, y:NB_SHOT_PX*0.52 + (p.y - cy)*k });
   nbFriedSide(() => drawDishFaces(g, dish.faces, screen, stackHeights(dish.faces), zk, true, pieceShiftLive(dish.faces)));
+  if(typeof drizzlePaint === "function") drizzlePaint(g, screen, k);   // полоса варенья (шаг 5) видна и на снимке
   if(typeof c.toDataURL !== "function") return null;
   for(const q of NB_SHOT_Q){
     const url = c.toDataURL("image/jpeg", q);
@@ -102,8 +105,9 @@ function nbShot(){
 function notebookSnap(to){
   let img = null;
   try{ img = nbShot(); }catch(e){ img = null; }          // снимок не должен сорвать подачу
-  if(!NB.cur){ NB.evenings.push({ ts:new Date().toISOString(), snaps:[] }); NB.cur = true; }
-  while(NB.evenings.length > NB_EVENINGS) NB.evenings.shift();
+  // Старые страницы здесь не выбрасываются: «начать вечер заново» снимет сегодняшнюю страницу, и выброшенная
+  // пропала бы зря. Лишнее уходит в notebookNewEvening, когда вечер окончен.
+  if(!NB.cur){ NB.evenings.push({ ts:new Date().toISOString(), ...(typeof shelfN === "function" ? { n:shelfN() } : {}), snaps:[] }); NB.cur = true; }
   const ev = NB.evenings[NB.evenings.length - 1];
   const stepOf = typeof guestStepOf === "function" ? guestStepOf : () => 0;
   let step = 0;
@@ -117,11 +121,21 @@ function notebookSnap(to){
 }
 // Снимки этого вечера (для ночного кадра, шаг 4).
 function notebookEvening(){ return NB.cur ? NB.evenings[NB.evenings.length - 1].snaps : []; }
+// Снимки прошлого вечера (для ночного кадра второго вечера, шаг 5).
+// Вчера — последняя страница с меньшим номером вечера: вечер, оконченный и начатый заново из радио,
+// оставляет вторую страницу с тем же номером, и она не «вчера». У страниц без номера (сборка 78) — по порядку.
+function notebookYesterday(){
+  if(!NB.cur) return [];
+  const E = NB.evenings, cur = E[E.length - 1];
+  for(let i = E.length - 2; i >= 0; i--) if(!(cur.n > 0) || !(E[i].n > 0) || E[i].n < cur.n) return E[i].snaps;
+  return [];
+}
 // evening.js зовёт это из eveNewEvening. «Начать вечер заново» посреди вечера — тот же вечер с начала:
 // его снимки стираются. Оконченный вечер остаётся страницей; следующий начнётся с новой.
 function notebookNewEvening(from, wasOver){
   if(NB.cur && !wasOver && from === "radio") NB.evenings.pop();
   NB.cur = false; NB.peeked = false;
+  while(NB.evenings.length > NB_EVENINGS) NB.evenings.shift();   // хранится семь оконченных вечеров
   nbMode = 0; nbAnim = 0; nbPeek = 0; nbDrag = null; nbPage = nbPages().length - 1; nbQuiet = NB_QUIET_S;
 }
 

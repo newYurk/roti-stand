@@ -13,6 +13,12 @@
      drizzleDraw(ctx)
      drizzleReset()
      drizzleEnabled  — покрытие [0..1]
+
+   ВАРЕНЬЕ (шаг 5 v0, shelf.js): тот же жест другим цветом. window.drizzleTint = {fill, rim} — нить,
+   начатая при нём, плоская: без брызг, падающих капель, выбега и мокрого блеска (правило 17.11).
+   drizzleActive — палец ведёт нить; drizzleStrokes — сколько нитей легло на роти; drizzlePaint —
+   те же нити в чужой холст (снимок тетради). Нити помнят грань по номеру; после нового реза номера
+   другие — _relink() находит грань заново по точке.
 */
 
 "use strict";
@@ -40,22 +46,50 @@ let _coverage     = 0;
 let _samples      = [];
 let _coast        = null;
 let _cardDone     = false;
+let _facesRef     = null;    // dish.faces, для которого верны номера граней в нитях
 
 Object.defineProperty(window, "drizzleEnabled",
   { get: () => _coverage, configurable: true });
 Object.defineProperty(window, "drizzleModeOn",
   { get: () => _modeOn, configurable: true });
+Object.defineProperty(window, "drizzleActive",
+  { get: () => _active, configurable: true });
+Object.defineProperty(window, "drizzleStrokes",
+  { get: () => _trails.filter(t => t.pts.some(q => q && !q.break)).length, configurable: true });
 
 function drizzleReset() {
   _modeOn = false; _active = false; _captureId = null;
   _trails = []; _currentTrail = null; _drops = []; _falls = []; _coverage = 0;
-  _samples = []; _coast = null; _cardDone = false;
+  _samples = []; _coast = null; _cardDone = false; _facesRef = null;
   const body = document.getElementById("cardBody");
   if (body) delete body.dataset.drizzle;
   _syncButton();
 }
 
+function _relink() {
+  if (typeof dish === "undefined" || !dish || !dish.faces || typeof pointInFace !== "function") return;
+  if (dish.faces === _facesRef) return;
+  const first = _facesRef === null || !_trails.length;
+  _facesRef = dish.faces;
+  if (first) return;
+  for (const t of _trails) {
+    for (let n = 0; n < t.pts.length; n++) {
+      const p = t.pts[n];
+      if (!p || p.break) continue;
+      const f = dish.faces[p.face];
+      if (f && f.kind === "dough" && pointInFace(f.points, p.x, p.y)) continue;
+      let found = false;
+      for (let i = 0; i < dish.faces.length && !found; i++) {
+        const q = dish.faces[i];
+        if (q.kind === "dough" && pointInFace(q.points, p.x, p.y)) { p.face = i; found = true; }
+      }
+      if (!found) t.pts[n] = { break: true };   // точка попала в пропил: нить здесь рвётся
+    }
+  }
+}
+
 function drizzleUpdate(dt) {
+  _relink();
   if (_coast && _currentTrail) {
     _coast.t += dt;
     const damp = Math.exp(-dt / COAST_DECAY);
@@ -106,6 +140,7 @@ function drizzleDraw(ctx) {
   ctx.lineJoin = "round";
   ctx.lineCap = "round";
   for (const trail of _trails) {
+    if (trail.tint) { _strokeFlat(ctx, trail); continue; }
     const runs = _runs(trail.pts);
     ctx.globalAlpha = Math.min(1, trail.wet + 0.12);
     for (const run of runs) _strokeRun(ctx, run, tilt);
@@ -144,7 +179,10 @@ function _tableFromLocal(mx, my, face) {
   if (typeof dishTwist !== "undefined" && dishTwist && typeof rotAbout === "function")
     p = rotAbout(p, dishTwist.pivot, Math.cos(dishTwist.angle), Math.sin(dishTwist.angle));
   const pose = typeof dishPose === "function" ? dishPose() : { x: 0, y: 0, scale: 1 };
-  return { x: pose.x + p.x * pose.scale, y: pose.y + p.y * pose.scale };
+  // роти в руке (несут на стойку): стенд рисует его со сдвигом жеста — нить идёт вместе с ним
+  const g = typeof dishGesture !== "undefined" ? dishGesture : null;
+  const sl = g && g.slide ? { x: g.slide.x * pose.scale, y: g.slide.y * pose.scale - (g.carry ? 0.05 * pose.scale : 0) } : { x: 0, y: 0 };
+  return { x: pose.x + sl.x + p.x * pose.scale, y: pose.y + sl.y + p.y * pose.scale };
 }
 
 function _screen(mx, my, face) {
@@ -171,6 +209,44 @@ function _runs(pts) {
   return out;
 }
 
+// Куски нити между разрывами, без деления по граням (для плоской полосы варенья).
+function _segments(pts) {
+  const out = [];
+  let cur = [];
+  for (const p of pts) {
+    if (!p || p.break) { if (cur.length) out.push(cur); cur = []; continue; }
+    cur.push(p);
+  }
+  if (cur.length) out.push(cur);
+  return out;
+}
+
+// Плоская полоса (варенье): одна ровная линия одного цвета через все грани, без обрезки по грани и
+// без каймы — на мелких треугольниках листа обрезанная нить рвалась в клочья.
+// Ширина одна на всю полосу и не зависит от скорости пальца (быстрый штрих был волосом, медленный — комками).
+function _flatWidth() { return Math.max(4, (typeof PAN_R === "number" ? PAN_R : 80) * 0.05); }
+// Точки чаще, чем через полширины полосы, пропускаются: дрожь медленного пальца шла по краю зубцами.
+function _thin(pts, min) {
+  const out = [];
+  for (let i = 0; i < pts.length; i++) {
+    const q = pts[i], l = out[out.length - 1];
+    if (!l || i === pts.length - 1 || Math.hypot(q.x - l.x, q.y - l.y) >= min) out.push(q);
+  }
+  return out;
+}
+function _strokeFlat(ctx, trail) {
+  ctx.globalAlpha = 1;
+  ctx.strokeStyle = trail.tint.fill;
+  for (const seg of _segments(trail.pts)) {
+    ctx.lineWidth = _flatWidth();
+    ctx.beginPath();
+    const qs = _thin(seg.map(p => _screen(p.x, p.y, p.face)), ctx.lineWidth / 2);
+    qs.forEach((q, i) => { if (i) ctx.lineTo(q.x, q.y); else ctx.moveTo(q.x, q.y); });
+    if (qs.length === 1) ctx.lineTo(qs[0].x + 0.01, qs[0].y);
+    ctx.stroke();
+  }
+}
+
 function _clipFace(ctx, face) {
   if (typeof dish === "undefined" || !dish || !dish.faces[face]) return false;
   const f = dish.faces[face];
@@ -186,6 +262,7 @@ function _clipFace(ctx, face) {
 }
 
 function _strokeRun(ctx, run, tilt) {
+  const RIM = DRIZZLE_COLOR_RIM, FILL = DRIZZLE_COLOR_FILL;
   if (!run.length) return;
   let wAvg = 0;
   for (const p of run) wAvg += p.w;
@@ -197,11 +274,11 @@ function _strokeRun(ctx, run, tilt) {
     _clipFace(ctx, run[0].face);
   if (run.length === 1) {
     const s = _screen(run[0].x, run[0].y, run[0].face);
-    ctx.fillStyle = DRIZZLE_COLOR_RIM;
+    ctx.fillStyle = RIM;
     ctx.beginPath();
     ctx.ellipse(s.x, s.y, rimW * 0.5, rimW * 0.5 * tilt, 0, 0, Math.PI * 2);
     ctx.fill();
-    ctx.fillStyle = DRIZZLE_COLOR_FILL;
+    ctx.fillStyle = FILL;
     ctx.beginPath();
     ctx.ellipse(s.x, s.y, fillW * 0.5, fillW * 0.5 * tilt, 0, 0, Math.PI * 2);
     ctx.fill();
@@ -211,10 +288,10 @@ function _strokeRun(ctx, run, tilt) {
       const s = _screen(run[i].x, run[i].y, run[i].face);
       if (i === 0) ctx.moveTo(s.x, s.y); else ctx.lineTo(s.x, s.y);
     }
-    ctx.strokeStyle = DRIZZLE_COLOR_RIM;
+    ctx.strokeStyle = RIM;
     ctx.lineWidth = rimW;
     ctx.stroke();
-    ctx.strokeStyle = DRIZZLE_COLOR_FILL;
+    ctx.strokeStyle = FILL;
     ctx.lineWidth = fillW;
     ctx.stroke();
   }
@@ -300,12 +377,12 @@ function _stampOne(trail, x, y, sp) {
   const w = _widthForSpeed(sp);
   const hit = _hit({ x, y });
   if (!hit) {
-    if (_nearRoti({ x, y })) _fall(x, y, w);
+    if (!trail.tint && _nearRoti({ x, y })) _fall(x, y, w);
     trail.broken = true;
     return;
   }
   const last = trail.pts[trail.pts.length - 1];
-  if (trail.broken || (last && !last.break && last.face !== hit.i)) {
+  if (trail.broken || (!trail.tint && last && !last.break && last.face !== hit.i)) {
     trail.pts.push({ break: true });
     trail.broken = false;
   } else if (last && !last.break && last.face === hit.i) {
@@ -343,6 +420,8 @@ function _onDown(e) {
   if (!_inDrizzlePhase() || _ui(e)) return;
   if (e.button != null && e.button !== 0) return;
   if (_active) return;
+  // варенье (shelf.js): касание радио, тетради или банки — не штрих; shelf.js убирает варенье, касание идёт стенду
+  if (window.drizzleTint && typeof window.drizzlePass === "function" && window.drizzlePass(e.clientX, e.clientY)) return;
   _active = true;
   _captureId = e.pointerId;
   _coast = null;
@@ -351,7 +430,7 @@ function _onDown(e) {
   const p = _pt(e);
   const now = (typeof performance !== "undefined" ? performance.now() : Date.now()) / 1000;
   _samples = [{ x: p.x, y: p.y, t: now }];
-  _currentTrail = { pts: [], wet: 1, settling: false };
+  _currentTrail = { pts: [], wet: 1, settling: false, tint: window.drizzleTint || null };
   _trails.push(_currentTrail);
   _stamp(_currentTrail, p.x, p.y, 0);
   e.stopImmediatePropagation();
@@ -369,7 +448,7 @@ function _onMove(e) {
   if (_samples.length > 12) _samples.shift();
   _stamp(_currentTrail, p.x, p.y, sp);
   const hit = _hit(p);
-  if (hit && Math.random() < 0.08) _bead(hit.mx, hit.my, typeof PAN_R === "number" ? PAN_R : 80, hit.i);
+  if (hit && !_currentTrail.tint && Math.random() < 0.08) _bead(hit.mx, hit.my, typeof PAN_R === "number" ? PAN_R : 80, hit.i);
   e.stopImmediatePropagation();
 }
 
@@ -391,7 +470,7 @@ function _onUp(e) {
     const v = _velocity();
     const pan = typeof PAN_R === "number" ? PAN_R : 80;
     const last = _samples[_samples.length - 1];
-    if (last && Math.hypot(v.vx, v.vy) > pan * 0.5) {
+    if (last && !_currentTrail.tint && Math.hypot(v.vx, v.vy) > pan * 0.5) {
       _coast = { x: last.x, y: last.y, vx: v.vx, vy: v.vy, t: 0 };
     } else {
       _currentTrail.settling = true;
@@ -493,6 +572,28 @@ function drizzleRotate(angle, pivot) {
   }
 }
 
+// Те же нити в чужой холст: screen(p) переводит точку блюда (с её сдвигом куска) в пиксели холста,
+// k — пикселей на единицу блюда. Для снимка тетради (notebook.js): полоса варенья видна и там.
+function drizzlePaint(g, screen, k) {
+  if (!_trails.length || typeof dish === "undefined" || !dish) return;
+  const pose = typeof dishPose === "function" ? dishPose() : { scale: 1 };
+  const at = p => { const o = _shiftOf(p.face); return screen({ x: p.x + o.x, y: p.y + o.y }); };
+  g.save(); g.lineJoin = "round"; g.lineCap = "round";
+  for (const trail of _trails) {
+    g.strokeStyle = trail.tint ? trail.tint.fill : DRIZZLE_COLOR_FILL;
+    for (const seg of _segments(trail.pts)) {
+      let w = 0; for (const p of seg) w += p.w;
+      g.lineWidth = Math.max(2, (trail.tint ? _flatWidth() : w / seg.length * 1.6) / Math.max(1e-6, pose.scale) * k);
+      g.beginPath();
+      const qs = trail.tint ? _thin(seg.map(at), g.lineWidth / 2) : seg.map(at);
+      qs.forEach((q, i) => { if (i) g.lineTo(q.x, q.y); else g.moveTo(q.x, q.y); });
+      if (qs.length === 1) g.lineTo(qs[0].x + 0.01, qs[0].y);
+      g.stroke();
+    }
+  }
+  g.restore();
+}
+window.drizzlePaint = drizzlePaint;
 window.drizzleRotate = drizzleRotate;
 window.setDrizzleMode = _setMode;
 
@@ -509,8 +610,11 @@ window.setDrizzleMode = _setMode;
   function wrap(name) {
     const orig = window[name];
     if (typeof orig !== "function" || orig._drizzleWrap) return false;
-    const wrapped = function () {
-      if (_inDrizzlePhase()) return;
+    const wrapped = function (id, cx, cy) {
+      // варенье в руке, а касание легло на радио, тетрадь или банку (shelf.js): оно идёт стенду. Слушатель стенда
+      // стоит раньше нашего, поэтому вопрос задаётся и здесь, и в _onDown — кто первый, тот и спросит.
+      const pass = name === "onDown" && _inDrizzlePhase() && window.drizzleTint && typeof window.drizzlePass === "function" && window.drizzlePass(cx, cy);
+      if (!pass && _inDrizzlePhase()) return;
       return orig.apply(this, arguments);
     };
     wrapped._drizzleWrap = true;
