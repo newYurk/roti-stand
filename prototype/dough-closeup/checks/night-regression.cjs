@@ -128,10 +128,15 @@ function toTable(h) {
 const rotiBox = h => h.J(`(()=>{const b=dish.cutBounds,up=tableLiftCanvas()*cv.getBoundingClientRect().height/cv.height,
   P=(x,y)=>{const q=__harness.dishToClient({x,y});return {x:q.x,y:q.y-up}};
   return {c:P(dish.cutCenter.x,dish.cutCenter.y),l:P(b.left,dish.cutCenter.y),r:P(b.right,dish.cutCenter.y),t:P(dish.cutCenter.x,b.top),b:P(dish.cutCenter.x,b.bottom)}})()`);
+// Build 80: «нарезано» is three edge-to-edge cuts of two directions (1 + 2); one cut no longer serves.
 function cut(h) {
-  const B = rotiBox(h), dx = (B.r.x - B.l.x) * 0.2;
+  const B = rotiBox(h), w = B.r.x - B.l.x, dx = w * 0.2, dy = (B.b.y - B.t.y) * 0.2;
   drive(h, line({ x: B.l.x - dx, y: B.c.y }, { x: B.r.x + dx, y: B.c.y }, { v: 380, hold: 60 }));
   assert.equal(h.run('dish.cuts.length'), 1, 'one cut through the envelope');
+  assert.equal(h.run('cutEnough()'), false, 'one cut is not «нарезано»');
+  for (const k of [-1, 1]) drive(h, line({ x: B.c.x + k * w / 6, y: B.t.y - dy }, { x: B.c.x + k * w / 6, y: B.b.y + dy }, { v: 380, hold: 60 }));
+  assert.equal(h.run('dish.cuts.length'), 3, 'three cuts, each from edge to edge');
+  assert.equal(h.run('cutEnough()'), true, 'two across one: «нарезано»');
 }
 function serve(h, to) {
   const B = rotiBox(h);
@@ -157,7 +162,11 @@ const fryNow = h => h.J('{t:dish.panTime,cook:meanCook(),dry:meanDry(),crisp:dis
 function until(h, cond, max = 60 * 400) { let n = 0; while (!h.run(cond) && n < max) { h.frames(1); n++; } assert.ok(h.run(cond), `waited ${n} frames for ${cond}`); return n; }
 function onPan(h) { stretched(h); toPan(h); }
 function arrive(h) { until(h, 'GST.here'); until(h, 'guestPic()===2'); until(h, 'guestPic()===1'); }
-function finish(h, crisp) { envelope(h); toTable(h); cut(h); if (crisp !== undefined) h.run(`dishCrisp=${crisp}`); }
+// Merge with the frying batch (build 79): an open sheet no longer browns, so a roti folded and served at once is
+// RAW and Som refuses it. As in guest-regression.cjs, the folded envelope fries on until its steel side is
+// «бледное» (model time, a few seconds); the answer for such a roti is a nod, as these checks expect.
+const PALE = 'fryStep(meanCook())>=1';
+function finish(h, crisp) { if (!h.run('envelopeDone()')) envelope(h); if (!h.run(PALE)) until(h, PALE); toTable(h); cut(h); if (crisp !== undefined) h.run(`dishCrisp=${crisp}`); }
 const nextBall = h => { tap(h, h.spots().bowl); assert.equal(h.eve().ball, true, 'a ball is taken from the bowl'); };
 const FRESH = { v: 1, here: false, gone: false, knocked: false, answers: [], gifts: [], taken: 0 };
 
@@ -225,15 +234,23 @@ test('D1', 'third ball: the dog sleeps, lifts its head once the roti in the hand
   // an uncut roti cannot be given, and a stroke from its middle into the dog's corner is an ordinary cut stroke
   // (review of step 4: it was refused with "cut first"); the same stroke up to the counter is still refused
   { const c = rotiBox(h).c; drive(h, line(c, h.spots().counter, { v: 420, hold: 80 }), { settle: 30 }); }
-  assert.match(h.run('dish.message'), /^Сначала разрежь/, 'uncut, from the middle to the counter: "cut first"'); assert.equal(h.run('dish.cuts.length'), 0);
-  h.run('dish.message=""');
+  assert.match(h.run('dish.message'), /^сначала разрежь/, 'uncut, from the middle to the counter: "cut first"'); assert.equal(h.run('dish.cuts.length'), 0);
+  h.run('dish.message="";dish.noteUntil=0');
   { const c = rotiBox(h).c; drive(h, line(c, h.ns().dog, { v: 420, hold: 80 }), { settle: 30 }); }
-  assert.doesNotMatch(h.run('dish.message'), /^Сначала разрежь/, 'uncut, from the middle to the dog: not refused');
-  assert.equal(h.run('dish.cuts.length'), 1, 'it cuts, as before step 4');
+  assert.doesNotMatch(h.run('dish.message'), /^сначала разрежь/, 'uncut, from the middle to the dog: not refused as a serve');
+  // Changed in build 80: a cut goes from edge to edge, so this stroke (it starts in the middle of the roti) is no
+  // longer a cut — until build 79 it left one («it cuts, as before step 4»). The words say how to cut.
+  assert.equal(h.run('dish.cuts.length'), 0, 'a stroke from the middle is not a cut any more'); assert.equal(h.run('dish.message'), 'режь от края до края');
   assert.equal(h.eve().rotiDone, 2, 'an uncut roti is not served to the dog'); assert.equal(h.run('dish.mode'), 'cut'); assert.equal(h.NGT().dog, 0);
-  assert.equal(h.run('eveningLive("Разрезов: 1")'), 'нарезано · возьми за середину и неси', 'no "to the counter" in the words while the dog takes the roti too');
+  cut(h);
+  assert.equal(h.run('dish.message'), 'нарезано — за середину и неси', 'no "to the counter" in the words: the dog takes the roti too');
+  assert.equal(h.run('eveningLive(dish.message)'), null, 'the stand line passes through (nightLive is gone in build 80)'); assert.equal(h.run('typeof nightLive'), 'undefined');
   const S = h.ns();
   { const r = h.J('(()=>{const r=cv.getBoundingClientRect();return {top:r.top,height:r.height}})()'); S.lookY = r.top + r.height * 2 / 3; }   // the line of the spec, counted here — not read from night.js
+  // Changed in the review of build 80: the middle of a roti on the table is always a carry, so the UNCUT roti led
+  // to the counter above was in the hand and the dog has already looked once at it («look» in the journal before
+  // this point). «One look per carry» is counted for the carry below.
+  const looks0 = h.ngt().length; assert.deepEqual(h.ngt(), ['look'], 'the uncut roti carried up to the counter: the dog looked once');
   let p = grab(h);
   assert.ok(p.y > S.lookY, `the roti lies in the lower third (${p.y.toFixed(0)} > ${S.lookY.toFixed(0)})`);
   p = go(h, p, { x: p.x, y: S.lookY + 12 });
@@ -242,7 +259,7 @@ test('D1', 'third ball: the dog sleeps, lifts its head once the roti in the hand
   assert.equal(h.ns().pose, 1, 'above the lower third the dog lifts its head');
   p = go(h, p, { x: p.x, y: S.lookY + 60 }); h.frames(2);
   assert.equal(h.ns().pose, 1, 'the head stays up while the roti is in the hand');
-  assert.equal(h.run('eveningLive(dish.message)'), 'в руке — неси и отпусти');
+  assert.equal(h.run('dish.message'), '', 'in the hand: no words (build 80; it was «в руке — неси и отпусти»)');
   // over the roti the dog is drawn on a flat dark silhouette of itself, a little wider (the fur is nearly the colour of the roti)
   { const o = h.drawn('nightDrawOver(ctx,1,1,eveGeo());'), dark = o.filter(e => e.fill === '#1d150e'), fur = o.filter(e => e.fill === '#d9d2c0');
     assert.ok(fur.length >= 5 && o.length % 2 === 0, `the dog is drawn over the roti (${o.length} ellipses)`);
@@ -250,7 +267,7 @@ test('D1', 'third ball: the dog sleeps, lifts its head once the roti in the hand
     for (let i = 0; i < half; i++) { assert.ok(Math.abs(o[i].x - o[half + i].x) < 1e-6 && o[i].rx > o[half + i].rx + 1 && o[i].ry > o[half + i].ry + 1, 'each dark shape is wider than its own'); }
     assert.ok(dark.length > half); }
   assert.equal(h.drawn('nightDrawUnder(ctx,1,1,eveGeo());').filter(e => e.fill === '#d9d2c0').length, fur_under(h), 'under the table layer the dog has no silhouette');
-  assert.deepEqual(h.ngt(), ['look'], 'one look per carry');
+  assert.deepEqual(h.ngt().slice(looks0), ['look'], 'one look per carry');
   p = go(h, p, S.dog); drop(h, p);
   assert.equal(h.eve().rotiDone, 3); assert.equal(h.eve().ball, false);
   assert.deepEqual(h.serves(), ['dog']); assert.equal(h.NGT().dog, 1); assert.equal(h.onCounter(), 0, 'nothing of it lies on the counter');
@@ -276,7 +293,7 @@ test('D2', 'while Som waits for her roti the dog sleeps and does not take it: re
   p = go(h, p, S.dog); drop(h, p);
   assert.equal(h.eve().rotiDone, 0, 'not served'); assert.equal(h.eve().ball, true); assert.equal(h.run('dish.mode'), 'cut'); assert.equal(h.NGT().dog, 0);
   assert.equal(h.J('gestures.filter(g=>g.kind==="pan").at(-1).outcome'), 'serve-back', 'the stand logs a carry that ended nowhere');
-  assert.equal(h.run('nightLive(dish.message)'), null, 'while the roti is hers the words stay the stand\'s and Som\'s');
+  assert.equal(h.run('eveningLive(dish.message)'), null, 'the words stay the stand\'s');
   serve(h, h.gs().som);
   assert.deepEqual(h.serves(), ['som']); sec(h, 5);
   // second ball: she is still here → hers; script shortcut: she has left → the dog takes it
@@ -285,8 +302,8 @@ test('D2', 'while Som waits for her roti the dog sleeps and does not take it: re
   h.run('guestLeave("test")');
   assert.equal(h.ns().wants, true, 'Som is gone: the dog takes the second roti');
   { const B = rotiBox(h); serve(h, { x: B.c.x + 30, y: B.c.y + 20 }); }   // a short carry released on the table: not served, and the words do not send it "to the counter"
-  assert.equal(h.eve().rotiDone, 1); assert.match(h.run('dish.message'), /^Неси выше/);
-  assert.equal(h.run('eveningLive(dish.message)'), 'роти на столе · возьми за середину и неси');
+  assert.equal(h.eve().rotiDone, 1); assert.equal(h.run('dish.message'), 'неси дальше', 'the words do not name the counter (build 80: one short line of the stand)');
+  assert.equal(h.run('eveningLive(dish.message)'), null);
   serve(h, h.ns().dog);
   assert.deepEqual(h.serves(), ['som', 'dog']); assert.equal(h.NGT().dog, 1); assert.equal(h.onCounter(), 0);
   assert.deepEqual(h.errors, []);
@@ -408,6 +425,89 @@ test('D6', 'without night.js the evening is the one of step 3: the old closing l
   assert.equal(h.eve().over, true); assert.equal(h.run('eveningLive("")'), 'вечер окончен · три роти');
   h.tick(3, 1 / 60, true); assert.equal(h.run('loopErrs'), 0); assert.deepEqual(h.errors, []);
   return { summary: 'evening.js + guest.js + notebook.js alone: old closing line, save.night kept' };
+});
+
+test('D7', 'the snapshot of a roti given to Som keeps her answer, and the mark under it is her answer face: nod (level mouth, head tilted), crunch (closed eyes, crumbs); an old snapshot without an answer keeps the old mark', () => {
+  const h = night(); light(h);
+  onPan(h); arrive(h); finish(h); serve(h, h.gs().som);          // short fry → nod
+  assert.deepEqual(h.g().answers.map(a => a.answer), ['nod']);
+  const snaps = h.NB().evenings.at(-1).snaps;
+  assert.equal(snaps[0].to, 'som'); assert.equal(snaps[0].answer, 'nod', 'the snapshot keeps the answer');
+  // the mark under a Som snapshot draws her answer face, the old mark has no features
+  const mark = ans => h.J(`(()=>{const E=[],R=[],S=[],k={ellipse:ctx.ellipse,stroke:ctx.stroke,rotate:ctx.rotate,fillRect:ctx.fillRect};
+    ctx.ellipse=(x,y,rx,ry)=>{E.push({f:ctx.fillStyle,x,y,rx,ry})};ctx.rotate=a=>R.push(a);ctx.stroke=()=>S.push(1);
+    try{nbMark(ctx,1,1,"som",100,100,1,${ans === null ? 'null' : JSON.stringify(ans)})}finally{Object.assign(ctx,k)}return {E,R,S}})()`);
+  const mNod = mark('nod');
+  assert.deepEqual(mNod.R, [0.16], 'the nod head is tilted');
+  assert.equal(mNod.E.filter(e => e.f === '#1d150e' && e.rx < 1.4).length, 2, 'two open eyes');
+  assert.equal(mNod.S.length, 3, 'two earrings + one level mouth');
+  const mCrunch = mark('crunch');
+  assert.deepEqual(mCrunch.R, [], 'no tilt on the crunch');
+  assert.equal(mCrunch.E.filter(e => e.f === '#f0c674').length, 6, 'crumbs');
+  assert.equal(mCrunch.E.filter(e => e.f === '#1d150e').length, 0, 'no open eyes — the eyes are closed');
+  assert.equal(mCrunch.S.length, 5, 'two earrings + two closed eyes + a smile');
+  const mOld = mark(null);
+  assert.deepEqual(mOld.R, [], 'the old mark is not tilted');
+  assert.equal(mOld.E.filter(e => e.f === '#f0c674').length, 0);
+  assert.equal(mOld.E.filter(e => e.f === '#1d150e').length, 0, 'the old mark has no face features');
+  assert.equal(mOld.S.length, 2, 'only the earrings');
+  const r = reloadD(h);
+  assert.equal(r.NB().evenings.at(-1).snaps[0].answer, 'nod', 'the answer survives a reload');
+  assert.equal(h.run('loopErrs'), 0); assert.deepEqual(h.errors, []);
+  return { summary: `answer kept on the snapshot: ${snaps[0].answer}; nod: tilt + open eyes + level mouth, crunch: crumbs + closed eyes, old: neutral` };
+});
+
+// ── night with shelf.js (for the yesterday row, step 5): shelf.js loads last, after night.js ──
+const shelfScript = { file: path.join(path.dirname(H.sourcePath), 'shelf.js'), src: fs.readFileSync(path.join(path.dirname(H.sourcePath), 'shelf.js'), 'utf8') };
+function nightShelf(opts = {}) {
+  const h = night(opts);
+  vm.runInContext(shelfScript.src, h.context, { filename: shelfScript.file, timeout: 10000 });
+  return h;
+}
+
+test('D8', 'the night frame of the second evening shows yesterday as a separate row below today, the same size, dimmed and without marks', () => {
+  const snap = (to, k) => ({ to, img: null, crisp: 1, step: 1, ts: `2026-11-17T12:0${k}:00.000Z` });
+  const store = [['roti_evening', JSON.stringify({ v: 1, lamp: false, ballsLeft: 0, rotiDone: 3, lid: true, over: true, ball: false, n: 2,
+    guest: { v: 1, here: false, gone: true, knocked: true, answers: [], gifts: [], taken: 0, events: [] },
+    notebook: { v: 1, cur: true, peeked: true, evenings: [
+      { ts: '2026-11-16T12:00:00.000Z', n: 1, snaps: ['som', 'som', 'dog'].map((to, k) => snap(to, k)) },
+      { ts: '2026-11-17T12:00:00.000Z', n: 2, snaps: ['som', 'dog', 'counter'].map((to, k) => snap(to, k)) } ], events: [] },
+    night: { v: 1, dog: 0, shown: true, events: [] },
+    shelf: { v: 1, n: 2, bananas: 0, jam: 0, jar: false, empty: false, banBall: 0, jamBall: 0, som: { jar: false, early: false }, jarIn: null, begun: true, events: [] } })]];
+  for (const [w, hh] of [[390, 844], [375, 667]]) {
+    const h = nightShelf({ storage: store, w, hh }); h.frames(3);
+    const N = h.ns();
+    assert.equal(N.frame, true); assert.equal(N.cards.length, 3); assert.equal(N.past.length, 3, 'three yesterday cards');
+    assert.ok(N.past.every((p, i) => Math.abs(p.s - N.cards[i].s) < 1e-6), `yesterday is the same size (${N.past[0].s.toFixed(0)} = ${N.cards[0].s.toFixed(0)} px on ${w}×${hh})`);
+    assert.ok(N.past.every((p, i) => Math.abs(p.x - N.cards[i].x) < 1e-6), 'the same columns as today');
+    assert.ok(N.past[0].y > N.cards[0].markY, 'yesterday is a row below today');
+    const cy0 = h.J('(()=>{const G=eveGeo(),r=cv.getBoundingClientRect();return r.top+G.counter.y0*r.height/cv.height})()');
+    assert.ok(N.past[2].y + N.past[2].s <= cy0, 'above the counter');
+    // marks for today only; yesterday cards carry a dim overlay
+    const cloth = h.drawn('nightDraw(ctx,1,1,eveGeo());').filter(e => e.fill === '#8a4b3c').length;
+    assert.equal(cloth, 1, 'one Som mark — today\'s; yesterday has no marks');
+    const over = h.J('(()=>{const out=[],k=ctx.fillRect;ctx.fillRect=(x,y,w,h)=>{out.push({f:ctx.fillStyle,x,y,w,h})};try{nightDraw(ctx,1,1,eveGeo())}finally{ctx.fillRect=k}return out.filter(r=>r.f==="rgba(8,6,10,0.45)")})()');
+    assert.equal(over.length, 3, 'three dim overlays, one per yesterday card');
+    assert.deepEqual(h.errors, []);
+  }
+  return { summary: 'yesterday: a dimmed row below today, same size, no marks' };
+});
+
+test('D9', 'after the night the new evening starts with an empty counter, while the snapshot of a counter roti keeps its stand mark', () => {
+  const h = night({ storage: saveAt(2) });           // third ball in work, two soft roti given to Som
+  onPan(h); finish(h); serve(h);                      // the third roti goes to the counter
+  assert.equal(h.onCounter(), 1, 'the third roti lies on the counter');
+  endEvening(h); h.frames(3);
+  assert.deepEqual(h.ns().cards.map(c => c.to), ['som', 'som', 'counter']);
+  assert.equal(h.onCounter(), 1, 'at night the counter still shows it');
+  // the snapshot of a counter roti keeps the stand mark
+  const m = h.J('(()=>{const out=[],k=ctx.fillRect;ctx.fillRect=(x,y,w,h)=>out.push({f:ctx.fillStyle,x,y,w,h});try{nbMark(ctx,1,1,"counter",100,100,1)}finally{ctx.fillRect=k}return out})()');
+  assert.ok(m.some(r => r.f === '#3a2c1e' && r.w >= 20), 'the stand mark is drawn under the snapshot');
+  // the lump starts the new evening: the counter is empty
+  tap(h, h.spots().lump); h.frames(3);
+  assert.equal(h.eve().over, false); assert.equal(h.onCounter(), 0, 'the new evening starts with an empty counter');
+  assert.equal(h.run('loopErrs'), 0); assert.deepEqual(h.errors, []);
+  return { summary: 'counter: 1 at night → 0 in the new evening; the stand mark stays on the snapshot' };
 });
 
 const passed = results.filter(r => r.status === 'PASS').length;

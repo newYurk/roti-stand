@@ -326,7 +326,13 @@ test('G6', 'the smoothing never collapses or flips a cell and never draws a rim 
 test('G7', 'a punched hole: the outline of the intact cells has two closed loops and the hole loop is smooth, not a staircase (same window, same limits as the rim)', () => {
   const h = boot(TUNE, 390, 844); press(h);
   for (let k = 0; k < 4; k++) pull(h, k * Math.PI / 2, 0.8, 1.5);
-  h.run('{const c=centerOfSheet();punchHole({x:0.42,y:0.56});}');   // inside the sheet: the hole loop must not touch the rim
+  // Build 81 tears only where the dough is already thin (punchHole looks for a thin spot under the slap), so the
+  // hole is punched by script: the bonds within 1.5 grid steps of a node at 0.55 of the radius break, inside the sheet.
+  const torn = h.run(`(()=>{const c=centerOfSheet(),sr=sheetRadius(),t={x:c.x+sr*0.55*0.6,y:c.y+sr*0.55*0.8};let b=-1,bd=1e9;
+    for(let i=0;i<N;i++){const d=Math.hypot(px[i]-t.x,py[i]-t.y);if(d<bd){bd=d;b=i;}}
+    const rad=(Math.max(R0,sr)*2/(GRID-1))*1.5;let n=0;for(const cc of cons){if(cc.broken)continue;
+    if(Math.hypot((px[cc.a]+px[cc.b])/2-px[b],(py[cc.a]+py[cc.b])/2-py[b])<rad*2.2&&breakCon(cc))n++;}return n;})()`);
+  assert.ok(torn > 0, 'the scripted hole breaks bonds');
   h.tick(2);
   snapSheet(h);
   const cell = cellTable(h), bad = [], rows = {};

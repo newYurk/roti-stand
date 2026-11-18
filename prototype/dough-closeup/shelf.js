@@ -27,8 +27,9 @@ const SHELF_KNOCK_EARLY_S = 0.01;            // и стучит сразу (об
 const SHELF_JAR_HAND_S = 3;                  // сколько пустая банка у неё в руке, прежде чем встать на полку
 const SHELF_CELL = 30, SHELF_HIT = 22;       // CSS px: шаг вещей на полке и запас касания по сторонам
 const SHELF_W = 82;                          // доска полки: три места с шагом 30 (у гостьи без этого файла она 74)
+const SHELF_FLIGHT_S = 0.6;                  // сколько подарок Сом летит от неё до полки (одно прямое движение)
 const SHELF_TINT = { fill:"#a8402c", rim:"rgba(29,21,14,0.55)" };   // полоса варенья: цвет банки
-const SHELF_GLASS = "#8b7f6e", SHELF_LID = "#d9d2c0", SHELF_LABEL = "#e8dcc0", SHELF_RED = "#a8402c", SHELF_YELLOW = "#e3c04a";
+const SHELF_GLASS = "#8b7f6e", SHELF_LID = "#d9d2c0", SHELF_LABEL = "#e8dcc0", SHELF_RED = "#a8402c", SHELF_YELLOW = "#e3c04a", SHELF_MARK = "#3a2c1e";
 
 function shelfFresh(){
   return { v:SHELF_V, n:1, bananas:0, jam:0, jar:false, empty:false, banBall:0, jamBall:0,
@@ -40,6 +41,7 @@ let sArmed = false, sSeen = false, sBefore = 0;   // варенье в руке:
 let sDown = null;                      // палец на банке: {id, what}
 let sBack = false;                     // это касание банки ставит варенье обратно (оно было в руке), а не берёт
 let sHand = 0;                         // сколько банка уже у Сом в руке
+let sTravel = null;                    // подарок летит от Сом к полке: {gift, from, to, before, t, dur}
 
 // ─────────────────────────── сохранение и журнал
 function shelfState(){ return { ...SHF, events:shelfEvents }; }
@@ -88,9 +90,20 @@ function shelfNewEvening(from, wasOver){
   SHF.banBall = 0; SHF.jamBall = 0; SHF.begun = false; sHand = 0; sDown = null; sBack = false;
 }
 // Подарок Сом ложится на полку (guest.js зовёт из guestServe): тот же вид пополняется до полного.
+// Запас пишется сразу (перезагрузка посреди полёта подарок не теряет), а сам предмет одним прямым
+// движением за SHELF_FLIGHT_S едет от неё (guestSlot) к своему месту на полке — без дуг и свечения.
 function shelfGift(gift){
+  if(gift !== "bananas" && gift !== "jam") return;
+  let from = null, to = null;
+  try{
+    const G = eveGeo(), S = guestSlot(G), P = shelfGeo(G);
+    from = { x:S.x0 + S.w/2, y:S.y0 + S.h*0.6 };
+    to = gift === "bananas" ? { x:P.bunch.x, y:P.bunch.y } : { x:P.jar.x, y:P.jar.y };
+  }catch(e){ from = to = null; }
+  const before = { bananas:SHF.bananas, jam:SHF.jam, jar:SHF.jar };
   if(gift === "bananas"){ const was = SHF.bananas; SHF.bananas = SHELF_BANANAS; shelfLog("refill", "bananas", { was }); }
   else if(gift === "jam"){ const was = SHF.jam; SHF.jam = SHELF_JAM; SHF.jar = true; shelfLog("refill", "jam", { was }); }
+  sTravel = from && to ? { gift, from, to, before, t:0, dur:SHELF_FLIGHT_S } : null;
 }
 // Стереть всё — вечера, полку, тетрадь. Только из режима стенда (кнопка #evWipe видна при html.dev).
 function shelfWipe(){
@@ -201,7 +214,8 @@ function shelfSpots(){
   const c = p => ({ x:r.left + p.x*k, y:r.top + (p.y - 10*G.u)*ky });
   return { n:SHF.n, bananas:SHF.bananas, jam:SHF.jam, jar:SHF.jar, empty:SHF.empty, armed:sArmed, jamCan:shelfJamCan(),
     bananaOk:shelfBananaOk(), som:shelfSomState() || null, jarIn:SHF.jarIn, somJar:shelfSomJar(),
-    bunchAt:SHF.bananas > 0 ? c(S.bunch) : null, jarAt:SHF.jar ? c(S.jar) : null, emptyAt:SHF.empty ? c(S.empty) : null };
+    bunchAt:SHF.bananas > 0 ? c(S.bunch) : null, jarAt:SHF.jar ? c(S.jar) : null, emptyAt:SHF.empty ? c(S.empty) : null,
+    flight:sTravel ? { gift:sTravel.gift, from:{ ...sTravel.from }, to:{ ...sTravel.to }, t:+sTravel.t.toFixed(3), dur:sTravel.dur } : null };
 }
 
 // ─────────────────────────── ввод (evening.js зовёт под typeof; true — касание забрано)
@@ -258,6 +272,7 @@ function shelfUpdate(dt){
     eveLog("begin", { n:SHF.n, shelf:shelfContents(), som:shelfSomState() || null, ...(SHF.again ? { again:true } : {}) });
   }
   if(sBack && !sDown) sBack = false;                       // касание ушло не на банку
+  if(sTravel){ sTravel.t += dt; if(sTravel.t >= sTravel.dur) sTravel = null; }   // подарок долетел
   // пустая банка Сом: пришла — банка в руке; постояла 3 с (крышка и тетрадь счёт останавливают) — банка на полке
   if(SHF.jarIn === "wait" && typeof GST !== "undefined" && GST.here){ SHF.jarIn = "hand"; sHand = 0; eveSave(); }
   if(SHF.jarIn === "hand"){
@@ -281,30 +296,44 @@ function shelfUpdate(dt){
   }
   if(!window.drizzleModeOn || !dish || dish.mode !== "cut") shelfDisarm();   // роти со стола ушёл
 }
-// Банка: стекло, варенье до уровня (ступени — трети), крышка, наклейка. open — крышка приподнята: варенье в руке.
+// Банка: стекло, варенье до уровня (ступени — трети), крышка, наклейка и три риски уровня (3 → 2 → 1 → 0).
+// open — крышка приподнята: варенье в руке.
 function shelfJarDraw(g, sx, sy, x, y, u, level, open, label){
-  g.fillStyle = SHELF_GLASS; g.fillRect((x - 8*u)*sx, (y - 19*u)*sy, 16*u*sx, 19*u*sy);
-  const h = 19*u*Math.max(0, Math.min(1, level/SHELF_JAM));
-  if(h > 0){ g.fillStyle = SHELF_RED; g.fillRect((x - 8*u)*sx, (y - h)*sy, 16*u*sx, h*sy); }
-  g.fillStyle = SHELF_LID; g.fillRect((x - 9*u)*sx, (y - (open ? 31 : 23)*u)*sy, 18*u*sx, 5*u*sy);
-  if(label){ g.fillStyle = SHELF_LABEL; g.fillRect((x - 4*u)*sx, (y - 13*u)*sy, 8*u*sx, 6*u*sy); }
+  const w = 10*u, h0 = 19*u;                                // полширины и высота стекла
+  g.fillStyle = SHELF_GLASS; g.fillRect((x - w)*sx, (y - h0)*sy, 2*w*sx, h0*sy);
+  const h = h0*Math.max(0, Math.min(1, level/SHELF_JAM));
+  if(h > 0){ g.fillStyle = SHELF_RED; g.fillRect((x - w)*sx, (y - h)*sy, 2*w*sx, h*sy); }
+  g.fillStyle = SHELF_MARK;                                 // три риски: верх каждой трети
+  for(let k = 1; k <= SHELF_JAM; k++){ const my = y - h0*k/SHELF_JAM; g.fillRect((x - w - 1.5*u)*sx, (my - Math.max(0.5, 0.5*u))*sy, (2*w + 3*u)*sx, Math.max(1, 0.8*u*sy)); }
+  g.fillStyle = SHELF_LID; g.fillRect((x - w - 1*u)*sx, (y - (open ? 31 : 23)*u)*sy, (2*w + 2*u)*sx, 5*u*sy);
+  if(label){ g.fillStyle = SHELF_LABEL; g.fillRect((x - 5*u)*sx, (y - 13*u)*sy, 10*u*sx, 6*u*sy); }
 }
-// Связка: по банану на роти, веером от одной ножки.
+// Связка: по банану на роти, веером от одной ножки — видно 2 → 1 → нет.
 function shelfBunchDraw(g, sx, sy, x, y, u, count){
   g.fillStyle = SHELF_YELLOW;
   for(const a of [-0.6, 0.35].slice(0, count)){             // верхушки сходятся у ножки, низы расходятся
-    g.beginPath(); g.ellipse((x + Math.sin(a)*8*u)*sx, (y - 7*u - Math.cos(a)*2*u)*sy, 4.5*u*sx, 11*u*sy, -a, 0, Math.PI*2); g.fill();
+    g.beginPath(); g.ellipse((x + Math.sin(a)*9*u)*sx, (y - 8*u - Math.cos(a)*2*u)*sy, 5.5*u*sx, 13*u*sy, -a, 0, Math.PI*2); g.fill();
   }
-  g.fillStyle = "#5a4326"; g.fillRect((x - 3*u)*sx, (y - 21*u)*sy, 4*u*sx, 5*u*sy);
+  g.fillStyle = "#5a4326"; g.fillRect((x - 3*u)*sx, (y - 24*u)*sy, 4*u*sx, 5*u*sy);
 }
 // guest.js зовёт это вместо своей полки (после неба, до стойки).
 function shelfDraw(g, sx, sy, G){
-  if(eveDev || !shelfAny()) return;
+  if(eveDev || (!shelfAny() && !sTravel)) return;
   const S = shelfGeo(G), u = G.u;
+  // пока подарок летит, на полке — прежний вид (вещь ещё не долетела)
+  const ban = sTravel && sTravel.gift === "bananas" ? sTravel.before.bananas : SHF.bananas;
+  const jam = sTravel && sTravel.gift === "jam" ? sTravel.before.jam : SHF.jam;
+  const jar = sTravel && sTravel.gift === "jam" ? sTravel.before.jar : SHF.jar;
   g.fillStyle = SHELF_GLASS; g.fillRect(S.F.x0*sx, S.F.y*sy, (S.x1 - S.F.x0)*sx, Math.max(1, 3*u*sy));
-  if(SHF.bananas > 0) shelfBunchDraw(g, sx, sy, S.bunch.x, S.bunch.y, u, SHF.bananas);
-  if(SHF.jar) shelfJarDraw(g, sx, sy, S.jar.x, S.jar.y, u, SHF.jam, sArmed, true);
+  if(ban > 0) shelfBunchDraw(g, sx, sy, S.bunch.x, S.bunch.y, u, ban);
+  if(jar) shelfJarDraw(g, sx, sy, S.jar.x, S.jar.y, u, jam, sArmed, true);
   if(SHF.empty) shelfJarDraw(g, sx, sy, S.empty.x, S.empty.y, u, 0, false, false);
+  if(sTravel){                                             // сам подарок ещё в полёте
+    const k = Math.min(1, sTravel.t/sTravel.dur);
+    const px = sTravel.from.x + (sTravel.to.x - sTravel.from.x)*k, py = sTravel.from.y + (sTravel.to.y - sTravel.from.y)*k;
+    if(sTravel.gift === "bananas") shelfBunchDraw(g, sx, sy, px, py, u, SHELF_BANANAS);
+    else shelfJarDraw(g, sx, sy, px, py, u, SHELF_JAM, false, true);
+  }
 }
 
 // ─────────────────────────── запуск
