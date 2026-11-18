@@ -11,7 +11,7 @@
 // до 400%+ и лист «рвётся» в середине от любого движения. Замер это обнаружил сразу.
 // Число узлов сохранено (1 060 после обрезки по кругу; прежняя оценка «~1150» была на глаз,
 // пересчитано 07.09.2026), однородность рёбер восстановлена.
-const BUILD = "2026-11-18 · скорость: тот же вид, кадр дешевле · 97";
+const BUILD = "2026-11-18 · скорость 2: роти в руке и растяжка дешевле · 98";
 const GRID = 38;                   // 38x38, в круг попадает 1 060 узлов (посчитано, не оценка)
 let SUBSTEPS = 8;                  // T2: 8–10 подшагов, 1 итерация
 let DAMP = 0.986;
@@ -137,6 +137,16 @@ function prX(x, y){
   return cvW*0.5 + (x - cvW*0.5) * k;
 }
 function prY(x, y){ return cvHor + (y - cvHor) * TILT; }
+// Сборка 98 (скорость 2): Math.hypot(a,b) без вызова встроенной функции — тот же алгоритм V8 (деление на больший
+// модуль, сумма квадратов, корень, умножение), поэтому бит в бит то же число (проверено на 2·10⁷ парах в Node
+// и в Chrome: runs/merge-perf2/bench). В горячих циклах физики вызов Math.hypot стоил больше самой арифметики.
+function hyp(a, b){
+  const x = a < 0 ? -a : a, y = b < 0 ? -b : b;
+  let m, n; if(x > y){ m = x; n = y; } else { m = y; n = x; }
+  if(m === 0) return 0;
+  if(!(m < Infinity) || n !== n) return Math.hypot(a, b);
+  const r = n / m; return Math.sqrt(1 + r*r) * m;
+}
 function unproject(sx, sy){
   const h = horizon(), wy = h + (sy - h)/TILT;
   const k = 1 + ((wy - h)/cv.height) * PERSP;
@@ -4441,7 +4451,43 @@ function dflBegin(L,M,g){
   lg.setTransform(M); lg.imageSmoothingEnabled=g.imageSmoothingEnabled;
   return lg;
 }
-function drawDishLayered(slot,g,K0,R0,hot,paint,steps){
+// Сборка 98 (скорость 2): слой, переживающий смену позы (в руке, на лету). aff() даёт экранные точки щупов —
+// одних и тех же точек блюда (центр, углы и середины сторон рамки) в текущей позе. Слой рисуется в позе снимка,
+// а на кадр кладётся аффинным преобразованием, точным в трёх щупах. Проекция стола (prX/prY) не аффинная, поэтому
+// в остальных щупах сверяется остаток: больше DFL_AFF_PX пикселя экрана, или масштаб позы ушёл дальше DFL_AFF_SCALE,
+// или вид сплющился по одной оси дальше DFL_AFF_ANISO — слой перерисовывается в текущей позе.
+// При ходе пальцем по кругу остаток — сотые доли пикселя, перерисовок нет.
+const DFL_AFF_PX = 0.3, DFL_AFF_SCALE = 0.02, DFL_AFF_ANISO = 0.01, DFL_AFF_PAD = 0.12, DFL_AFF_SETTLE = 10;
+function dflProbe(M,pts){
+  const o=new Float64Array(pts.length);
+  for(let i=0;i<pts.length;i+=2){ const x=pts[i], y=pts[i+1]; o[i]=M.a*x+M.c*y+M.e; o[i+1]=M.b*x+M.d*y+M.f; }
+  return o;
+}
+// аффинное отображение щупов снимка a в текущие b (точно в щупах 0,1,2) или null, если остаток велик
+function dflAffine(a,b){
+  if(dflSame(a,b)) return [1,0,0,1,0,0];                      // та же поза — слой как есть, без пересэмплирования
+  const u1x=a[2]-a[0],u1y=a[3]-a[1],u2x=a[4]-a[0],u2y=a[5]-a[1];
+  const v1x=b[2]-b[0],v1y=b[3]-b[1],v2x=b[4]-b[0],v2y=b[5]-b[1];
+  const det=u1x*u2y-u2x*u1y; if(!(Math.abs(det)>1e-9)) return null;
+  const ia=u2y/det, ib=-u1y/det, ic=-u2x/det, id=u1x/det;      // обратная к [u1 u2]
+  const A=v1x*ia+v2x*ib, C=v1x*ic+v2x*id, B=v1y*ia+v2y*ib, D=v1y*ic+v2y*id;
+  const E=b[0]-A*a[0]-C*a[1], F=b[1]-B*a[0]-D*a[1];
+  const sxk=Math.hypot(A,B), syk=Math.hypot(C,D);
+  if(Math.abs(sxk/syk-1)>DFL_AFF_ANISO) return null;
+  for(let i=6;i<a.length;i+=2){
+    const x=A*a[i]+C*a[i+1]+E, y=B*a[i]+D*a[i+1]+F;
+    if(Math.abs(x-b[i])>DFL_AFF_PX || Math.abs(y-b[i+1])>DFL_AFF_PX) return null;
+  }
+  return [A,B,C,D,E,F];
+}
+// щупы целиком на холсте с запасом (иначе в слое не хватило бы части блюда при сдвиге)
+function dflInside(a){
+  let x0=Infinity,x1=-Infinity,y0=Infinity,y1=-Infinity;
+  for(let i=0;i<a.length;i+=2){ if(a[i]<x0)x0=a[i]; if(a[i]>x1)x1=a[i]; if(a[i+1]<y0)y0=a[i+1]; if(a[i+1]>y1)y1=a[i+1]; }
+  const mx=(x1-x0)*DFL_AFF_PAD+2, my=(y1-y0)*DFL_AFF_PAD+2;
+  return x0-mx>=0 && y0-my>=0 && x1+mx<=cv.width && y1+my<=cv.height;
+}
+function drawDishLayered(slot,g,K0,R0,hot,paint,steps,aff){
   const M=g.getTransform();
   const K=[cv.width,cv.height,M.a,M.b,M.c,M.d,M.e,M.f,TILT,PERSP,g.imageSmoothingEnabled?1:0,...K0];
   const R=[g,dish,FRAME,frameOn,PAL,...R0];
@@ -4452,13 +4498,32 @@ function drawDishLayered(slot,g,K0,R0,hot,paint,steps){
   if(!still || g.globalAlpha!==1 || g.globalCompositeOperation!=="source-over"){ S.B=null; paint(g); return; }
   let L=S.L;
   const geo=same(L);
-  if(!geo || hot && !steps && !dflThermalClose(L.th)){
+  // поза: щупы сейчас и отображение слоя в кадр (aff — только для слоёв, переживающих смену позы)
+  const pr=aff ? aff() : null, now=pr ? dflProbe(M,pr.pts) : null;
+  let T=null;
+  if(pr){
+    // поза с прошлого кадра ушла дальше, чем переносит аффинное отображение (перелёт с масштабом, рывок) — прямо,
+    // как в 97: перерисовка слоя каждый кадр стоила бы дороже прямого рисунка
+    const pp=S.pp, ps=S.ps; S.pp=now; S.ps=pr.scale;
+    if(!pp || pp.length!==now.length || Math.abs(pr.scale/ps-1)>DFL_AFF_SCALE || !dflAffine(pp,now)){ S.B=null; paint(g); return; }
+    // блюдо у края холста: переносить слой нельзя (части блюда в нём нет) — только слой той же позы, как в 97
+    const inside=dflInside(now);
+    if(!inside && !dflSame(pp,now)){ S.B=null; paint(g); return; }
+    if(geo && L.ref && (inside ? Math.abs(pr.scale/L.scale-1)<=DFL_AFF_SCALE : dflSame(L.ref,now))) T=inside ? dflAffine(L.ref,now) : [1,0,0,1,0,0];
+    // поза встала (DFL_AFF_SETTLE кадров подряд та же; касания приходят не каждый кадр), а слой снят в другой —
+    // один раз перерисовать точно, без пересэмплирования
+    S.st=dflSame(pp,now) ? (S.st||0)+1 : 0;
+    if(T && S.st===DFL_AFF_SETTLE && !dflSame(L.ref,now)) T=null;
+    if(geo && !T && S.B) S.B=null;                              // поза ушла — дорисовка недоделанного слоя не нужна
+  }
+  if(!geo || pr && !T || hot && !steps && !dflThermalClose(L.th)){
     // новая геометрия или поза — слой целиком сейчас (как прямой рисунок)
     if(L && window.__dflWhy){ const w=__dflWhy, k=slot+(!dflSame(L.K,K) ? "K"+L.K.findIndex((v,i)=>v!==K[i]) : !L.R.every((v,i)=>v===R[i]) ? "R"+L.R.findIndex((v,i)=>v!==R[i]) : "th"); w[k]=(w[k]||0)+1; }
     if(!L) L=S.L=dflCanvas();
     S.B=null;
     L.delta=dflPaintInto(dflBegin(L,M,g),g,paint);
     L.K=K; L.R=R; L.th=hot ? dflThermal() : null; L.n++;
+    if(pr){ L.ref=now; L.scale=pr.scale; T=null; }
   } else if(hot && (S.B ? S.B.it : !dflThermalClose(L.th))){
     // дозрела прожарка: новый слой — в запасной холст, понемногу
     let B=S.B;
@@ -4466,16 +4531,35 @@ function drawDishLayered(slot,g,K0,R0,hot,paint,steps){
       if(window.__dflWhy){ const w=__dflWhy; w[slot+"th"]=(w[slot+"th"]||0)+1; }
       B=S.B=S.spare && S.spare!==L ? S.spare : dflCanvas(); S.spare=null;
       B.th=dflThermal(); B.K=K; B.R=R;
+      if(pr){ B.ref=now; B.scale=pr.scale; }
       const lg=dflBegin(B,M,g);
       for(const k of DFL_STATE) if(k!=="globalAlpha" && k!=="globalCompositeOperation") lg[k]=g[k];
       lg.setLineDash(g.getLineDash()); B.s0=dflState(lg); B.M0=lg.getTransform(); B.it=steps(lg);
     }
     const t0=performance.now(); let done=false;
     while(!(done=B.it.next().done) && performance.now()-t0<DFL_BUDGET_MS);
-    if(done){ B.it=null; B.n++; B.delta=dflDelta(B.g,B.s0,B.M0); S.spare=L; S.L=L=B; S.B=null; }
+    if(done){
+      B.it=null; B.n++; B.delta=dflDelta(B.g,B.s0,B.M0); S.spare=L; S.L=L=B; S.B=null;
+      if(pr && !(T=dflAffine(L.ref,now))){ L.delta=dflPaintInto(dflBegin(L,M,g),g,paint); L.ref=now; L.scale=pr.scale; L.th=dflThermal(); }
+    }
   }
-  g.save(); g.setTransform(1,0,0,1,0,0); g.drawImage(L.cv,0,0); g.restore();
+  g.save();
+  if(T && !(T[0]===1 && T[1]===0 && T[2]===0 && T[3]===1 && T[4]===0 && T[5]===0)){ g.setTransform(T[0],T[1],T[2],T[3],T[4],T[5]); g.imageSmoothingEnabled=true; }
+  else g.setTransform(1,0,0,1,0,0);
+  g.drawImage(L.cv,0,0); g.restore();
   dflApply(g,L.delta);
+}
+// щупы позы для слоёв (dflAffine): точки рамки граней в координатах блюда, через screen() — в экран
+function dflProbePts(faces,screen,scale){
+  const c=dflProbePts.c||(dflProbePts.c=new WeakMap());
+  let b=c.get(faces);
+  if(!b){ let L=Infinity,R=-Infinity,T=Infinity,B=-Infinity;
+    for(const f of faces) for(const p of f.points){ if(p.x<L)L=p.x; if(p.x>R)R=p.x; if(p.y<T)T=p.y; if(p.y>B)B=p.y; }
+    const mx=(L+R)/2, my=(T+B)/2;
+    b=[{x:mx,y:my},{x:R,y:my},{x:mx,y:B},{x:L,y:T},{x:R,y:T},{x:R,y:B},{x:L,y:B},{x:L,y:my},{x:mx,y:T}]; c.set(faces,b); }
+  const pts=new Array(b.length*2);
+  for(let i=0;i<b.length;i++){ const q=screen(b[i]); pts[2*i]=q.x; pts[2*i+1]=q.y; }
+  return {pts,scale};
 }
 function drawDish(g,sx,sy){
   let pose=dishPose(), moving=false;
@@ -4510,10 +4594,11 @@ function drawDish(g,sx,sy){
     // Сборка 90: у граней шапки нет и тени на таве — она ложилась правее выреза тёмной полосой с жёстким краем
     const noShadow=cap ? f=>{ let x=0,y=0; for(const p of f.points){ x+=p.x; y+=p.y; } return pointInFace(cap.P,x/f.points.length,y/f.points.length); } : null;
     if(faces===dish.faces && typeof g.getTransform==="function"){   // в наборах (Node) холст-заглушка — рисуем прямо
-      const key=[pose.x,pose.y,pose.scale,sx,sy,T ? T.angle : 0,T ? T.pivot.x : 0,T ? T.pivot.y : 0,cap ? cap.P.length : -1];
+      // сборка 98: поза (x, y, масштаб, zk) не в ключе — слой переносится аффинно (dflAffine), см. drawDishLayered
+      const key=[sx,sy,T ? T.angle : 0,T ? T.pivot.x : 0,T ? T.pivot.y : 0,cap ? cap.P.length : -1];
       if(cap) for(const p of cap.P) key.push(p.x,p.y);
-      const shift=pieceShiftLive(faces);
-      drawDishLayered("faces",g,[...key,zk],[faces,H,shift,dish.holeCells,dish.thermal,dish.seed],true,lg=>drawDishFaces(lg,faces,screen,H,zk,true,shift,noShadow),lg=>dishFacesSteps(lg,faces,screen,H,zk,true,shift,noShadow));
+      const shift=pieceShiftLive(faces), probe=()=>dflProbePts(faces,screen,pose.scale);
+      drawDishLayered("faces",g,key,[faces,H,shift,dish.holeCells,dish.thermal,dish.seed],true,lg=>drawDishFaces(lg,faces,screen,H,zk,true,shift,noShadow),lg=>dishFacesSteps(lg,faces,screen,H,zk,true,shift,noShadow),probe);
     } else drawDishFaces(g,faces,screen,H,zk,true,pieceShiftLive(faces),noShadow);
     if(!moving && !slide && faces===dish.faces) drawMargarineGloss(g,screen,H,zk,sx);
     if(!moving && !slide && !T && faces===dish.faces) drawDishHoleRims(g,screen,H,zk);
@@ -4523,8 +4608,8 @@ function drawDish(g,sx,sy){
     if(!moving&&(dish.folds||dish.cuts.length)&&!(dishGesture&&dishGesture.preview)){
       // срезы — тоже слоем: обрезка по контуру из тысяч граней дорога каждый кадр, а от жарки срезы не зависят
       if(faces===dish.faces && typeof g.getTransform==="function")
-        drawDishLayered("sections",g,[pose.x,pose.y,pose.scale,sx,sy,zk,T ? T.angle : 0,T ? T.pivot.x : 0,T ? T.pivot.y : 0,dishSpread,devicePixelRatio||1],
-          [faces,H,pieceShiftLive(faces),dish.folds,dish.cuts.length],false,lg=>drawDishSections(lg,screen,faces,sx,sy,zk,H));
+        drawDishLayered("sections",g,[sx,sy,T ? T.angle : 0,T ? T.pivot.x : 0,T ? T.pivot.y : 0,dishSpread,devicePixelRatio||1],
+          [faces,H,pieceShiftLive(faces),dish.folds,dish.cuts.length],false,lg=>drawDishSections(lg,screen,faces,sx,sy,zk,H),null,()=>dflProbePts(faces,screen,pose.scale));
       else drawDishSections(g,screen,faces,sx,sy,zk,H);
     }
     if(cap){
@@ -4957,6 +5042,45 @@ function rimDrawBase(){
 }
 
 // ─────────────────────────── XPBD
+// Сборка 98 (скорость 2): подшаги решателя — отдельной функцией над типизированными массивами. Внутри подшагов
+// связи и закрепления не меняются, поэтому живые связи (не порваны, хоть один конец свободен) один раз за шаг
+// выписываются подряд: концы, длина покоя (то же double), веса концов. Порядок связей и арифметика — прежние,
+// числа физики те же бит в бит (наборы square-stretch, carry, envelope, model, edge — runs/merge-perf2).
+let solA = null, solB = null, solR = null, solWA = null, solWB = null;
+function solveSubsteps(h, damp){
+  const M = cons.length;
+  if(!solA || solA.length < M){ solA = new Int32Array(M); solB = new Int32Array(M); solR = new Float64Array(M); solWA = new Float64Array(M); solWB = new Float64Array(M); }
+  const A = solA, B = solB, RS = solR, WA = solWA, WB = solWB;
+  let n = 0;
+  for(let k=0;k<M;k++){
+    const c = cons[k]; if(c.broken) continue;
+    const a=c.a, b=c.b, wa = pinned[a]?0:1, wb = pinned[b]?0:1;
+    if(wa+wb===0) continue;
+    A[n]=a; B[n]=b; RS[n]=c.rest; WA[n]=wa; WB[n]=wb; n++;
+  }
+  const alpha = COMPLIANCE/(h*h);
+  for(let ss=0; ss<SUBSTEPS; ss++){
+    for(let i=0;i<N;i++){
+      if(pinned[i]){ prx[i]=px[i]; pry[i]=py[i]; continue; }
+      vx[i]*=damp; vy[i]*=damp;
+      prx[i]=px[i]+vx[i]*h; pry[i]=py[i]+vy[i]*h;
+    }
+    for(let k=0;k<n;k++){
+      const a=A[k], b=B[k];
+      const dx=prx[b]-prx[a], dy=pry[b]-pry[a];
+      const d=hyp(dx,dy); if(d<1e-6) continue;
+      const wa=WA[k], wb=WB[k], w=wa+wb;
+      const lam=-(d-RS[k])/(w+alpha), nx=dx/d, ny=dy/d;
+      prx[a]-=nx*lam*wa; pry[a]-=ny*lam*wa;
+      prx[b]+=nx*lam*wb; pry[b]+=ny*lam*wb;
+    }
+    for(let i=0;i<N;i++){
+      if(pinned[i]) continue;
+      vx[i]=(prx[i]-px[i])/h; vy[i]=(pry[i]-py[i])/h;
+      px[i]=prx[i]; py[i]=pry[i];
+    }
+  }
+}
 function step(dt){
   // В руке и в полёте узлы заморожены: перенос — движение картинки, запекаемое при посадке.
   // На таве лист схватился и стоит — только жарится.
@@ -4978,32 +5102,7 @@ function step(dt){
   // когда окно пластичности закрылось, — успокаивается быстрее (audit §5).
   const damp = action.state==="FLYING" ? 0.995
              : (action.state==="SETTLING" && plasticT<=0) ? 0.94 : DAMP;
-  for(let ss=0; ss<SUBSTEPS; ss++){
-    for(let i=0;i<N;i++){
-      if(pinned[i]){ prx[i]=px[i]; pry[i]=py[i]; continue; }
-      vx[i]*=damp; vy[i]*=damp;
-      prx[i]=px[i]+vx[i]*h; pry[i]=py[i]+vy[i]*h;
-    }
-
-    const alpha = COMPLIANCE/(h*h);
-    for(let k=0;k<cons.length;k++){
-      const c = cons[k]; if(c.broken) continue;
-      const a=c.a, b=c.b;
-      const dx=prx[b]-prx[a], dy=pry[b]-pry[a];
-      const d=Math.hypot(dx,dy); if(d<1e-6) continue;
-      const wa = pinned[a]?0:1, wb = pinned[b]?0:1, w = wa+wb;
-      if(w===0) continue;
-      const lam=-(d-c.rest)/(w+alpha), nx=dx/d, ny=dy/d;
-      prx[a]-=nx*lam*wa; pry[a]-=ny*lam*wa;
-      prx[b]+=nx*lam*wb; pry[b]+=ny*lam*wb;
-    }
-
-    for(let i=0;i<N;i++){
-      if(pinned[i]) continue;
-      vx[i]=(prx[i]-px[i])/h; vy[i]=(pry[i]-py[i])/h;
-      px[i]=prx[i]; py[i]=pry[i];
-    }
-  }
+  solveSubsteps(h, damp);
   plasticT = Math.max(0, plasticT - dt);
   // Шаг 2 → 3 так же автоматически и ТЕМ ЖЕ ЛИСТОМ. Раньше перехода не было вовсе:
   // строка говорила «✓ готов · запятой на таву», а шаг оставался вторым, и нажатие
@@ -5072,6 +5171,26 @@ function relaxRim(dt){
 const GRIP_MIN = 5, GRIP_MAX = 22;   // шагов решётки
 
 let radBuf = null;
+// Сборка 98 (скорость 2): k-я по величине без полной сортировки (выбор Хоара на месте). Значение k-го элемента
+// у упорядочения одно, поэтому число то же, что у a.sort()[k]; NaN (сломанная физика) — по-старому, сортировкой.
+function kthOf(a, k){
+  const n = a.length;
+  for(let i=0;i<n;i++) if(a[i]!==a[i]){ a.sort(); return a[k]; }
+  let lo = 0, hi = n-1;
+  while(hi > lo){
+    const m = (lo+hi) >> 1;                              // опорный — медиана трёх
+    let x = a[lo], y = a[m], z = a[hi];
+    const p = x < y ? (y < z ? y : (x < z ? z : x)) : (x < z ? x : (y < z ? z : y));
+    let i = lo, j = hi;
+    while(i <= j){
+      while(a[i] < p) i++;
+      while(a[j] > p) j--;
+      if(i <= j){ const t = a[i]; a[i] = a[j]; a[j] = t; i++; j--; }
+    }
+    if(k <= j) hi = j; else if(k >= i) lo = i; else return a[k];
+  }
+  return a[k];
+}
 function sheetRadius(){
   // Радиус ТЕЛА листа: 92-й перцентиль расстояний живых узлов. Максимум не годится:
   // после разрывов остаётся бахрома из полудержащихся цепочек, шлепки задирают её
@@ -5081,12 +5200,10 @@ function sheetRadius(){
   let n = 0;
   for(let i=0;i<N;i++){
     if(conDeg && conDeg[i] <= 0) continue;
-    radBuf[n++] = Math.hypot(px[i]-c.x, py[i]-c.y);
+    radBuf[n++] = hyp(px[i]-c.x, py[i]-c.y);
   }
   if(!n) return 0;
-  const a = radBuf.subarray(0, n);
-  a.sort();   // родная числовая сортировка типизированного массива: тот же порядок, в разы быстрее сравнителя
-  return a[Math.min(n-1, Math.floor(n*0.92))];
+  return kthOf(radBuf.subarray(0, n), Math.min(n-1, Math.floor(n*0.92)));
 }
 function centerOfSheet(){
   let sx=0, sy=0, n=0;
@@ -5105,12 +5222,10 @@ function sheetShortR(){
   let n = 0;
   for(const i of edgeNodes){
     if(conDeg && conDeg[i] <= 0) continue;
-    edgeRadBuf[n++] = Math.hypot(px[i]-c.x, py[i]-c.y);
+    edgeRadBuf[n++] = hyp(px[i]-c.x, py[i]-c.y);
   }
   if(!n) return 0;
-  const a = edgeRadBuf.subarray(0, n);
-  a.sort();   // родная числовая сортировка типизированного массива: тот же порядок, в разы быстрее сравнителя
-  return a[Math.min(n-1, Math.floor(n*0.18))];
+  return kthOf(edgeRadBuf.subarray(0, n), Math.min(n-1, Math.floor(n*0.18)));
 }
 function flattenStats(){
   const h = flatH || thick;
@@ -6454,7 +6569,7 @@ function breakCon(c){
 }
 
 function sheetSpeed(){
-  let sum=0; for(let i=0;i<N;i++) sum += Math.hypot(vx[i],vy[i]);
+  let sum=0; for(let i=0;i<N;i++) sum += hyp(vx[i],vy[i]);
   return sum/Math.max(1,N);
 }
 
@@ -6529,24 +6644,27 @@ let evenBuf = null;
 function evenOut(dt){
   // В окне удара почти не сглаживаем: иначе лепесток за кадр становится кругом.
   const k = Math.min(0.5, 3.2*dt) * (plasticT>0 ? 0.18 : 1);
-  if(!evenBuf || evenBuf.length !== cons.length) evenBuf = new Float32Array(cons.length);
+  if(!evenBuf || evenBuf.length !== cons.length){ evenBuf = new Float32Array(cons.length); conLen = new Float64Array(cons.length); }
   let sum = 0, n = 0;
+  // длины связей запоминаются в conLen: creep() сразу после берёт их же (узлы между ними не двигаются)
   for(let i=0;i<cons.length;i++){ const c=cons[i]; if(c.broken) continue;
-    const d = Math.hypot(px[c.b]-px[c.a], py[c.b]-py[c.a]);
+    const d = hyp(px[c.b]-px[c.a], py[c.b]-py[c.a]); conLen[i] = d;
     evenBuf[i] = d / c.rest; sum += evenBuf[i]; n++; }
-  if(!n) return;
-  const mean = sum/n;
+  if(!n) return false;
+  const mean = sum/n, mm = Math.max(0.2, mean);
   for(let i=0;i<cons.length;i++){ const c=cons[i]; if(c.broken) continue;
-    c.rest *= 1 + (evenBuf[i] - mean)/Math.max(0.2, mean) * 0.02 * k;
+    c.rest *= 1 + (evenBuf[i] - mean)/mm * 0.02 * k;
   }
+  return true;
 }
+let conLen = null;
 function creep(dt){
   if(sheetRadius() > targetR*1.25) return;
-  evenOut(dt);
+  const L = evenOut(dt) ? conLen : null;
   const k = Math.min(1, CREEP * (plasticT>0 ? PLASTIC_BOOST : 1) * dt);
   for(let i=0;i<cons.length;i++){
     const c=cons[i]; if(c.broken) continue;
-    const d=Math.hypot(px[c.b]-px[c.a], py[c.b]-py[c.a]);
+    const d=L ? L[i] : hyp(px[c.b]-px[c.a], py[c.b]-py[c.a]);
     if((d-c.rest)/c.rest > CREEP_ON) c.rest += (d-c.rest)*k;
   }
 }
@@ -6583,7 +6701,7 @@ function checkBreak(dt){
 let maxStrain = 0, avgStrain = 0;
 let accBuf=null, cntBuf=null, quadRest=null;
 function area(q){
-  const [a,b,c,d]=q;
+  const a=q[0], b=q[1], c=q[2], d=q[3];
   return Math.abs((px[a]*(py[b]-py[d]) + px[b]*(py[c]-py[a]) +
                    px[c]*(py[d]-py[b]) + px[d]*(py[a]-py[c]))/2);
 }
@@ -6605,7 +6723,7 @@ function measureThickness(){
   let mx=0, sum=0, live=0;
   for(let k=0;k<cons.length;k++){
     const c=cons[k]; if(c.broken) continue;
-    const d=Math.hypot(px[c.b]-px[c.a], py[c.b]-py[c.a]);
+    const d=hyp(px[c.b]-px[c.a], py[c.b]-py[c.a]);
     const st=Math.max(0,(d-c.rest)/c.rest);
     if(st>mx) mx=st; sum+=st; live++;
   }
@@ -7527,11 +7645,54 @@ function tableAlpha(t){
   return 0.05 + 0.95 * Math.sqrt(k);   // 0,12 → 0,78 · 0,05 → 0,52 · 0,02 → 0,33 · у порога → 0,05
 }
 // rim: 1 — ячейка кромки: плотнее (альфа выше) и светлее, как толстый край в жизни
+// Сборка 98 (скорость 2): лист на столе (вид «диск») — тысяча полупрозрачных ячеек, каждая своей заливкой; это
+// треть кадра растяжки. В покое узлы всё равно дрожат на сотые доли пикселя (дожим решателя, creep), поэтому слой
+// сверяется не на равенство, а с допуском: слой рисуется заново, когда какой-то узел ушёл на экране дальше
+// SHEET_EPS_PX от снимка или толщина — дальше SHEET_EPS_H. Пока лист заметно движется (шлепок, тяга: сдвиг за кадр
+// больше SHEET_EPS_PX), рисуем прямо, как раньше — слой там добавил бы только наложение.
+const SHEET_EPS_PX = 0.2, SHEET_EPS_H = 0.004;
+const sheetL = {cv:null, g:null, sx:null, sy:null, h:null, K:null, R:null, px:null, py:null, ph:null, n:0, fs:null};
+function sheetLayer(g, X, Y, Hmap, sx, sy, ox, oy, K0, R0, paint){
+  if(typeof g.getTransform !== "function"){ paint(g); return; }      // холст-заглушка наборов
+  const M = g.getTransform();
+  const K = [cv.width, cv.height, M.a, M.b, M.c, M.d, M.e, M.f, sx, sy, ox, oy, g.imageSmoothingEnabled ? 1 : 0, N, ...K0];
+  const L = sheetL;
+  if(!L.px || L.px.length !== N){ L.px = new Float32Array(N); L.py = new Float32Array(N); L.ph = new Float32Array(N); L.sx = null; }
+  // экранные точки узлов сейчас и наибольший сдвиг от прошлого кадра и от снимка слоя
+  let dPrev = 0, dSnap = 0, dH = 0;
+  const scale = Math.max(Math.hypot(M.a, M.b), Math.hypot(M.c, M.d)) || 1;   // допуски — в пикселях устройства
+  const has = L.sx && L.K && dflSame(L.K, K) && L.R.length === R0.length && L.R.every((v,i)=>v===R0[i]);
+  for(let i=0;i<N;i++){
+    const x = prX(X[i],Y[i])*sx+ox, y = prY(X[i],Y[i])*sy+oy;
+    const ax = Math.abs(x-L.px[i]), ay = Math.abs(y-L.py[i]); const m = ax > ay ? ax : ay; if(m > dPrev) dPrev = m;
+    if(has){ const bx = Math.abs(x-L.sx[i]), by = Math.abs(y-L.sy[i]); const mb = bx > by ? bx : by; if(mb > dSnap) dSnap = mb;
+      const h = Math.abs(Hmap[i]-L.h[i]); if(h > dH) dH = h; }
+    L.px[i] = x; L.py[i] = y;
+  }
+  const still = dPrev*scale <= SHEET_EPS_PX;
+  if(!still || g.globalAlpha !== 1 || g.globalCompositeOperation !== "source-over"){ paint(g); return; }
+  if(!has || dSnap*scale > SHEET_EPS_PX || dH > SHEET_EPS_H){
+    if(!L.cv){ L.cv = document.createElement("canvas"); L.g = L.cv.getContext("2d"); }
+    if(L.cv.width !== cv.width || L.cv.height !== cv.height){ L.cv.width = cv.width; L.cv.height = cv.height; }
+    const lg = L.g;
+    lg.setTransform(1,0,0,1,0,0); lg.globalAlpha = 1; lg.globalCompositeOperation = "source-over"; lg.clearRect(0,0,L.cv.width,L.cv.height);
+    lg.setTransform(M); lg.imageSmoothingEnabled = g.imageSmoothingEnabled;
+    lg.fillStyle = g.fillStyle;
+    paint(lg);
+    L.fs = lg.fillStyle;                                    // рисунок оставляет в кадре свою заливку — перенести её
+    if(!L.sx || L.sx.length !== N){ L.sx = new Float32Array(N); L.sy = new Float32Array(N); L.h = new Float32Array(N); }
+    L.sx.set(L.px); L.sy.set(L.py); for(let i=0;i<N;i++) L.h[i] = Hmap[i];
+    L.K = K; L.R = R0.slice(); L.n++;
+  }
+  g.save(); g.setTransform(1,0,0,1,0,0); g.drawImage(L.cv, 0, 0); g.restore();
+  g.fillStyle = L.fs;
+}
 function tableSkin(t, rim = 0){
   const a = Math.min(1, tableAlpha(t) + 0.10 * rim);
   const pale = Math.max(0, Math.min(1, 1 - t / TABLE_ALPHA_TOP)) * 0.45 + 0.25 * rim;
-  const c = [0, 1, 2].map(k => Math.round(DOUGH[k] + (DOUGH_PALE[k] - DOUGH[k]) * pale));
-  return `rgba(${c[0]},${c[1]},${c[2]},${a.toFixed(3)})`;
+  // сборка 98: та же строка без массива и map (вызывается на каждую ячейку листа каждый кадр)
+  return "rgba(" + Math.round(DOUGH[0] + (DOUGH_PALE[0] - DOUGH[0]) * pale) + "," + Math.round(DOUGH[1] + (DOUGH_PALE[1] - DOUGH[1]) * pale)
+    + "," + Math.round(DOUGH[2] + (DOUGH_PALE[2] - DOUGH[2]) * pale) + "," + a.toFixed(3) + ")";
 }
 
 // На таве тонкое тесто просвечивает уже не столом, а дном тавы, и поверх ложится прожарка:
@@ -7855,10 +8016,12 @@ function draw(){
       y: prY(X[i],Y[i])*sy+oy
     });
     if(sheetLooksDisc() && !onPan && !xf){
+      // сборка 98: лист-«диск» шага 1–2 — слоем, пока он почти стоит (sheetLayer)
+      const useHull = stepNo===2 && (sameSlapN>0 || pullN>0 || action.state==="PULLING" || !!twitch);   // дёрнувшийся край рисуется по узлам, а не ровным эллипсом
+      sheetLayer(g, X, Y, Hmap, sx, sy, ox, oy, [stepNo, useHull ? 1 : 0, brokenCount(), R0, TILT], [Hmap, quads, rimEdgeQ], g=>{
       const c0 = bodyC, r0 = Math.max(R0, sheetRadius());
       const x = prX(c0.x,c0.y)*sx+ox, y = prY(c0.x,c0.y)*sy+oy;
       const rx = r0*sx, ry = r0*TILT*sy;
-      const useHull = stepNo===2 && (sameSlapN>0 || pullN>0 || action.state==="PULLING" || !!twitch);   // дёрнувшийся край рисуется по узлам, а не ровным эллипсом
       g.fillStyle = "rgba(10,6,2,0.22)";
       if(useHull && pathSheetOutline(g, sx, ox, sy, oy, r0*TILT*sy*0.07)){
         g.fill();
@@ -7878,18 +8041,22 @@ function draw(){
       }
       g.fillStyle = tableSkin(base);
       g.fill();
+      // сборка 98: те же вызовы рисования, без разбора массива, замыканий и объектов точек на каждую ячейку
+      const pX=i=>prX(X[i],Y[i])*sx+ox, pY=i=>prY(X[i],Y[i])*sy+oy;
       for(let q=0;q<quads.length;q++){
-        const [a,b2,c,d] = quads[q];
+        const qq = quads[q], a=qq[0], b2=qq[1], c=qq[2], d=qq[3];
         const t = (Hmap[a]+Hmap[b2]+Hmap[c]+Hmap[d])/4;
         if(t > 0.96) continue;
-        if(quadCons[q].some(cc=>cc.broken)) continue;   // дыра и в «круглом» виде — дыра: сквозь неё стол
+        const qc = quadCons[q]; let br = false;
+        for(let m=0;m<qc.length;m++) if(qc[m].broken){ br = true; break; }
+        if(br) continue;   // дыра и в «круглом» виде — дыра: сквозь неё стол
         g.fillStyle = tableSkin(t, rimEdgeQ ? rimEdgeQ[q] : 0);
-        const Pa=Pnt(a), Pb=Pnt(b2), Pc=Pnt(c), Pd=Pnt(d);
         g.beginPath();
-        g.moveTo(Pa.x,Pa.y); g.lineTo(Pb.x,Pb.y); g.lineTo(Pc.x,Pc.y); g.lineTo(Pd.x,Pd.y);
+        g.moveTo(pX(a),pY(a)); g.lineTo(pX(b2),pY(b2)); g.lineTo(pX(c),pY(c)); g.lineTo(pX(d),pY(d));
         g.closePath(); g.fill();
       }
       g.restore();
+      });
     } else if(!onPan && !xf){
       const c0 = bodyC, r0 = sheetRadius();
       g.fillStyle = "rgba(10,6,2,0.20)";
