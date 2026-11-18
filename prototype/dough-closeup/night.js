@@ -200,7 +200,7 @@ function nightDraw(g, sx, sy, G){
       g.fillStyle = "#3a2c1e"; g.fillRect((C.x + q)*sx, (C.y + q)*sy, (C.s - 2*q)*sx, (C.s - 2*q)*sy);
       g.fillStyle = "#c9a15a"; g.beginPath(); g.ellipse((C.x + C.s/2)*sx, (C.y + C.s/2)*sy, C.s*0.30*sx, C.s*0.28*sy, 0, 0, Math.PI*2); g.fill();
     }
-    nbMark(g, sx, sy, s.to, C.mx, C.my, u*0.72);
+    nbMark(g, sx, sy, s.to, C.mx, C.my, u*0.72, s.answer);
   });
   nightPast().forEach((s, i) => {                          // вчера: те же снимки мелко, без меток
     const C = R.past[i], im = typeof nbPic === "function" ? nbPic(s.img) : null, p = Math.max(1, 1.5*u);

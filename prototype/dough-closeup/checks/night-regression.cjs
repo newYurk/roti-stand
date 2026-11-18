@@ -410,6 +410,36 @@ test('D6', 'without night.js the evening is the one of step 3: the old closing l
   return { summary: 'evening.js + guest.js + notebook.js alone: old closing line, save.night kept' };
 });
 
+test('D7', 'the snapshot of a roti given to Som keeps her answer, and the mark under it is her answer face: nod (level mouth, head tilted), crunch (closed eyes, crumbs); an old snapshot without an answer keeps the old mark', () => {
+  const h = night(); light(h);
+  onPan(h); arrive(h); finish(h); serve(h, h.gs().som);          // short fry → nod
+  assert.deepEqual(h.g().answers.map(a => a.answer), ['nod']);
+  const snaps = h.NB().evenings.at(-1).snaps;
+  assert.equal(snaps[0].to, 'som'); assert.equal(snaps[0].answer, 'nod', 'the snapshot keeps the answer');
+  // the mark under a Som snapshot draws her answer face, the old mark has no features
+  const mark = ans => h.J(`(()=>{const E=[],R=[],S=[],k={ellipse:ctx.ellipse,stroke:ctx.stroke,rotate:ctx.rotate,fillRect:ctx.fillRect};
+    ctx.ellipse=(x,y,rx,ry)=>{E.push({f:ctx.fillStyle,x,y,rx,ry})};ctx.rotate=a=>R.push(a);ctx.stroke=()=>S.push(1);
+    try{nbMark(ctx,1,1,"som",100,100,1,${ans === null ? 'null' : JSON.stringify(ans)})}finally{Object.assign(ctx,k)}return {E,R,S}})()`);
+  const mNod = mark('nod');
+  assert.deepEqual(mNod.R, [0.16], 'the nod head is tilted');
+  assert.equal(mNod.E.filter(e => e.f === '#1d150e' && e.rx < 1.4).length, 2, 'two open eyes');
+  assert.equal(mNod.S.length, 3, 'two earrings + one level mouth');
+  const mCrunch = mark('crunch');
+  assert.deepEqual(mCrunch.R, [], 'no tilt on the crunch');
+  assert.equal(mCrunch.E.filter(e => e.f === '#f0c674').length, 6, 'crumbs');
+  assert.equal(mCrunch.E.filter(e => e.f === '#1d150e').length, 0, 'no open eyes — the eyes are closed');
+  assert.equal(mCrunch.S.length, 5, 'two earrings + two closed eyes + a smile');
+  const mOld = mark(null);
+  assert.deepEqual(mOld.R, [], 'the old mark is not tilted');
+  assert.equal(mOld.E.filter(e => e.f === '#f0c674').length, 0);
+  assert.equal(mOld.E.filter(e => e.f === '#1d150e').length, 0, 'the old mark has no face features');
+  assert.equal(mOld.S.length, 2, 'only the earrings');
+  const r = reloadD(h);
+  assert.equal(r.NB().evenings.at(-1).snaps[0].answer, 'nod', 'the answer survives a reload');
+  assert.equal(h.run('loopErrs'), 0); assert.deepEqual(h.errors, []);
+  return { summary: `answer kept on the snapshot: ${snaps[0].answer}; nod: tilt + open eyes + level mouth, crunch: crumbs + closed eyes, old: neutral` };
+});
+
 const passed = results.filter(r => r.status === 'PASS').length;
 console.log(`\nnight: ${passed}/${results.length} passed`);
 try {
