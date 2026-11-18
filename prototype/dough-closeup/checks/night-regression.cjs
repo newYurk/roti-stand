@@ -476,6 +476,23 @@ test('D8', 'the night frame of the second evening shows yesterday as a separate 
   return { summary: 'yesterday: a dimmed row below today, same size, no marks' };
 });
 
+test('D9', 'after the night the new evening starts with an empty counter, while the snapshot of a counter roti keeps its stand mark', () => {
+  const h = night({ storage: saveAt(2) });           // third ball in work, two soft roti given to Som
+  onPan(h); finish(h); serve(h);                      // the third roti goes to the counter
+  assert.equal(h.onCounter(), 1, 'the third roti lies on the counter');
+  endEvening(h); h.frames(3);
+  assert.deepEqual(h.ns().cards.map(c => c.to), ['som', 'som', 'counter']);
+  assert.equal(h.onCounter(), 1, 'at night the counter still shows it');
+  // the snapshot of a counter roti keeps the stand mark
+  const m = h.J('(()=>{const out=[],k=ctx.fillRect;ctx.fillRect=(x,y,w,h)=>out.push({f:ctx.fillStyle,x,y,w,h});try{nbMark(ctx,1,1,"counter",100,100,1)}finally{ctx.fillRect=k}return out})()');
+  assert.ok(m.some(r => r.f === '#3a2c1e' && r.w >= 20), 'the stand mark is drawn under the snapshot');
+  // the lump starts the new evening: the counter is empty
+  tap(h, h.spots().lump); h.frames(3);
+  assert.equal(h.eve().over, false); assert.equal(h.onCounter(), 0, 'the new evening starts with an empty counter');
+  assert.equal(h.run('loopErrs'), 0); assert.deepEqual(h.errors, []);
+  return { summary: 'counter: 1 at night → 0 in the new evening; the stand mark stays on the snapshot' };
+});
+
 const passed = results.filter(r => r.status === 'PASS').length;
 console.log(`\nnight: ${passed}/${results.length} passed`);
 try {
