@@ -97,9 +97,10 @@ function roti(opts) { const h = evening(opts); light(h); stretched(h); toPan(h);
 const cookAll = (h, c) => h.run(`for(const t of dish.thermal) if(t){t.dry[0]=t.dry[1]=1;t.cook[0]=t.cook[1]=${c};} dish.panTime=(dish.panTime||0)+0.3; fryHold=true;`);
 const cookSides = (h, bottom, top) => h.run(`for(let i=0;i<dish.thermal.length;i++){const t=dish.thermal[i];if(!t)continue;t.dry[0]=t.dry[1]=1;
   const w=dish.contactWeights[i]; const down=w&&w[1]>w[0]?1:0; t.cook[down]=${bottom}; t.cook[1-down]=${top};} dish.panTime=(dish.panTime||0)+0.3; fryHold=true;`);
-// Seen faces of the envelope on the tava: colour drawn (dishCrustColor) against the ground of the same face.
+// Seen faces of the envelope on the tava: the colour at the face middle (dishCrustSample — what the spot texture lays there)
+// against the ground of the same face (round 2: the face fill is the ground, spots go on top as a texture).
 const FACES = `(()=>{const out=[];for(const f of dish.faces){ if(f.kind!=="dough"||!dish.topWeights[f.source][f.turned?0:1]) continue;
-  const P=crustFace(f), c=dishCrustColor(f); out.push({c:c.map(v=>Math.round(v*10)/10),g:P.ground.map(v=>Math.round(v*10)/10),edge:P.edge,cook:P.c,src:f.source,t:f.turned}); } return out;})()`;
+  const P=crustFace(f), c=dishCrustSample(f); out.push({c:c.map(v=>Math.round(v*10)/10),g:P.ground.map(v=>Math.round(v*10)/10),edge:P.edge,cook:P.c,src:f.source,t:f.turned}); } return out;})()`;
 // Material sampling of the field: share of the area under spots and the spot colours, for one cook value (no edge).
 const FIELD = (c, edge = 0, side = 1) => `(()=>{const P={base:[227,213,178],c:${c},edge:${edge},seed:dish.seed,side:${side},ground:cookColor([227,213,178],crustGround(${c}))};
   let n=0,sp=0,L=[],R=[];const lum=v=>0.299*v[0]+0.587*v[1]+0.114*v[2], gl=lum(P.ground);
@@ -178,6 +179,13 @@ test('L3', 'the pattern stays: the same spots frame to frame, after a turn and a
   cookAll(h, 0.42); h.frames(1);
   const a = h.J(FACES); h.frames(30); cookAll(h, 0.42); h.frames(1); const b = h.J(FACES);
   assert.deepEqual(b.map(f => f.c), a.map(f => f.c), 'frame to frame: identical colours');
+  // round 2: the tava draws spots from a texture of the same field (spotTexField) — it must match spotField
+  const tex = h.J(`(()=>{const F=spotTexField(dish.seed,1),N=SPOT_TEX_N;let mx=0,n=0;
+    for(let k=0;k<4000;k++){const i=(k*7919)%N,j=(k*104729)%N;n++;
+      mx=Math.max(mx,Math.abs(F[j*N+i]-spotField(SPOT_TEX_U0+(i+.5)*SPOT_TEX_S,SPOT_TEX_U0+(j+.5)*SPOT_TEX_S,dish.seed,1)));}
+    return {n,mx};})()`);
+  assert.ok(tex.mx < 1e-6, `spot texture = spot field: max difference ${tex.mx} over ${tex.n} texels`);
+  console.log(`     texture vs field: max difference ${tex.mx.toExponential(1)} over ${tex.n} texels`);
   // material middles survive a turn exactly: the same material point, so the same spot
   const mids = () => h.J('dish.faces.filter(f=>f.kind==="dough").map(f=>{const q=faceMaterialMid(f);return [f.source,f.turned,+q.x.toFixed(6),+q.y.toFixed(6)]})');
   const m0 = mids();

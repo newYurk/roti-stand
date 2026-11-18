@@ -1248,13 +1248,16 @@ function dishCookColor(f,side,through=true){
 //    SPOT_LIFT…; сырая сторона (ниже FRY_STEPS[0]) — ни одного пятна, фон бледный и матовый;
 //  • у края роти и у шва конверта (рёбра складок) пятен больше и они темнее (EDGE_W, SEAM_W);
 //    румяная кайма стороны на стали (сборка 78) осталась, но тоже пятнами;
-//  • на таве цвет грани — значение поля в её середине (грань — пол-ячейки сетки, ~5–7 CSS px);
-//    на столе рельеф считается попиксельно, и пятна там круглые (renderDishTable → crustMix).
+//  • пятно — не свой цвет, а затемнение фона (множитель SPOT_TINT): фон золотеет с прожаркой, веснушки
+//    чуть темнее него, края мягкие (раунд 2, 18.11: на 86 пятна читались ржавчиной и камуфляжем);
+//  • на таве пятна рисуются текстурой в координатах материала (crustSpotTex): у каждой грани своё
+//    аффинное отображение материал → экран, умножение поверх фона грани, сила — globalAlpha; на столе
+//    тот же crustMix считается попиксельно (renderDishTable). Пятна круглые и там, и там.
 const CRUST_M0 = [1,0,0,1,0,0];                // материал = блюдо в момент посадки
-const SPOT_BIG = 0.11, SPOT_FINE = 0.035;      // размер пятен и точек в долях радиуса роти
-const SPOT_SOFT = 0.05;                       // мягкость края пятна (в долях поля): без ступеньки
-const SPOT_LIFT = 0.16, SPOT_DEEP = 0.32;      // пятно темнее своей стороны на 0,16…0,48 «цвета» (у тёмной стороны меньше)
-const EDGE_W = 0.075;                          // полоса края, где пятна гуще, — доля радиуса
+const SPOT_BIG = 0.09, SPOT_FINE = 0.03;       // шаг сетки пятен и веснушек в долях радиуса роти (раунд 2: круглые точки)
+const SPOT_SOFT = 0.09;                       // мягкость края пятна (в долях поля): край расплывается
+const SPOT_TINT = [0.76,0.65,0.56];            // множитель цвета в сердцевине пятна при полной силе: коричневее фона, не чёрное
+const EDGE_W = 0.075, EDGE_GROUND = 0.16;      // полоса края, где пятна гуще, — доля радиуса; румянец фона у края
 function crustSeedNow(){
   const e=typeof EVE!=="undefined" && EVE ? EVE : null;
   return 1+(e && Number.isFinite(e.rotiDone) ? e.rotiDone : 0);
@@ -1279,10 +1282,28 @@ function crustNoise(x,y,seed){
   const a=crustHash(ix,iy,seed), b=crustHash(ix+1,iy,seed), c=crustHash(ix,iy+1,seed), d=crustHash(ix+1,iy+1,seed);
   return a+(b-a)*u+(c-a)*v+(a-b-c+d)*u*v;
 }
-// Поле пятен 0…1 в точке материала: крупные пятна + мелкие точки. side — сторона листа (0/1).
+// Поле пятен 0…1 в точке материала: круглые точки двух размеров (раунд 2; шум на решётке давал
+// квадратные кляксы). В каждой клетке сетки — одна точка со случайными местом, радиусом и весом;
+// поле — максимум по точкам от w·(1−(d/r)²). Порог поля по доле площади сначала открывает самые
+// весомые точки и их середины, дальше точек больше и они крупнее. Крупные пятна (вес ≤ 0,8)
+// появляются только у сильно зажаренной стороны. Медленный шум сверху — скопления веснушек.
+function spotDot(cx,cy,cell,s){
+  const h1=crustHash(cx,cy,s), h2=crustHash(cx,cy,s+101), h3=crustHash(cx,cy,s+202), h4=crustHash(cx,cy,s+303);
+  return [(cx+0.15+0.7*h1)*cell,(cy+0.15+0.7*h2)*cell,cell*(0.3+0.42*h3),0.45+0.55*h4];
+}
+function spotDots(x,y,cell,s){
+  const ix=Math.floor(x/cell), iy=Math.floor(y/cell); let v=0;
+  for(let j=-1;j<=1;j++) for(let i=-1;i<=1;i++){
+    const D=spotDot(ix+i,iy+j,cell,s), dx=x-D[0], dy=y-D[1], q=(dx*dx+dy*dy)/(D[2]*D[2]);
+    if(q<1){ const w=D[3]*(1-q); if(w>v) v=w; }
+  }
+  return v;
+}
+const SPOT_BIG_W = 0.7, SPOT_CLUSTER = 0.3;
+function spotCluster(x,y,s){ return 1-SPOT_CLUSTER+SPOT_CLUSTER*crustNoise(x/0.22+3.1,y/0.22+8.7,s+31); }
 function spotField(x,y,seed,side){
   const s=seed*2+side;
-  return 0.64*crustNoise(x/SPOT_BIG,y/SPOT_BIG,s)+0.36*crustNoise(x/SPOT_FINE+17.3,y/SPOT_FINE-4.1,s+7919);
+  return Math.max(SPOT_BIG_W*spotDots(x,y,SPOT_BIG,s+7919),spotDots(x,y,SPOT_FINE,s))*spotCluster(x,y,s);
 }
 // Квантили поля (считаются один раз): порог, выше которого лежит заданная доля площади.
 let spotQ=null;
@@ -1294,14 +1315,33 @@ function spotQuant(p){
   const q=Math.max(0,Math.min(100,p*100)), k=Math.floor(q), f=q-k;
   return k>=100 ? spotQ[100] : spotQ[k]+(spotQ[k+1]-spotQ[k])*f;
 }
-// Доля площади стороны под пятнами по её прожарке c: сырое — 0; к «зажаренному» — около половины.
+// Доля площади стороны под пятнами по её прожарке c: сырое — 0; «приготовленное» — редкие веснушки,
+// «зажаренное» — гуще (до ~40 %). Больше половины — уже сплошные кляксы (камуфляж сборки 86).
 function spotCover(c){
   if(!(c>=FRY_STEPS[0])) return 0;
   const k=Math.min(1,(c-FRY_STEPS[0])/(FRY_STEPS[3]-FRY_STEPS[0]));
-  return Math.min(0.85,0.06+0.5*Math.pow(k,0.8)+Math.max(0,c-FRY_STEPS[3])*1.5);
+  return Math.min(0.85,0.04+0.32*Math.pow(k,0.8)+Math.max(0,c-FRY_STEPS[3])*1.5);
 }
-// Фон между пятнами: светлее стороны вдвое, у горелого догоняет её (горелое читается тёмным целиком).
-function crustGround(c){ return c<1 ? 0.5*c : Math.min(c, 0.5+(c-1)*5); }
+// Сила пятна (0…1) — насколько сердцевина пятна доходит до SPOT_TINT: растёт с прожаркой, у края и
+// у шва сильнее. Горелое — тёмное целиком, пятна на нём почти не нужны.
+function spotStrength(c,edge){
+  if(!(c>=FRY_STEPS[0])) return 0;
+  const k=Math.min(1,(c-FRY_STEPS[0])/(FRY_STEPS[2]-FRY_STEPS[0]));
+  return Math.min(1,0.3+0.45*k+0.35*edge);
+}
+// Фон между пятнами — сама сторона, чуть светлее: с прожаркой золотеет (раунд 2: на 86 фон оставался
+// кремовым до «зажаренного»); у горелого догоняет её (горелое читается тёмным целиком).
+const CRUST_GROUND = 0.78;
+function crustGround(c){ return c<1 ? CRUST_GROUND*c : Math.min(c, CRUST_GROUND+(c-1)*4); }
+// Маска пятна 0…1 по значению поля n и порогу thr: мягкий край, к сердцевине гуще.
+function spotMask(n,thr,soft){
+  const s=Math.max(0,Math.min(1,(n-thr+soft)/(2*soft)));
+  if(s<=0) return 0;
+  const d=Math.max(0,Math.min(1,(n-thr)/Math.max(1e-6,spotQuant(1)-thr)));
+  return s*s*(3-2*s)*(0.5+0.5*d);
+}
+// Доля площади с поправкой на край и шов (там пятна гуще).
+function spotCoverAt(c,edge){ const cov=spotCover(c); return cov ? cov+(0.75-cov)*0.6*edge : 0; }
 // Параметры корки, одинаковые по всей грани: прожарка видимой стороны (с каймой стороны на стали),
 // близость к краю и шву, зерно узора. null — у грани нет тепла (порванная ячейка).
 function crustFace(f,side){
@@ -1330,21 +1370,18 @@ function crustFace(f,side){
       const low=L.bot*spot; if(k>0 && low>c) c+=(low-c)*k;
     }
   }
+  // край и рёбра складок румянее и сами по себе, не только пятнами (раунд 2)
+  if(c>=FRY_STEPS[0]) gc+=EDGE_GROUND*edge*Math.min(1,c/FRY_STEPS[2]);
   return {base,c,edge,seed:(dish && dish.seed)||1,side,ground:cookColor(base,gc)};
 }
 // Цвет корки в точке материала (x, y) для параметров грани P. Без пятна — фон.
 function crustMix(P,x,y,ground=P.ground,soft=SPOT_SOFT,field=null){
-  let cov=spotCover(P.c);
+  const cov=spotCoverAt(P.c,P.edge);
   if(!cov) return ground;
-  cov+=(0.9-cov)*0.5*P.edge;
-  const n=field===null ? spotField(x,y,P.seed,P.side) : field, thr=spotQuant(1-cov);
-  const s=Math.max(0,Math.min(1,(n-thr+soft)/(2*soft)));
-  if(s<=0) return ground;
-  const d=Math.max(0,Math.min(1,(n-thr)/Math.max(1e-6,spotQuant(1)-thr)));
-  const cap=P.c>=FRY_STEPS[3] ? COOK_CAP : 0.95;   // до «горелого» пятно коричневое, не чёрное
-  const lift=(SPOT_LIFT+SPOT_DEEP*d+0.12*P.edge)*Math.max(0.3,1-0.7*P.c);   // тёмной стороне пятну темнеть почти некуда
-  const sc=Math.min(cap,Math.max(P.c,P.c+lift));
-  return lerp3(ground,cookColor(P.base,sc),s*s*(3-2*s));
+  const n=field===null ? spotField(x,y,P.seed,P.side) : field;
+  const m=spotMask(n,spotQuant(1-cov),soft)*spotStrength(P.c,P.edge);
+  if(m<=0) return ground;
+  return [ground[0]*(1-m*(1-SPOT_TINT[0])),ground[1]*(1-m*(1-SPOT_TINT[1])),ground[2]*(1-m*(1-SPOT_TINT[2]))];
 }
 // Середина грани в материале — кэш по массиву точек (новая геометрия — новый массив).
 const crustMid=new WeakMap();
@@ -1354,24 +1391,103 @@ function faceMaterialMid(f){
   hit=f.m ? crustToMaterial(f.m,x,y) : {x,y};
   crustMid.set(f.points,hit); return hit;
 }
-// Цвет грани на таве и в руке: поле пятен в середине грани.
-// Цвет видимой стороны грани пересчитывается раз в CRUST_DT секунд жарки: за это время прожарка сдвигается
-// на тысячные, а рисунок тавы иначе платил бы за поле пятен каждый кадр (2 000+ граней).
+// Вид грани на таве и в руке: заливка — фон корки, пятна поверх — текстурой (drawCrustSpots).
+// Пересчитывается раз в CRUST_DT секунд жарки: за это время прожарка сдвигается на тысячные, а рисунок
+// тавы иначе платил бы за crustFace (rimDist) каждый кадр (2 000+ граней).
 const CRUST_DT = 0.25, crustCache = new WeakMap();
-function dishCrustColor(f,side){
-  if(side===undefined && dish){
-    // сдвиг по номеру ячейки: грани пересчитываются вразбивку, а не все в одном кадре
-    const key=Math.floor((dish.panTime||0)/CRUST_DT+(f.source%16)/16)+"|"+(dish.seed||1), hit=crustCache.get(f);
-    if(hit && hit.key===key) return hit.c;
-    const c=dishCrustColorNow(f); crustCache.set(f,{key,c}); return c;
-  }
-  return dishCrustColorNow(f,side);
+function crustLook(f){
+  const key=dish ? Math.floor((dish.panTime||0)/CRUST_DT+(f.source%16)/16)+"|"+(dish.seed||1) : "", hit=crustCache.get(f);
+  if(hit && hit.key===key) return hit;
+  const P=crustFace(f), cov=spotCoverAt(P.c,P.edge);
+  const L={key,c:P.ground,cov,k:cov ? spotStrength(P.c,P.edge) : 0,seed:P.seed,side:P.side};
+  crustCache.set(f,L); return L;
 }
-function dishCrustColorNow(f,side){
-  const P=crustFace(f,side), q=faceMaterialMid(f), key=P.seed*2+P.side;
-  // значение поля в середине грани постоянно — считается один раз на грань, зерно и сторону
-  if(q.key!==key){ q.key=key; q.n=spotField(q.x,q.y,P.seed,P.side); }
-  return crustMix(P,q.x,q.y,P.ground,SPOT_SOFT,q.n);
+function dishCrustColor(f,side){ return side===undefined ? crustLook(f).c : crustFace(f,side).ground; }
+// Цвет в середине грани с пятном (для наборов: то, что текстура кладёт в этой точке).
+function dishCrustSample(f){ const P=crustFace(f), q=faceMaterialMid(f); return crustMix(P,q.x,q.y); }
+// Текстура пятен: поле в координатах материала на квадрате [U0, U0+N·S]², одна на сторону и зерно;
+// уровни — доля площади, квантованная на SPOT_LEVELS ступеней (у соседних граней разница ступени — край
+// пятна сдвигается на сотые поля, под мягким краем не виден). Значение текселя — множитель цвета.
+const SPOT_TEX_N = 512, SPOT_TEX_U0 = -1.15, SPOT_TEX_S = 2.3/512, SPOT_LEVELS = 24, SPOT_COV_MAX = 0.85;
+let spotTex = {seed:0, field:[null,null], pat:new Map()};
+function spotTexField(seed,side){
+  if(spotTex.seed!==seed) spotTex={seed, field:[null,null], pat:new Map()};
+  let F=spotTex.field[side]; if(F) return F;
+  // То же поле, что spotField, но раскладкой точек по текселям: в разы быстрее опроса 3×3 клеток
+  const N=SPOT_TEX_N, S=SPOT_TEX_S, U=SPOT_TEX_U0, s=seed*2+side; F=new Float32Array(N*N);
+  for(const [cell,sd,W] of [[SPOT_FINE,s,1],[SPOT_BIG,s+7919,SPOT_BIG_W]]){
+    const c0=Math.floor(U/cell)-1, c1=Math.ceil((U+N*S)/cell)+1;
+    for(let cy=c0;cy<=c1;cy++) for(let cx=c0;cx<=c1;cx++){
+      const D=spotDot(cx,cy,cell,sd), r2=D[2]*D[2];
+      const i0=Math.max(0,Math.floor((D[0]-D[2]-U)/S-.5)), i1=Math.min(N-1,Math.ceil((D[0]+D[2]-U)/S-.5));
+      const j0=Math.max(0,Math.floor((D[1]-D[2]-U)/S-.5)), j1=Math.min(N-1,Math.ceil((D[1]+D[2]-U)/S-.5));
+      for(let j=j0;j<=j1;j++){ const dy=U+(j+.5)*S-D[1];
+        for(let i=i0;i<=i1;i++){ const dx=U+(i+.5)*S-D[0], q=(dx*dx+dy*dy)/r2;
+          if(q<1){ const w=W*D[3]*(1-q); if(w>F[j*N+i]) F[j*N+i]=w; } } }
+    }
+  }
+  for(let j=0;j<N;j++){ const y=U+(j+.5)*S; for(let i=0;i<N;i++) F[j*N+i]*=spotCluster(U+(i+.5)*S,y,s); }
+  return spotTex.field[side]=F;
+}
+function spotLevel(cov){ return Math.max(1,Math.min(SPOT_LEVELS,Math.round(cov/SPOT_COV_MAX*SPOT_LEVELS))); }
+function crustSpotPattern(g,seed,side,lv){
+  if(typeof document==="undefined" || !g.createPattern) return null;
+  const key=seed+"|"+side+"|"+lv; let pat=spotTex.seed===seed ? spotTex.pat.get(key) : undefined;
+  if(pat!==undefined) return pat;
+  const F=spotTexField(seed,side), N=SPOT_TEX_N, thr=spotQuant(1-lv/SPOT_LEVELS*SPOT_COV_MAX);
+  const cv=document.createElement("canvas"); cv.width=cv.height=N;
+  const cx=cv.getContext("2d"), im=cx.createImageData(N,N), d=im.data;
+  for(let i=0;i<N*N;i++){
+    const m=spotMask(F[i],thr,SPOT_SOFT);
+    d[i*4]=255*(1-m*(1-SPOT_TINT[0])); d[i*4+1]=255*(1-m*(1-SPOT_TINT[1])); d[i*4+2]=255*(1-m*(1-SPOT_TINT[2])); d[i*4+3]=255;
+  }
+  cx.putImageData(im,0,0);
+  pat=g.createPattern(cv,"repeat"); spotTex.pat.set(key,pat); return pat;
+}
+// Точки грани в материале — кэш по массиву точек и рамке.
+const crustMat=new WeakMap();
+function faceMaterialPts(f){
+  let hit=crustMat.get(f.points); if(hit && hit.m===f.m) return hit.q;
+  const q=new Float32Array(6);
+  for(let k=0;k<3;k++){ const p=f.points[k], r=f.m ? crustToMaterial(f.m,p.x,p.y) : p; q[k*2]=r.x; q[k*2+1]=r.y; }
+  crustMat.set(f.points,{m:f.m,q}); return q;
+}
+// Грани под верхним слоем (клапаны конверта закрывают низ): пятна им не нужны — их всё равно закроют.
+// Скрыта, только если стопка выше верха грани во всех клетках вокруг её середины и вершин (с запасом).
+function crustBuried(faces,H){
+  if(!H || !H.zt || !H.top || !H.size) return null;
+  if(H.crustBuried) return H.crustBuried;
+  const n=H.size, out=new Uint8Array(faces.length);
+  const cell=(x,y)=>[Math.min(n-1,Math.max(0,Math.floor((x-H.L)/H.dx))),Math.min(n-1,Math.max(0,Math.floor((y-H.T)/H.dy)))];
+  for(let i=0;i<faces.length;i++){
+    const f=faces[i]; if(f.kind!=="dough") continue;
+    let cx=0,cy=0; for(const p of f.points){ cx+=p.x; cy+=p.y; }
+    // запас — 0,7 толщины самой грани: открытая грань стоит вровень со стопкой, под клапаном — на слой ниже
+    const c={x:cx/f.points.length,y:cy/f.points.length}, pts=[c,...f.points], lim=H.zt[i]+Math.max(0.05,0.7*layerMM(f,c));
+    let hid=true;
+    for(const p of pts){ const [a,b]=cell(p.x,p.y);
+      for(let j=Math.max(0,b-1);j<=Math.min(n-1,b+1) && hid;j++) for(let k=Math.max(0,a-1);k<=Math.min(n-1,a+1);k++) if(H.top[j*n+k]<=lim){ hid=false; break; }
+      if(!hid) break; }
+    out[i]=hid ? 1 : 0;
+  }
+  return H.crustBuried=out;
+}
+// Пятна поверх уже залитой грани (путь грани — текущий): умножение текстуры, у каждой грани своё
+// аффинное отображение материал → экран по трём первым точкам (s — их экранные x, y).
+const spotMatrix = typeof DOMMatrix!=="undefined" ? new DOMMatrix() : null;
+function drawCrustSpots(g,f,s){
+  const L=crustLook(f); if(!(L.k>0.01) || !spotMatrix) return;
+  const pat=crustSpotPattern(g,L.seed,L.side,spotLevel(L.cov)); if(!pat) return;
+  const q=faceMaterialPts(f), du1=q[2]-q[0], dv1=q[3]-q[1], du2=q[4]-q[0], dv2=q[5]-q[1], det=du1*dv2-du2*dv1;
+  if(Math.abs(det)<1e-12) return;
+  const dx1=s[2]-s[0], dy1=s[3]-s[1], dx2=s[4]-s[0], dy2=s[5]-s[1];
+  const a=(dx1*dv2-dx2*dv1)/det, c=(dx2*du1-dx1*du2)/det, b=(dy1*dv2-dy2*dv1)/det, d=(dy2*du1-dy1*du2)/det;
+  const e=s[0]-a*q[0]-c*q[1], h=s[1]-b*q[0]-d*q[1], S=SPOT_TEX_S, U=SPOT_TEX_U0;
+  const M=spotMatrix; M.a=a*S; M.b=b*S; M.c=c*S; M.d=d*S; M.e=e+(a+c)*U; M.f=h+(b+d)*U;
+  pat.setTransform(M);
+  const ga=g.globalAlpha;
+  g.globalCompositeOperation="multiply"; g.globalAlpha=L.k; g.fillStyle=pat; g.fill();
+  g.globalCompositeOperation="source-over"; g.globalAlpha=ga;
 }
 // Мокрый блеск маргарина (сборка 86): на ближнем к глазу крае роти, там, где под кромкой жир.
 // Нет, пока сторона на стали сырая; ярче всего у «бледного», тускнеет к «зажаренному». Без пузырьков.
@@ -2965,9 +3081,10 @@ function drawDishFaces(g,faces,screen,H,zk,shadow=true,shift=null){
       : dishCrustColor(f);
     return k===1 ? color : color.map(c=>Math.min(255,c*k));
   };
+  const tri=new Float64Array(6);   // экранные три первые точки последней залитой грани — для пятен
   const top=(i,off)=>{
-    const f=faces[i], p=screen(f.points[0],f); g.beginPath(); g.moveTo(p.x,p.y-off(0));
-    for(let k=1;k<f.points.length;k++){ const q=screen(f.points[k],f); g.lineTo(q.x,q.y-off(k)); }
+    const f=faces[i], p=screen(f.points[0],f), y0=p.y-off(0); g.beginPath(); g.moveTo(p.x,y0); tri[0]=p.x; tri[1]=y0;
+    for(let k=1;k<f.points.length;k++){ const q=screen(f.points[k],f), y=q.y-off(k); g.lineTo(q.x,y); if(k<3){ tri[k*2]=q.x; tri[k*2+1]=y; } }
     g.closePath(); g.fill();
   };
   const faceScreen=f=>p=>screen(p,f);
@@ -3010,12 +3127,14 @@ function drawDishFaces(g,faces,screen,H,zk,shadow=true,shift=null){
       : H ? Math.min(.95,.72+doughMM(f.tone)*.3)*doughSet(f)
       : Math.max(.48,Math.min(.92,.48+doughMM(f.tone)*.3));
     if(H){ const hs=H.vert(k); top(k,m=>hs[m]*zk); } else top(k,()=>0);
+    if(f.kind==="dough" && !(buried && buried[k])) drawCrustSpots(g,f,tri);   // сборка 86, раунд 2: пятна круглые и на таве
   };
   // Открытая начинка — всегда верх своей ячейки и выше соседнего теста, поэтому рисуется
   // последней: иначе низкий клапан за порцией закрашивал её верх (ревью толщины 16.09, п. 4).
   // Сперва стенки всех открытых кусочков, потом их верхи — стенка следующего кусочка не
   // ложится поверх уже нарисованного.
-  const open=[];
+  const buried=crustBuried(faces,H);
+  const open=[], smooth=g.imageSmoothingEnabled; g.imageSmoothingEnabled=true;   // текстура пятен — сглаженно
   for(let k=0;k<faces.length;k++){
     if(H && faces[k].kind==="filling" && H.exposed(k)) open.push(k); else paint(k);
   }
@@ -3027,7 +3146,7 @@ function drawDishFaces(g,faces,screen,H,zk,shadow=true,shift=null){
     drawFaceWalls(g,f.points,faceScreen(f),hs,zk,base);
   }
   for(const k of open) paint(k);
-  g.globalAlpha=1;
+  g.globalAlpha=1; g.imageSmoothingEnabled=smooth;
   if(H && open.length){
     drawEggFilm(g,faces,open,screen,H,zk);
     drawBananaSlices(g,faces,open,screen,H,zk);
