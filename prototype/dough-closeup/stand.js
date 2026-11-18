@@ -11,7 +11,7 @@
 // до 400%+ и лист «рвётся» в середине от любого движения. Замер это обнаружил сразу.
 // Число узлов сохранено (1 060 после обрезки по кругу; прежняя оценка «~1150» была на глаз,
 // пересчитано 07.09.2026), однородность рёбер восстановлена.
-const BUILD = "2026-11-18 · скорость 2: роти в руке и растяжка дешевле · 98";
+const BUILD = "2026-11-18 · рама и поворот не сбрасывают роти · 99";
 const GRID = 38;                   // 38x38, в круг попадает 1 060 узлов (посчитано, не оценка)
 let SUBSTEPS = 8;                  // T2: 8–10 подшагов, 1 итерация
 let DAMP = 0.986;
@@ -182,13 +182,15 @@ if(typeof Image!=="undefined" && frameWantedSafe()){
   FRAME = FRAMES[frameWantedSafe()];
   frameImg = new Image();
   frameImg.onload = ()=>{
-    frameOn = true; setTilt(FRAME.tilt || TILT_BASE);
-    sampleFrameColours();
-    // Рама — это экран игры, а не замер: виды A/B рисуют кадр в 80 и 224 пикселя по ширине,
-    // и картинка экрана в них превращается в мозаику. В раме всегда полный вид.
-    try { variant = "C"; document.querySelectorAll("[data-v]").forEach(b=>b.classList.toggle("on", b.dataset.v==="C")); } catch(e) {}
-    try { document.body.classList.add("framed"); } catch(e) {}
-    try { resize(true); } catch(e) {}
+    // Картинка может прийти, когда игрок уже начал: раскладка меняется с сохранением роти (сборка 99).
+    try { resize(false, ()=>{
+      frameOn = true; setTilt(FRAME.tilt || TILT_BASE);
+      sampleFrameColours();
+      // Рама — это экран игры, а не замер: виды A/B рисуют кадр в 80 и 224 пикселя по ширине,
+      // и картинка экрана в них превращается в мозаику. В раме всегда полный вид.
+      try { variant = "C"; document.querySelectorAll("[data-v]").forEach(b=>b.classList.toggle("on", b.dataset.v==="C")); } catch(e) {}
+      try { document.body.classList.add("framed"); } catch(e) {}
+    }); } catch(e) {}
   };
   frameImg.src = FRAME.src;
 }
@@ -197,26 +199,34 @@ function frameWantedSafe(){
   try { const k = localStorage.getItem("rotiFrame"); return FRAMES[k] ? k : null; } catch(e) { return null; }
 }
 // Переключение экрана на ходу (владелица 17.09: «между скринами можно переключить?»).
+// Сборка 99 (#113): рама меняет только вид. Раньше здесь звался resize(true) → build(): роти на любом шаге
+// пропадал, цикл начинался заново. Теперь смена рамы идёт через resize(false, смена): старые зоны
+// запоминаются до смены, лист и блюдо переносятся в новую раскладку (стол → стол, тава → тава).
+// Пока палец ведёт жест, смена ждёт отпускания, как и ресайз. FRAME меняется тоже внутри смены:
+// старая рабочая зона должна считаться по старой раме.
 function setFrame(key){
   try { localStorage.setItem("rotiFrame", key || ""); } catch(e) {}
   if(typeof document!=="undefined")
     document.querySelectorAll("[data-frame]").forEach(b=>b.classList.toggle("on", b.dataset.frame===(key||"")));
+  setFrame.want = key || "";                       // картинка прошлой рамы, пришедшая позже, уже не нужна
   if(!FRAMES[key]){                       // без рамы — обратно на свой стол
-    frameOn = false; FRAME = FRAMES.riverside; UNDER = TABLE; PAN_UNDER = null; PAL = buildPal(); setTilt(TILT_BASE);
-    if(typeof palPan!=="undefined" && palPan.clear) palPan.clear();
-    try { document.body.classList.remove("framed"); } catch(e) {}
-    try { resize(true); } catch(e) {}
+    try { resize(false, ()=>{
+      frameOn = false; FRAME = FRAMES.riverside; UNDER = TABLE; PAN_UNDER = null; PAL = buildPal(); setTilt(TILT_BASE);
+      if(typeof palPan!=="undefined" && palPan.clear) palPan.clear();
+      try { document.body.classList.remove("framed"); } catch(e) {}
+    }); } catch(e) {}
     return;
   }
-  FRAME = FRAMES[key];
   const img = new Image();
   img.onload = ()=>{
-    frameImg = img; frameOn = true; setTilt(FRAME.tilt || TILT_BASE); sampleFrameColours();
-    try { variant = "C"; document.querySelectorAll("[data-v]").forEach(b=>b.classList.toggle("on", b.dataset.v==="C")); } catch(e) {}
-    try { document.body.classList.add("framed"); } catch(e) {}
-    try { resize(true); } catch(e) {}
+    if(setFrame.want !== key) return;
+    try { resize(false, ()=>{
+      FRAME = FRAMES[key]; frameImg = img; frameOn = true; setTilt(FRAME.tilt || TILT_BASE); sampleFrameColours();
+      try { variant = "C"; document.querySelectorAll("[data-v]").forEach(b=>b.classList.toggle("on", b.dataset.v==="C")); } catch(e) {}
+      try { document.body.classList.add("framed"); } catch(e) {}
+    }); } catch(e) {}
   };
-  img.src = FRAME.src;
+  img.src = FRAMES[key].src;
 }
 // Цвет «под тестом» и «под роти» берётся с самой картинки: средний цвет рабочей поверхности и
 // середины тавы. Иначе тонкое тесто просвечивает цветом стола, которого в раме нет.
@@ -8532,13 +8542,20 @@ let pendingResize = false;
 // (найдено проверкой 08.09, обе формы окна). Полёт при этом всё равно защищён —
 // в нём `action.state === "TOSS"`.
 function gestureLive(){ return action.state !== "RESTING" || !!dishGesture || !!dishFlight || !!dishMove || !!fatGesture || !!dishTwist; }
-function resize(force){
+// layout — смена раскладки (рамы), которую надо применить вместе с ресайзом (сборка 99, #113): она
+// вызывается после замера старых зон, до переноса листа. Ждёт конца жеста так же, как ресайз.
+let pendingLayout = null;
+function resize(force, layout){
+  if(layout) pendingLayout = layout;
   const r = stage.getBoundingClientRect(), dpr = Math.min(2, devicePixelRatio||1);
   const w = Math.max(64, Math.round(r.width*dpr)), h = Math.max(64, Math.round(r.height*dpr));
-  if(!force && w===cv.width && h===cv.height) return;
+  // Окно вернулось к прежнему размеру, пока палец вёл жест: пересобирать нечего, но и ждать уже нечего —
+  // иначе pendingResize оставался поднятым навсегда (сборка 99, проверка «в руке»).
+  if(!force && !pendingLayout && w===cv.width && h===cv.height){ pendingResize = false; return; }
   if(!force && gestureLive()){ pendingResize = true; return; }   // доиграем жест, потом пересоберём
   pendingResize = false;
-  const oldPan={...panC},oldR=targetR,oldZ=zone("work");
+  const oldPan={...panC,r:PAN_R},oldR=targetR,oldZ=zone("work");
+  if(pendingLayout){ const f = pendingLayout; pendingLayout = null; f(); }
   cv.width = w; cv.height = h; cvDims();
   if(dish && !force){
     const z=zone("work"); targetR=sheetSpan(z)*TARGET_FRAC; layoutPan();
@@ -8559,16 +8576,25 @@ function resize(force){
 // s = новая мишень / старая; длины покоя — в s раз, площади покоя — в s², радиусы и мерка жеста —
 // в s. Толщина, карта нажима, сушка и цвет безразмерны и не трогаются. Лист на таве без блюда
 // (посадка не дала ни одной ячейки) переносится так же от старого центра тавы к новому.
+// Сборка 99 (#113): смена рамы меняет и соотношение листа и стола (в раме у канала стол узкий, лист ограничен тавой).
+// Поэтому середина листа переносится не множителем s, а по месту в зоне: её смещение от центра зоны — в долях
+// ширины и глубины зоны (на таве — в долях радиуса тавы), а форма вокруг середины — множителем s. Лист,
+// сдвинутый к краю стола, остаётся у того же края, а не уезжает к середине или за край.
 function rescaleSheet(oldZ, oldPan, oldR){
   const z = zone("work");
   targetR = sheetSpan(z)*TARGET_FRAC; layoutPan();
   const s = targetR/oldR, onPan = phase === "PAN";
   const o0 = onPan ? oldPan : { x:oldZ.cx, y:oldZ.cy }, o1 = onPan ? panC : { x:z.cx, y:z.cy };
+  const kx = onPan ? (oldPan.r ? PAN_R/oldPan.r : s) : z.w/oldZ.w, ky = onPan ? kx : z.h/oldZ.h;
+  let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;     // середина — центр габарита листа
+  for(let i=0;i<N;i++){ if(px[i]<x0) x0=px[i]; if(px[i]>x1) x1=px[i]; if(py[i]<y0) y0=py[i]; if(py[i]>y1) y1=py[i]; }
+  const cx = N ? (x0+x1)/2 : o0.x, cy = N ? (y0+y1)/2 : o0.y;
+  const c1x = o1.x + (cx-o0.x)*kx, c1y = o1.y + (cy-o0.y)*ky;
   for(let i=0;i<N;i++){
-    px[i] = o1.x + (px[i]-o0.x)*s; py[i] = o1.y + (py[i]-o0.y)*s; prx[i] = px[i]; pry[i] = py[i];
+    px[i] = c1x + (px[i]-cx)*s; py[i] = c1y + (py[i]-cy)*s; prx[i] = px[i]; pry[i] = py[i];
     vx[i] *= s; vy[i] *= s;
   }
-  if(sqC && !onPan) sqC = { x:o1.x + (sqC.x-o0.x)*s, y:o1.y + (sqC.y-o0.y)*s };   // мишень едет вместе с листом
+  if(sqC && !onPan) sqC = { x:c1x + (sqC.x-cx)*s, y:c1y + (sqC.y-cy)*s };   // мишень едет вместе с листом
   else sqC = null;
   scaleSheetLengths(s);
 }
