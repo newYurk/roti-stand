@@ -75,7 +75,10 @@
   /* Гостья у стойки (шаг 2 v0, guest.js ставит html.guest): её картинка начинается в 34 px от верха,
      поэтому служебная строка мельче и прижата к верху — две строки кончаются над её головой. */
   html.guest:not(.dev) #topbar{ top:4px; }
-  html.guest:not(.dev) #live{ margin-top:0; font-size:12px; line-height:1.15; }
+  /* Сборка 80: в игре строка всегда одна и короткая (stand.js, LINE_MAX) — прижата к верху и не переносится:
+     кончается на 21 px, выше головы гостьи (34 px) и полки с подарками, при ней и без неё одинаково. */
+  html:not(.dev) #topbar{ top:4px; }
+  html:not(.dev) #live{ margin-top:0; font-size:14px; line-height:1.2; white-space:nowrap; }
   #radioSheet{ position:absolute; inset:0; z-index:7; display:flex; align-items:center;
     justify-content:center; background:rgba(15,12,9,.78); }
   #radioBox{ display:flex; flex-direction:column; gap:10px; min-width:230px; padding:16px;
