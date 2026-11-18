@@ -112,14 +112,15 @@ function toPan(h) {
   assert.equal(h.run('phase'), 'PAN', 'the sheet carried by the middle lies on the tava');
   assert.equal(h.run('!!dish&&dish.mode'), 'fold');
 }
-function envelope(h) {
-  for (const k of [2, 3, 0, 1]) {
+function envelope(h, sides = [2, 3, 0, 1]) {
+  for (const k of sides) {
     const e = h.J(`(()=>{const E=dish.env,a=${k}<2?E.u:E.v,s=${k}%2?-1:1,d={x:a.x*s,y:a.y*s},hk=E.h[${k}];
       const hu=dish.hull.reduce((m,p)=>Math.max(m,(p.x-E.c.x)*d.x+(p.y-E.c.y)*d.y),0)/hk;
       return [__harness.dishToClient({x:E.c.x+d.x*hk*hu*.97,y:E.c.y+d.y*hk*hu*.97}),__harness.dishToClient(E.c)]})()`);
     const a = e[0], m = e[1], b = { x: a.x + (m.x - a.x) * 0.85, y: a.y + (m.y - a.y) * 0.85 };
     drive(h, line(a, b, { v: 170, hold: 150, stop: 60, seed: k + 3 }));
   }
+  if (sides.length < 4) return;
   assert.equal(h.run('dish.folds'), 4, 'four folds');
   assert.equal(h.run('envelopeDone()'), true, 'the envelope is done');
 }
@@ -230,11 +231,11 @@ test('G2', 'a knock on every new frying step (hint, 0.8 s); no hint twice for on
   const h = guest(); light(h); onPan(h); arrive(h); assert.equal(h.run('guestCookStep()'), 0, 'open sheet: no step, no knock'); envelope(h);
   assert.equal(h.run('guestCookStep()'), 0, 'just folded: still below «бледное»');
   h.run('COOK_RATE=FRY_RATES[40]');   // script shortcut: the fast frying preset of the stand panel, to pass the steps sooner
-  const seen = []; let frames = 0, hintFrames = 0, last = h.gev().length;
+  const seen = [], lasts = []; let frames = 0, hintFrames = 0, last = h.gev().length;
   while (h.run('guestCookStep()') < 3 && frames < 60 * 240) {
     h.frames(1); frames++;
     const ev = h.grows();
-    if (ev.length > last) { last = ev.length; const r = ev.at(-1); seen.push(`${r.event}@${r.bottom}`); hintFrames = 0; while (h.pic() === 2) { h.frames(1); frames++; hintFrames++; } }
+    if (ev.length > last) { last = ev.length; const r = ev.at(-1); seen.push(`${r.event}@${r.bottom}`); hintFrames = 0; while (h.pic() === 2) { h.frames(1); frames++; hintFrames++; } lasts.push({ event: r.event, s: hintFrames / 60 }); }
   }
   sec(h, 2);
   { const ev = h.grows(); if (ev.length > last) { last = ev.length; seen.push(`${ev.at(-1).event}@${ev.at(-1).bottom}`); } }
@@ -242,9 +243,11 @@ test('G2', 'a knock on every new frying step (hint, 0.8 s); no hint twice for on
   // between the hints. The hints themselves are counted as before: exactly one per step.
   assert.deepEqual(seen.filter(x => !x.startsWith('again@')), ['hint@бледное', 'hint@приготовленное', 'hint@зажаренное'], 'one hint per step');
   assert.ok(seen.every(x => /^(hint|again)@/.test(x)), `only hints and repeats: ${seen.join(' ')}`);
-  assert.ok(Math.abs(hintFrames / 60 - 0.8) < 0.05 || Math.abs(hintFrames / 60 - 1.2) < 0.05, `a hint lasts 0.8 s, a repeat 1.2 s (${(hintFrames / 60).toFixed(2)} s)`);
+  // Review of build 80: the length is checked for EVERY knock by its kind (it was «0.8 or 1.2 s» of the last one, whatever it was).
+  assert.ok(lasts.length >= 3);
+  for (const k of lasts) assert.ok(Math.abs(k.s - (k.event === 'hint' ? 0.8 : 1.2)) < 0.05, `a hint lasts 0.8 s, a repeat 1.2 s: ${k.event} ${k.s.toFixed(2)} s`);
   { const n0 = h.gev().length; sec(h, 12); assert.ok(h.gev().slice(n0).every(e => e === 'again'), 'no more hints on the same step — only the repeat'); last = h.gev().length; }
-  return { summary: `${seen.join(' → ')}; hint ${(hintFrames / 60).toFixed(2)} s; ${(frames / 60).toFixed(0)} s of frying at the fast preset` };
+  return { summary: `${seen.join(' → ')}; lengths ${lasts.map(k => `${k.event} ${k.s.toFixed(2)}`).join(', ')} s; ${(frames / 60).toFixed(0)} s of frying at the fast preset` };
 });
 
 test('G3', 'released over her picture — hers; lower, on the counter band — the counter; beside her — the counter', () => {
@@ -535,7 +538,7 @@ test('G8', 'layout at 390×844 and 375×667: her picture is above the counter, b
   return { summary: out.join(' · ') };
 });
 
-test('G9', 'build 80 — the knock is seen at the tava: she leans, the arm reaches the far rim and the marks flash there; it repeats after 8 s of waiting until the roti is flipped or taken off; her eyes follow the roti; a roti carried past her onto the counter turns her head', () => {
+test('G9', 'build 80 — the knock is seen at the tava: she leans, the arm reaches the far rim and the marks flash there; it repeats after 8 s of waiting over a FOLDED roti (never over an open sheet) until the roti is flipped or taken off; her eyes follow the roti and the folding finger; a roti carried past her onto the counter turns her head', () => {
   const h = guest(); light(h); onPan(h); until(h, 'GST.here');
   // the main knock: arm at the rim of the tava, marks only around the two hits, she leans
   until(h, 'guestPic()===2');
@@ -550,14 +553,26 @@ test('G9', 'build 80 — the knock is seen at the tava: she leans, the arm reach
   assert.ok(hits >= 12 && marks > hits && markNoHit >= 12, `marks outlast the hits (${hits} hit frames, ${marks} mark frames)`);
   assert.ok(lean > 5, `she leans to the tava while knocking (${lean} px)`); assert.equal(h.gs().arm, null, 'no arm between knocks'); assert.equal(h.gs().lean, 0);
   h.tick(2, 1 / 60, true); assert.equal(h.run('loopErrs'), 0);
-  // open sheet, not flipped: the knock repeats after 8 s of waiting, again and again
-  const n0 = h.gev().length; let t = 0; const at = [];
-  while (at.length < 2 && t < 60 * 30) { h.frames(1); t++; if (h.gev().length > n0 + at.length) at.push(t / 60); }
-  assert.deepEqual(h.gev().slice(n0), ['again', 'again']);
-  assert.ok(Math.abs(at[0] - 8) < 0.1 && Math.abs(at[1] - at[0] - 9.2) < 0.1, `8 s after the knock, then every 8 s + 1.2 s of knocking (${at.map(x => x.toFixed(2)).join(', ')})`);
+  // Changed in the review of build 80: an OPEN sheet cannot be flipped, so she does not repeat the knock over it
+  // (it was «again» every 9.2 s while the player laid the banana and folded). The repeat starts at the finished envelope.
+  const n0 = h.gev().length; sec(h, 25);
+  assert.deepEqual(h.gev().slice(n0), [], 'open sheet: no repeat of the knock');
+  // while a side is being folded her eyes go to the finger (three sides by strokes, the fourth move by move)
+  envelope(h, [2, 3, 0]);
+  { const e = h.J(`(()=>{const E=dish.env,d=envSide(E,1);return [__harness.dishToClient({x:E.c.x+d.x*E.h[1]*.97,y:E.c.y}),__harness.dishToClient(E.c)]})()`), rest = h.gs().gaze;
+    h.touch('start', 't1', e[0].x, e[0].y); h.frames(6);
+    for (let i = 1; i <= 12; i++) { h.touch('move', 't1', e[0].x + (e[1].x - e[0].x) * i / 14, e[0].y); h.frames(1); if (i === 2) { const at = h.gs().gaze; assert.ok(Math.abs(at.x - rest.x) > 0.1, `folding: her eyes go to the finger at the edge (gaze x ${rest.x} → ${at.x})`); } }
+    h.touch('end', 't1', e[0].x + (e[1].x - e[0].x) * 12 / 14, e[0].y); h.frames(30); assert.equal(h.run('envelopeDone()'), true); }
+  // folded, not flipped: the knock repeats after 8 s of waiting, again and again (a hint of a new step restarts the wait)
+  const n1a = h.gev().length; let t = 0; const at = [];
+  while (at.length < 2 && t < 60 * 60) { h.frames(1); t++; const ev = h.gev().slice(n1a); if (ev.filter(e => e === 'again').length > at.length) at.push(t / 60); }
+  { const ev = h.gev().slice(n1a); assert.ok(ev.every(e => e === 'again' || e === 'hint'), ev.join(' ')); assert.equal(ev.filter(e => e === 'again').length, 2);
+    const i0 = ev.indexOf('again'), between = ev.slice(i0 + 1, ev.lastIndexOf('again')).length;
+    assert.ok(at[0] >= 8 - 0.1, `not earlier than 8 s after the fold (${at[0].toFixed(2)})`);
+    if (!between) assert.ok(Math.abs(at[1] - at[0] - 9.2) < 0.1, `every 8 s + 1.2 s of knocking (${at.map(x => x.toFixed(2)).join(', ')})`); }
   until(h, 'guestPic()===1'); h.tick(2, 1 / 60, true);
   // eyes: down at the tava while the roti lies there
-  envelope(h); const g0 = h.gs().gaze; assert.ok(g0.y > 0.9 && Math.abs(g0.x) < 0.35, `she looks down at the roti on the tava (${g0.x},${g0.y})`);
+  const g0 = h.gs().gaze; assert.ok(g0.y > 0.9 && Math.abs(g0.x) < 0.35, `she looks down at the roti on the tava (${g0.x},${g0.y})`);
   // flipped: no more repeats (the hints of the new side go on)
   cookSides(h, 0.2, 0.02); flick(h, 700); assert.equal(h.run('dish.flips'), 1);
   // in the air over the tava (script shortcut: startFlip, the same entry the flick uses): her eyes and head go up after it
@@ -583,7 +598,7 @@ test('G9', 'build 80 — the knock is seen at the tava: she leans, the arm reach
   // given to her: no «watch»
   const c = guest(); light(c); onPan(c); arrive(c); finish(c); serve(c, c.gs().som);
   assert.ok(!c.gev().includes('watch')); assert.deepEqual(h.errors.concat(b.errors, c.errors), []);
-  return { summary: `knock: ${hits} hit frames, marks ${marks} frames at ${rim.x.toFixed(0)},${rim.y.toFixed(0)} (counter bottom ${S.counterBottom.toFixed(0)}); lean ${lean} px; repeats at ${at.map(x => x.toFixed(1)).join(' s, ')} s; gaze tava ${g0.x},${g0.y}; watch dir ${W.watchDir}, head ${W.head}` };
+  return { summary: `knock: ${hits} hit frames, marks ${marks} frames at ${rim.x.toFixed(0)},${rim.y.toFixed(0)} (counter bottom ${S.counterBottom.toFixed(0)}); lean ${lean} px; open sheet 25 s: no repeat; after the fold repeats at ${at.map(x => x.toFixed(1)).join(' s, ')} s; gaze tava ${g0.x},${g0.y}; watch dir ${W.watchDir}, head ${W.head}` };
 });
 
 const passed = results.filter(r => r.status === 'PASS').length;

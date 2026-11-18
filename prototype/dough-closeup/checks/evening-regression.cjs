@@ -454,16 +454,34 @@ test('V10', 'one short line at a time: no percent, no arrow, no «лепесто
     assert.ok(m.length <= h.run('LINE_MAX'), `at most ${h.run('LINE_MAX')} characters: «${m}» (${m.length})`);
     assert.ok(!/%|→|лепесток|рваный|яйц|·|\n/.test(m), `one plain message: «${m}»`);
   }
+  // Review of build 80 — «теперь другой край — по кругу» only for the SAME edge (closer than 20°): slaps 30° apart
+  // go round and never read it (the limit was 56.6°, and a player going round by 30–45° was told to change the edge);
+  // touching the edge does not change the line (it used to blink «держишь край — махни наружу» on every tap).
+  { const q = evening(); light(q); flatten(q); const base = Math.PI / 8, lines = [], kinds = [];
+    const slapAt = deg => { const r = H.stroke(q, { angle: base + deg * Math.PI / 180, speed: 9, dist: 1.3, hz: 60, jitter: 1, seed: 7 + deg, hold: 150 }); kinds.push(r.kind); q.frames(20); lines.push(liveNow(q)); return q.run('sameSlapN'); };
+    assert.equal(slapAt(0), 1); assert.equal(slapAt(30), 1, '30° from the last slap: another edge'); assert.equal(slapAt(60), 1); assert.equal(slapAt(25), 1, '35° back: another edge');
+    assert.ok(kinds.every(k => k === 'slap'), `all four are slaps: ${kinds.join(' ')}`);
+    assert.ok(lines.every(m => m !== 'теперь другой край — по кругу'), `round by 30°: ${lines.join(' | ')}`);
+    if (q.run('stepNo') === 2) {
+      assert.equal(slapAt(25), 2, 'the same spot again'); const n = slapAt(35); assert.equal(n, 3, '10° away is the same edge');
+      if (q.run('stepNo') === 2) { assert.equal(lines.at(-1), 'теперь другой край — по кругу');
+        const e = q.J(`(()=>{const c=centerOfSheet();rimProfile(c);const a=${base},r=rimProf[rimBin(a)];return __harness.toClient(c.x+Math.cos(a)*r,c.y+Math.sin(a)*r)})()`);
+        q.touch('start', 't1', e.x, e.y); q.frames(4); const held = liveNow(q), state = q.run('action.state'); q.touch('end', 't1', e.x, e.y); q.frames(30);
+        assert.equal(state, 'ARMED'); assert.equal(held, 'теперь другой край — по кругу', 'the line does not change while the edge is held'); } }
+    seen.slaps = `${kinds.length} slaps, sameSlapN ${q.run('sameSlapN')}`; assert.deepEqual(q.errors, []); }
   // a new evening: the hints are back
   h.run('eveNewEvening("check")'); h.frames(2); assert.deepEqual(h.J('learned'), {}); light(h); say('прижми кусок и веди пальцем', 'a new evening teaches again');
   assert.equal(h.run('loopErrs'), 0); assert.deepEqual(h.errors, []);
   const uniq = [...new Set(seen.filter(Boolean))];
-  return { summary: `${uniq.length} different lines, longest ${Math.max(...uniq.map(m => m.length))} characters; twitch ${seen.twitch}; lines: ${uniq.join(' | ')}` };
+  return { summary: `${uniq.length} different lines, longest ${Math.max(...uniq.map(m => m.length))} characters; twitch ${seen.twitch}; round the sheet: ${seen.slaps}; lines: ${uniq.join(' | ')}` };
 });
 
 test('V11', 'the fourth fold: with three sides folded, a stroke inward that starts in the outer third of the open side — deeper than the edge band — folds it and never carries the roti; outward from the same spot it is still a carry; no flip advice before the fourth fold', () => {
-  const start = (h, f) => h.J(`(()=>{const E=dish.env,d=envSide(E,1);return {a:__harness.dishToClient({x:E.c.x+d.x*E.h[1]*${f},y:E.c.y}),c:__harness.dishToClient(E.c),open:openSideAt({x:E.c.x+d.x*E.h[1]*${f},y:E.c.y})}})()`);
-  const three = () => { const h = evening(); light(h); stretched(h); toPan(h); envelope(h, [2, 3, 0]); assert.equal(h.run('envDoneCount()'), 3); return h; };
+  const start = (h, f, k = 1) => h.J(`(()=>{const E=dish.env,d=envSide(E,${k}),q={x:E.c.x+d.x*E.h[${k}]*${f},y:E.c.y+d.y*E.h[${k}]*${f}};
+    let hu=0; for(let s=0;s<=1.3;s+=0.005) if(onMaterial({x:E.c.x+d.x*E.h[${k}]*s,y:E.c.y+d.y*E.h[${k}]*s},0)) hu=s;   // where the material ends on the axis of the side
+    return {a:__harness.dishToClient(q),c:__harness.dishToClient(E.c),open:openSideAt(q),hu}})()`);
+  const three = (sides = [2, 3, 0]) => { const h = evening(); light(h); stretched(h); toPan(h); envelope(h, sides); assert.equal(h.run('envDoneCount()'), 3); return h; };
+  const lastPan = h => h.J('gestures.filter(g=>g.kind==="pan").at(-1)');
   // (a) 0.72 of the half-width: inside the outer third, outside the edge band (the «middle», where a carry starts)
   const h = three(), P = start(h, 0.72);
   assert.equal(P.open, 1, 'the spot is in the outer third of the open side');
@@ -488,8 +506,37 @@ test('V11', 'the fourth fold: with three sides folded, a stroke inward that star
   assert.equal(M.open, -1);
   drive(m, line(M.a, { x: M.a.x + (M.c.x - M.a.x) + Math.sign(M.c.x - M.a.x) * 40, y: M.a.y }, { v: 170, hold: 60 }), { settle: 40 });
   assert.equal(m.J('gestures.filter(g=>g.kind==="pan").at(-1)').outcome, 'carry-back'); assert.equal(m.run('envDoneCount()'), 3);
-  assert.deepEqual(h.errors.concat(s.errors, c.errors, m.errors), []);
-  return { summary: `0.72 h inward → ${r.outcome} side ${r.side} (${r.path_css} px at ${r.speed} px/s); 16 px inward → fold; to the table → carry; from the middle → carry-back` };
+  // (d) Review of build 80 — the EDGE BAND of the open side (0.93 and 0.98 of its half-width; there the old foldPlan
+  // decided: 12–24 px inward did nothing, 45 px made a free fold and the envelope stayed «3 of 4»). Any inward
+  // stroke longer than the dead zone folds the side.
+  const band = [];
+  for (const f of [0.93, 0.98]) for (const px of [16, 24, 45]) {
+    const e = three(), E = start(e, f), dir = Math.sign(E.c.x - E.a.x);
+    e.touch('start', 't1', E.a.x, E.a.y); assert.equal(e.run('dishGesture.zone'), 'edge', `${f} of the half-width is the edge band`); e.touch('end', 't1', E.a.x, E.a.y); e.frames(5);
+    drive(e, line(E.a, { x: E.a.x + dir * px, y: E.a.y }, { v: 170, hold: 150, stop: 60, seed: px }));
+    const g = lastPan(e); band.push(`${f}/${px}px ${g.outcome}`);
+    assert.equal(g.outcome, 'fold', `${f} h, ${px} px inward: ${g.outcome}`); assert.equal(g.side, 1); assert.equal(e.run('envelopeDone()'), true); assert.deepEqual(e.errors, []);
+  }
+  // (e) after a free fold of the open side its edge has moved inward (script shortcut for the fold itself: until this
+  // review a 45 px stroke from the rim made it, now such a stroke folds the side); a 30 px stroke from the new edge
+  // folds the side — the envelope closes
+  const fr = three();
+  assert.equal(fr.run('(()=>{const E=dish.env,d=envSide(E,1),h=E.h[1];return foldDish({x:E.c.x+d.x*h,y:E.c.y+d.y*h},{x:E.c.x+d.x*h*0.62,y:E.c.y+d.y*h*0.62},0.3,-1)})()'), true, 'a free fold of the open side');
+  fr.frames(5); assert.equal(fr.run('envDoneCount()'), 3); assert.equal(fr.run('dish.folds'), 4);
+  const F1 = start(fr, 0.5); assert.ok(F1.hu < 1, `the free fold moved the edge inward (${F1.hu.toFixed(2)} of the half-width)`);
+  { const A = start(fr, F1.hu * 0.97), dir = Math.sign(A.c.x - A.a.x); drive(fr, line(A.a, { x: A.a.x + dir * 30, y: A.a.y }, { v: 170, hold: 150, stop: 60, seed: 10 })); }
+  assert.equal(lastPan(fr).outcome, 'fold', `30 px from the new edge: ${lastPan(fr).outcome}`); assert.equal(lastPan(fr).side, 1); assert.equal(fr.run('envelopeDone()'), true, 'after a free fold a 30 px stroke from the edge closes the envelope');
+  // (f) the FAR side open, the roti grabbed in its outer third and led down to the table: a carry, not a fold
+  // (the finger starts inward along that side, so the gesture began as its fold — review of build 80)
+  const far = three([2, 0, 1]), FA = start(far, 0.75, 3); assert.equal(FA.open, 3);
+  drive(far, line(FA.a, far.spots().work, { v: 320, hold: 60 }), { settle: 60 });
+  assert.equal(far.run('dish.mode'), 'cut', `led from the far side to the table: the roti is carried (${lastPan(far).outcome})`); assert.equal(far.run('envDoneCount()'), 3); assert.equal(lastPan(far).outcome, 'remove');
+  // and a deep fold stroke from the far side that stops ON the roti is still the fold
+  const deep = three([2, 0, 1]), DA = start(deep, 0.75, 3);
+  drive(deep, line(DA.a, { x: DA.c.x, y: DA.c.y + (DA.c.y - DA.a.y) * 0.3 }, { v: 170, hold: 150, stop: 60, seed: 11 }));
+  assert.equal(lastPan(deep).outcome, 'fold', `a deep stroke from the far side: ${JSON.stringify(lastPan(deep))}`); assert.equal(deep.run('envelopeDone()'), true);
+  assert.deepEqual(h.errors.concat(s.errors, c.errors, m.errors, fr.errors, far.errors, deep.errors), []);
+  return { summary: `0.72 h inward → ${r.outcome} side ${r.side} (${r.path_css} px at ${r.speed} px/s); 16 px inward → fold; to the table → carry; from the middle → carry-back; edge band: ${band.join(', ')}; after a free fold (edge at ${F1.hu.toFixed(2)} h) 30 px → envelope done; far side → table: ${lastPan(far).outcome}; far side deep stroke → fold` };
 });
 
 test('V12', 'a cut counts only from edge to edge; «нарезано» after three cuts of two directions (1 + 2 or 2 + 2); before that the roti is not served; a board lies under the roti on the table', () => {
@@ -533,8 +580,28 @@ test('V12', 'a cut counts only from edge to edge; «нарезано» after thr
   assert.deepEqual(d.J('cutFamilies()'), [1, 1]); assert.equal(d.run('cutEnough()'), false); assert.equal(d.run('dish.message'), 'ещё один рез');
   drive(d, line({ x: D.l.x - dw * 0.15, y: D.t.y - dh * 0.15 }, { x: D.r.x + dw * 0.15, y: D.b.y + dh * 0.15 }, { v: 380, hold: 60 }));
   assert.equal(d.run('dish.cuts.length'), 3, 'a diagonal from corner to corner is a cut'); assert.equal(d.run('cutEnough()'), true);
-  assert.deepEqual(h.errors.concat(d.errors), []);
-  return { summary: `scratch 30 % → no cut; 8 % inside both edges → a full cut; 1 cut and 2 along → not served; 2 + 1 → «нарезано»; 2 + 2 → 4 cuts; 1 + 1 → «ещё один рез», + diagonal → «нарезано»` };
+  // Review of build 80 — corners sliced off are not cuts: three strokes, each taking 20 % of the sides at a corner
+  // (they used to give «нарезано» on a whole roti)
+  const k = evening(); light(k); stretched(k); toPan(k); envelope(k); toTable(k);
+  const K = rotiBox(k), kw = K.r.x - K.l.x, kh = K.b.y - K.t.y;
+  for (const [sx, sy] of [[-1, -1], [1, -1], [1, 1]]) {
+    const cx = sx < 0 ? K.l.x : K.r.x, cy = sy < 0 ? K.t.y : K.b.y, p = { x: cx - sx * kw * 0.2, y: cy }, q = { x: cx, y: cy - sy * kh * 0.2 };
+    drive(k, line({ x: p.x + (p.x - q.x) * 0.4, y: p.y + (p.y - q.y) * 0.4 }, { x: q.x + (q.x - p.x) * 0.4, y: q.y + (q.y - p.y) * 0.4 }, { v: 380, hold: 60 }));
+  }
+  assert.equal(k.run('dish.cuts.length'), 0, 'a sliced corner is not a cut'); assert.equal(k.run('cutEnough()'), false); assert.equal(k.run('dish.message'), 'режь от края до края');
+  // Review of build 80 — the middle is always a carry. An UNCUT roti: to the counter — «сначала разрежь»; dropped
+  // short — it stays; to the middle of the tava — it fries on (build 80 answered «режь от края до края» and kept
+  // a roti with one or two cuts on the table).
+  const pan = h => h.J('gestures.filter(g=>g.kind==="pan").at(-1)').outcome;
+  serve(k); assert.equal(k.eve().rotiDone, 0); assert.equal(k.run('dish.message'), 'сначала разрежь'); assert.equal(pan(k), 'serve-uncut');
+  serve(k, { short: true }); assert.equal(k.run('dish.mode'), 'cut'); assert.equal(k.run('dish.message'), 'режь от края до края'); assert.equal(pan(k), 'serve-back');
+  serve(k, { short: 'pan' }); assert.equal(pan(k), 'pan-back'); assert.equal(k.run('dish.mode'), 'fold'); assert.equal(k.run('phase'), 'PAN'); assert.equal(k.run('dish.message'), 'снова на таве');
+  // one cut, then back to the tava: the cut is undone, the envelope fries on
+  toTable(k); { const B1 = rotiBox(k), w1 = B1.r.x - B1.l.x; drive(k, line({ x: B1.l.x - w1 * 0.2, y: B1.c.y }, { x: B1.r.x + w1 * 0.2, y: B1.c.y }, { v: 380, hold: 60 })); }
+  assert.equal(k.run('dish.cuts.length'), 1); serve(k, { short: 'pan' });
+  assert.equal(pan(k), 'pan-back', 'a roti with one cut goes back to the tava'); assert.equal(k.run('dish.mode'), 'fold'); assert.equal(k.run('dish.cuts.length'), 0); assert.equal(k.run('envelopeDone()'), true);
+  assert.deepEqual(h.errors.concat(d.errors, k.errors), []);
+  return { summary: `three sliced corners → 0 cuts; uncut: counter → «сначала разрежь», tava → pan-back; one cut: tava → pan-back; scratch 30 % → no cut; 8 % inside both edges → a full cut; 1 cut and 2 along → not served; 2 + 1 → «нарезано»; 2 + 2 → 4 cuts; 1 + 1 → «ещё один рез», + diagonal → «нарезано»` };
 });
 
 const passed = results.filter(r => r.status === 'PASS').length;

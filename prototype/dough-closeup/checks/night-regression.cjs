@@ -247,6 +247,10 @@ test('D1', 'third ball: the dog sleeps, lifts its head once the roti in the hand
   assert.equal(h.run('eveningLive(dish.message)'), null, 'the stand line passes through (nightLive is gone in build 80)'); assert.equal(h.run('typeof nightLive'), 'undefined');
   const S = h.ns();
   { const r = h.J('(()=>{const r=cv.getBoundingClientRect();return {top:r.top,height:r.height}})()'); S.lookY = r.top + r.height * 2 / 3; }   // the line of the spec, counted here — not read from night.js
+  // Changed in the review of build 80: the middle of a roti on the table is always a carry, so the UNCUT roti led
+  // to the counter above was in the hand and the dog has already looked once at it («look» in the journal before
+  // this point). «One look per carry» is counted for the carry below.
+  const looks0 = h.ngt().length; assert.deepEqual(h.ngt(), ['look'], 'the uncut roti carried up to the counter: the dog looked once');
   let p = grab(h);
   assert.ok(p.y > S.lookY, `the roti lies in the lower third (${p.y.toFixed(0)} > ${S.lookY.toFixed(0)})`);
   p = go(h, p, { x: p.x, y: S.lookY + 12 });
@@ -263,7 +267,7 @@ test('D1', 'third ball: the dog sleeps, lifts its head once the roti in the hand
     for (let i = 0; i < half; i++) { assert.ok(Math.abs(o[i].x - o[half + i].x) < 1e-6 && o[i].rx > o[half + i].rx + 1 && o[i].ry > o[half + i].ry + 1, 'each dark shape is wider than its own'); }
     assert.ok(dark.length > half); }
   assert.equal(h.drawn('nightDrawUnder(ctx,1,1,eveGeo());').filter(e => e.fill === '#d9d2c0').length, fur_under(h), 'under the table layer the dog has no silhouette');
-  assert.deepEqual(h.ngt(), ['look'], 'one look per carry');
+  assert.deepEqual(h.ngt().slice(looks0), ['look'], 'one look per carry');
   p = go(h, p, S.dog); drop(h, p);
   assert.equal(h.eve().rotiDone, 3); assert.equal(h.eve().ball, false);
   assert.deepEqual(h.serves(), ['dog']); assert.equal(h.NGT().dog, 1); assert.equal(h.onCounter(), 0, 'nothing of it lies on the counter');
