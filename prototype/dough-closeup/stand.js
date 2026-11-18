@@ -11,7 +11,7 @@
 // до 400%+ и лист «рвётся» в середине от любого движения. Замер это обнаружил сразу.
 // Число узлов сохранено (1 060 после обрезки по кругу; прежняя оценка «~1150» была на глаз,
 // пересчитано 07.09.2026), однородность рёбер восстановлена.
-const BUILD = "2026-11-18 · яйцо одной лужицей, дыры насквозь · 96";
+const BUILD = "2026-11-18 · скорость: тот же вид, кадр дешевле · 97";
 const GRID = 38;                   // 38x38, в круг попадает 1 060 узлов (посчитано, не оценка)
 let SUBSTEPS = 8;                  // T2: 8–10 подшагов, 1 итерация
 let DAMP = 0.986;
@@ -128,11 +128,15 @@ const TILT_BASE = 0.56, PERSP = 0.22;
 // роти не ложится в нарисованную таву. Мерка — сама тава: высота её эллипса к ширине ≈ TILT/перспектива.
 let TILT = TILT_BASE;
 function horizon(){ return cv.height * 0.42; }
+// Сборка 97: проекция зовётся тысячи раз за кадр, а cv.width/cv.height — обращения к DOM. Размер холста
+// меняет только resize(); здесь он запоминается там и ещё раз в начале каждого кадра (cvDims). Формулы те же.
+let cvW = cv.width, cvH = cv.height, cvHor = cvH * 0.42;
+function cvDims(){ cvW = cv.width; cvH = cv.height; cvHor = cvH * 0.42; }
 function prX(x, y){
-  const h = horizon(), k = 1 + ((y - h)/cv.height) * PERSP;
-  return cv.width*0.5 + (x - cv.width*0.5) * k;
+  const k = 1 + ((y - cvHor)/cvH) * PERSP;
+  return cvW*0.5 + (x - cvW*0.5) * k;
 }
-function prY(x, y){ const h = horizon(); return h + (y - h) * TILT; }
+function prY(x, y){ return cvHor + (y - cvHor) * TILT; }
 function unproject(sx, sy){
   const h = horizon(), wy = h + (sy - h)/TILT;
   const k = 1 + ((wy - h)/cv.height) * PERSP;
@@ -3343,7 +3347,12 @@ function doughSet(f){
   const s=Math.min(1,Math.max(t.dry[0],t.dry[1])/SET_DRY);
   return SET_RAW+(1-SET_RAW)*s*s*(3-2*s);
 }
-function drawDishFaces(g,faces,screen,H,zk,shadow=true,shift=null,noShadow=null){
+// Сборка 97: рисунок граней — генератор с паузами (yield) между пачками граней. Обычный вызов проходит его
+// целиком; слой граней на таве (drawDishLayered) при дозревании прожарки дорисовывает новый слой за несколько
+// кадров, пока на экране старый, — иначе перерисовка тысяч граней раз в полсекунды давала рывок кадра.
+function drawDishFaces(...a){ const it=dishFacesSteps(...a); while(!it.next().done); }
+const DISH_STEP_N = 64;   // граней между паузами
+function* dishFacesSteps(g,faces,screen,H,zk,shadow=true,shift=null,noShadow=null){
   const turn=dishTwist && dish && faces===dish.faces ? dishTwist.angle : 0;   // свет стоит, пока блюдо крутят
   if(shift){ const base=screen; screen=(p,f)=>{ const o=f && shift.get(f); return base(o ? {x:p.x+o.x,y:p.y+o.y} : p); }; }
   // Тень конверта на стали и боковая сторона у его края. Отдельные заливки мелких
@@ -3381,6 +3390,7 @@ function drawDishFaces(g,faces,screen,H,zk,shadow=true,shift=null,noShadow=null)
     const holesOut=shadow && dishHolesOpen(faces);
     if(holesOut){ g.save(); clipOutDishHoles(g,screen); }
     for(let i=0;i<faces.length && shadow;i++){
+      if(i && !(i%DISH_STEP_N)) yield;
       if(faces[i].kind!=="dough" || H.zb[i]>.3 || (noShadow && noShadow(faces[i]))) continue;
       const hs=H.vert(i), drop=zk*RELIEF_K*Math.max(...hs)*(onTable ? .45 : .25);
       if(drop<.3) continue;
@@ -3391,6 +3401,7 @@ function drawDishFaces(g,faces,screen,H,zk,shadow=true,shift=null,noShadow=null)
     if(holesOut) g.restore();
     const crust=[];
     for(let i=0;i<faces.length;i++){
+      if(i && !(i%DISH_STEP_N)) yield;
       if(faces[i].kind!=="dough" || !H.rim(i) || Math.max(...H.vert(i))<WALL_MIN_MM) continue;
       g.fillStyle=rgb(tone(faces[i],.66));
       const open=wallEdgesOpen(faces,i,faceScreen(faces[i]));
@@ -3399,7 +3410,9 @@ function drawDishFaces(g,faces,screen,H,zk,shadow=true,shift=null,noShadow=null)
     }
     // Корочка низа по краю: нижняя полоса стенки — цвет стороны на стали. Так жарку снизу видно
     // сверху, как продавец смотрит на кромку (владелица 17.09: «держала долго — ничего не поджарилось»).
+    let nc=0;
     for(const [i,open] of crust){
+      if(++nc%DISH_STEP_N===0) yield;
       const f=faces[i], hs=H.vert(i), band=hs.map(h=>Math.min(h,Math.max(2.2/Math.max(zk,1e-6),.55*h)));
       // Сборка 91 (ревью 18.11, п. 3): полоса — в тени стенки (×WALL_CRUST_K), иначе сырой низ светлее верха
       // и читался белым основанием «книги»; цвет стороны на стали в ней остаётся.
@@ -3436,6 +3449,7 @@ function drawDishFaces(g,faces,screen,H,zk,shadow=true,shift=null,noShadow=null)
   const under=H ? eggUnderFlap(faces) : null, blob=H && eggBlobOn(faces);
   let underDone=false, blobDone=false;
   for(let k=0;k<faces.length;k++){
+    if(k && !(k%DISH_STEP_N)) yield;
     const f=faces[k];
     if(H && f.fill==="egg" && f.kind==="filling"){
       if(blob){ if(!blobDone){ blobDone=true; drawEggFilm(g,faces,null,screen,H,zk,true); } if(!under[k]) open.push(k); continue; }
@@ -3456,7 +3470,9 @@ function drawDishFaces(g,faces,screen,H,zk,shadow=true,shift=null,noShadow=null)
     g.fillStyle=rgb(tone(f,.88));
     drawFaceWalls(g,f.points,faceScreen(f),hs,zk,base);
   }
+  yield;
   for(const k of open) if(faces[k].fill!=="egg") paint(k);
+  yield;
   g.globalAlpha=1; g.imageSmoothingEnabled=smooth;
   if(H && open.length){
     if(!blob) drawEggFilm(g,faces,open,screen,H,zk);
@@ -3729,7 +3745,16 @@ function cornerLiftCap(){
 }
 // Цвета угла в точке q (середина шапки): верх — верхняя грань теста, низ — самая нижняя грань
 // (порядок граней — снизу вверх), её сторона на стали с румянцем.
+// Сборка 97: ответ запоминается для тех же граней и точки — шапка держится кадрами, а перебор всех граней
+// с pointInFace стоил ~2 мс кадра на слабом телефоне.
 function cornerFaceAt(q,top){
+  const C=cornerFaceAt.c||(cornerFaceAt.c=new WeakMap()), key=q.x+","+q.y+","+(top?1:0);
+  let M=C.get(dish.faces); if(!M){ M=new Map(); C.set(dish.faces,M); }
+  if(M.has(key)) return M.get(key);
+  if(M.size>64) M.clear();
+  const f=cornerFaceFind(q,top); M.set(key,f); return f;
+}
+function cornerFaceFind(q,top){
   const fs=dish.faces.filter(f=>f.kind==="dough" && pointInFace(f.points,q.x,q.y));
   let f=top ? fs.at(-1) : fs[0];
   if(!f){ let best=Infinity; for(const g of dish.faces) if(g.kind==="dough"){ const p=g.points[0], d=Math.hypot(p.x-q.x,p.y-q.y); if(d<best){ best=d; f=g; } } }
@@ -4342,6 +4367,116 @@ function drawBoard(g,sx,sy){
   g.fillStyle="#4a3722"; g.beginPath(); g.moveTo(d.x,d.y); g.lineTo(c.x,c.y); g.lineTo(c.x,c.y+th); g.lineTo(d.x,d.y+th); g.closePath(); g.fill();
   g.fillStyle="#7d6240"; g.beginPath(); g.moveTo(a.x,a.y); g.lineTo(b.x,b.y); g.lineTo(c.x,c.y); g.lineTo(d.x,d.y); g.closePath(); g.fill();
 }
+// Сборка 97 (скорость): слой граней блюда. Тысячи треугольников с градиентами корки и пятнами стоили
+// 15–40 мс кадра, хотя между кадрами на таве почти ничего не меняется. Грани рисуются в отдельный холст
+// и перерисовываются, только когда сдвинулось то, от чего зависит их рисунок: холст, поза, поворот,
+// высоты, сдвиг кусков, шапка поддетого угла, дыры — или прожарка, сушка, прилегание какой-то ячейки
+// ушли от снимка дальше DFL_EPS_*. Слой ложится на кадр source-over: та же картинка, что прямой рисунок
+// (сравнение пикселей — runs/merge-perf). Пока поза меняется каждый кадр (в руке, на лету), грани
+// рисуются прямо: слой там только добавил бы перерисовку и наложение.
+const DFL_EPS_COOK = 0.012, DFL_EPS_DRY = 0.01, DFL_EPS_CONTACT = 0.03;
+function dflSame(a,b){
+  if(!a || !b || a.length!==b.length) return false;
+  for(let i=0;i<a.length;i++) if(a[i]!==b[i]) return false;
+  return true;
+}
+// Снимок того, что в рисунке граней меняется со временем жарки: прожарка сторон, сушка до схватывания
+// (doughSet; дальше SET_DRY вид от сушки не зависит), прилегание (crustFace).
+const DFL_W = 6;
+function dflThermal(){
+  const T=dish && dish.thermal; if(!T) return null;
+  const out=new Float32Array(T.length*DFL_W);
+  for(let i=0;i<T.length;i++){ const t=T[i], o=i*DFL_W;
+    if(!t){ out[o]=-1; continue; }
+    out[o]=1; out[o+1]=t.cook[0]; out[o+2]=t.cook[1];
+    out[o+3]=Math.min(t.dry[0],SET_DRY); out[o+4]=Math.min(t.dry[1],SET_DRY); out[o+5]=t.contact||0;
+  }
+  return out;
+}
+function dflThermalClose(a){
+  const T=dish && dish.thermal;
+  if(!a || !T) return !a && !T;
+  if(a.length!==T.length*DFL_W) return false;
+  for(let i=0;i<T.length;i++){ const t=T[i], o=i*DFL_W;
+    if(!t){ if(a[o]!==-1) return false; continue; }
+    if(a[o]!==1
+      || Math.abs(a[o+1]-t.cook[0])>DFL_EPS_COOK || Math.abs(a[o+2]-t.cook[1])>DFL_EPS_COOK
+      || Math.abs(a[o+3]-Math.min(t.dry[0],SET_DRY))>DFL_EPS_DRY || Math.abs(a[o+4]-Math.min(t.dry[1],SET_DRY))>DFL_EPS_DRY
+      || Math.abs(a[o+5]-(t.contact||0))>DFL_EPS_CONTACT) return false;
+  }
+  return true;
+}
+// Слой slot («грани», «срезы»): paint(lg) рисует в него то же, что рисовал бы в кадр. K — числа, от которых
+// зависит рисунок, R — объекты (сравниваются как есть), hot — ещё и прожарка (снимок dflThermal).
+// Если сдвинулась только прожарка, новый слой дорисовывается в запасной холст по DFL_BUDGET_MS за кадр
+// (steps — тот же рисунок генератором), а на экране до готовности остаётся прежний.
+const dflSlots = {}, DFL_BUDGET_MS = 3;
+// Прямой рисунок оставлял в кадре своё состояние кисти (цвет, толщина линии…), и следующие рисунки кадра
+// им пользовались. Слой повторяет это: перед рисованием в слой берёт состояние кадра, после — переносит в кадр
+// то, что рисунок поменял (delta), и на кадрах из готового слоя тоже.
+const DFL_STATE = ["fillStyle","strokeStyle","lineWidth","lineCap","lineJoin","miterLimit","lineDashOffset","shadowBlur","shadowColor",
+  "shadowOffsetX","shadowOffsetY","font","textAlign","textBaseline","filter","imageSmoothingEnabled","globalAlpha","globalCompositeOperation"];
+function dflState(c){ const o={}; for(const k of DFL_STATE) o[k]=c[k]; o.dash=c.getLineDash().join(","); return o; }
+function dflPaintInto(lg,g,paint){
+  for(const k of DFL_STATE) if(k!=="globalAlpha" && k!=="globalCompositeOperation") lg[k]=g[k];
+  lg.setLineDash(g.getLineDash());
+  const a=dflState(lg), M0=lg.getTransform(); paint(lg); return dflDelta(lg,a,M0);
+}
+function dflDelta(lg,a,M0){
+  const b=dflState(lg), d={};
+  for(const k of DFL_STATE) if(a[k]!==b[k]) d[k]=b[k];
+  if(a.dash!==b.dash) d.dash=lg.getLineDash();
+  const M=lg.getTransform(); if(M.a!==M0.a||M.b!==M0.b||M.c!==M0.c||M.d!==M0.d||M.e!==M0.e||M.f!==M0.f) d.tf=M;
+  return d;
+}
+function dflApply(g,d){
+  if(!d) return;
+  for(const k in d){ if(k==="dash") g.setLineDash(d.dash); else if(k==="tf") g.setTransform(d.tf); else g[k]=d[k]; }
+}
+function dflCanvas(){ const c=document.createElement("canvas"); return {cv:c,g:c.getContext("2d"),K:null,R:[],th:null,n:0,it:null}; }
+function dflBegin(L,M,g){
+  if(L.cv.width!==cv.width || L.cv.height!==cv.height){ L.cv.width=cv.width; L.cv.height=cv.height; }
+  const lg=L.g;
+  lg.setTransform(1,0,0,1,0,0); lg.globalAlpha=1; lg.globalCompositeOperation="source-over"; lg.clearRect(0,0,L.cv.width,L.cv.height);
+  lg.setTransform(M); lg.imageSmoothingEnabled=g.imageSmoothingEnabled;
+  return lg;
+}
+function drawDishLayered(slot,g,K0,R0,hot,paint,steps){
+  const M=g.getTransform();
+  const K=[cv.width,cv.height,M.a,M.b,M.c,M.d,M.e,M.f,TILT,PERSP,g.imageSmoothingEnabled?1:0,...K0];
+  const R=[g,dish,FRAME,frameOn,PAL,...R0];
+  const S=dflSlots[slot]||(dflSlots[slot]={L:null,B:null,prev:null}), P=S.prev;
+  const same=(X)=>X && X.cv.width===cv.width && X.cv.height===cv.height && dflSame(X.K,K) && X.R.length===R.length && X.R.every((v,i)=>v===R[i]);
+  const still=P && dflSame(P.K,K) && P.R.length===R.length && P.R.every((v,i)=>v===R[i]);
+  S.prev={K,R};
+  if(!still || g.globalAlpha!==1 || g.globalCompositeOperation!=="source-over"){ S.B=null; paint(g); return; }
+  let L=S.L;
+  const geo=same(L);
+  if(!geo || hot && !steps && !dflThermalClose(L.th)){
+    // новая геометрия или поза — слой целиком сейчас (как прямой рисунок)
+    if(L && window.__dflWhy){ const w=__dflWhy, k=slot+(!dflSame(L.K,K) ? "K"+L.K.findIndex((v,i)=>v!==K[i]) : !L.R.every((v,i)=>v===R[i]) ? "R"+L.R.findIndex((v,i)=>v!==R[i]) : "th"); w[k]=(w[k]||0)+1; }
+    if(!L) L=S.L=dflCanvas();
+    S.B=null;
+    L.delta=dflPaintInto(dflBegin(L,M,g),g,paint);
+    L.K=K; L.R=R; L.th=hot ? dflThermal() : null; L.n++;
+  } else if(hot && (S.B ? S.B.it : !dflThermalClose(L.th))){
+    // дозрела прожарка: новый слой — в запасной холст, понемногу
+    let B=S.B;
+    if(!B || !same(B) || !B.it){
+      if(window.__dflWhy){ const w=__dflWhy; w[slot+"th"]=(w[slot+"th"]||0)+1; }
+      B=S.B=S.spare && S.spare!==L ? S.spare : dflCanvas(); S.spare=null;
+      B.th=dflThermal(); B.K=K; B.R=R;
+      const lg=dflBegin(B,M,g);
+      for(const k of DFL_STATE) if(k!=="globalAlpha" && k!=="globalCompositeOperation") lg[k]=g[k];
+      lg.setLineDash(g.getLineDash()); B.s0=dflState(lg); B.M0=lg.getTransform(); B.it=steps(lg);
+    }
+    const t0=performance.now(); let done=false;
+    while(!(done=B.it.next().done) && performance.now()-t0<DFL_BUDGET_MS);
+    if(done){ B.it=null; B.n++; B.delta=dflDelta(B.g,B.s0,B.M0); S.spare=L; S.L=L=B; S.B=null; }
+  }
+  g.save(); g.setTransform(1,0,0,1,0,0); g.drawImage(L.cv,0,0); g.restore();
+  dflApply(g,L.delta);
+}
 function drawDish(g,sx,sy){
   let pose=dishPose(), moving=false;
   if(dishFlight){ drawDishFlight(g,sx,sy,pose); return; }
@@ -4373,13 +4508,25 @@ function drawDish(g,sx,sy){
       cap.P.forEach((p,i)=>{ const q=screen(p); i ? g.lineTo(q.x,q.y) : g.moveTo(q.x,q.y); }); g.closePath(); g.clip("evenodd");
     }
     // Сборка 90: у граней шапки нет и тени на таве — она ложилась правее выреза тёмной полосой с жёстким краем
-    drawDishFaces(g,faces,screen,H,zk,true,pieceShiftLive(faces),cap ? f=>{ let x=0,y=0; for(const p of f.points){ x+=p.x; y+=p.y; } return pointInFace(cap.P,x/f.points.length,y/f.points.length); } : null);
+    const noShadow=cap ? f=>{ let x=0,y=0; for(const p of f.points){ x+=p.x; y+=p.y; } return pointInFace(cap.P,x/f.points.length,y/f.points.length); } : null;
+    if(faces===dish.faces && typeof g.getTransform==="function"){   // в наборах (Node) холст-заглушка — рисуем прямо
+      const key=[pose.x,pose.y,pose.scale,sx,sy,T ? T.angle : 0,T ? T.pivot.x : 0,T ? T.pivot.y : 0,cap ? cap.P.length : -1];
+      if(cap) for(const p of cap.P) key.push(p.x,p.y);
+      const shift=pieceShiftLive(faces);
+      drawDishLayered("faces",g,[...key,zk],[faces,H,shift,dish.holeCells,dish.thermal,dish.seed],true,lg=>drawDishFaces(lg,faces,screen,H,zk,true,shift,noShadow),lg=>dishFacesSteps(lg,faces,screen,H,zk,true,shift,noShadow));
+    } else drawDishFaces(g,faces,screen,H,zk,true,pieceShiftLive(faces),noShadow);
     if(!moving && !slide && faces===dish.faces) drawMargarineGloss(g,screen,H,zk,sx);
     if(!moving && !slide && !T && faces===dish.faces) drawDishHoleRims(g,screen,H,zk);
     if(lift && !cap) drawLiftedEdge(g,screen,lift,sx,sy);
     // Rebuild expensive boundary intersections only after a committed geometry
     // change. During a drag the existing flat preview remains immediate.
-    if(!moving&&(dish.folds||dish.cuts.length)&&!(dishGesture&&dishGesture.preview)) drawDishSections(g,screen,faces,sx,sy,zk,H);
+    if(!moving&&(dish.folds||dish.cuts.length)&&!(dishGesture&&dishGesture.preview)){
+      // срезы — тоже слоем: обрезка по контуру из тысяч граней дорога каждый кадр, а от жарки срезы не зависят
+      if(faces===dish.faces && typeof g.getTransform==="function")
+        drawDishLayered("sections",g,[pose.x,pose.y,pose.scale,sx,sy,zk,T ? T.angle : 0,T ? T.pivot.x : 0,T ? T.pivot.y : 0,dishSpread,devicePixelRatio||1],
+          [faces,H,pieceShiftLive(faces),dish.folds,dish.cuts.length],false,lg=>drawDishSections(lg,screen,faces,sx,sy,zk,H));
+      else drawDishSections(g,screen,faces,sx,sy,zk,H);
+    }
     if(cap){
       g.restore();
       const lifted=(p,h)=>{ const x=pose.x+p.x*pose.scale, y=pose.y+(p.y-h)*pose.scale; return {x:prX(x,y)*sx,y:prY(x,y)*sy}; };
@@ -4938,7 +5085,7 @@ function sheetRadius(){
   }
   if(!n) return 0;
   const a = radBuf.subarray(0, n);
-  Array.prototype.sort.call(a, (x,y)=>x-y);
+  a.sort();   // родная числовая сортировка типизированного массива: тот же порядок, в разы быстрее сравнителя
   return a[Math.min(n-1, Math.floor(n*0.92))];
 }
 function centerOfSheet(){
@@ -4962,7 +5109,7 @@ function sheetShortR(){
   }
   if(!n) return 0;
   const a = edgeRadBuf.subarray(0, n);
-  Array.prototype.sort.call(a, (x,y)=>x-y);
+  a.sort();   // родная числовая сортировка типизированного массива: тот же порядок, в разы быстрее сравнителя
   return a[Math.min(n-1, Math.floor(n*0.18))];
 }
 function flattenStats(){
@@ -7638,6 +7785,7 @@ function pathSheetOutline(g, sx, ox, sy, oy, extraY){
 }
 
 function draw(){
+  cvDims();
   const pixelated = variant!=="C";
   const LOGW = variant==="A" ? 80 : 224;
   let g, W, H, sx, sy, ox, oy;
@@ -8102,6 +8250,7 @@ function resetMeters(){
 }
 let loopErrs = 0, paused = 0;
 function loop(now){
+  cvDims();
   // Настоящее время кадра — для измерений; обрезанное — только для устойчивости симуляции.
   // Раньше счётчик копил обрезанное dt и потому не умел показывать меньше 30 fps:
   // при кадрах по 50 мс он рисовал 30 вместо 20, то есть был слеп ровно к тем
@@ -8223,7 +8372,7 @@ function resize(force){
   if(!force && gestureLive()){ pendingResize = true; return; }   // доиграем жест, потом пересоберём
   pendingResize = false;
   const oldPan={...panC},oldR=targetR,oldZ=zone("work");
-  cv.width = w; cv.height = h;
+  cv.width = w; cv.height = h; cvDims();
   if(dish && !force){
     const z=zone("work"); targetR=sheetSpan(z)*TARGET_FRAC; layoutPan();
     const scale=targetR/oldR;
