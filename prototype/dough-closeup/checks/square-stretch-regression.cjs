@@ -504,6 +504,36 @@ test('T9h', 'oblique pulls from a side mid-point (0 / 20 / 40 / 60° off the rad
   if (rows.some(r => r.binMax > 1.08 || r.inverted > 0 || r.corners > 0) || !/p/.test(rows[0].kinds)) failWith(out, out.summary);
   return out;
 });
+// ── T9t: build 81 — thinness on the table shows as transparency ───────────────────────────────
+// Spec §1: light warm dough (not khaki), the board shows through where the sheet is thinner,
+// the near-tear zone fades to almost transparent, the rim is denser and lighter. The pan
+// (mixOn + cook) is another branch's work and is not touched here.
+test('T9t', 'table skin: alpha grows with thickness, near-tear almost transparent, rim denser and lighter; the sheet on the table draws rgba', () => {
+  const h = fresh();
+  const skin = (t, rim = 0) => h.run(`tableSkin(${t},${rim})`);
+  const alpha = s => +s.match(/([\d.]+)\)$/)[1];
+  const lum = s => { const m = s.match(/rgba\(([\d.]+),([\d.]+),([\d.]+),/); return +m[1] + +m[2] + +m[3]; };
+  const ts = [0.004, 0.006, 0.01, 0.02, 0.05, 0.1, 0.15, 0.3, 1], as_ = ts.map(t => alpha(skin(t)));
+  const bad = [];
+  if (!as_.every((a, i) => i === 0 || a >= as_[i - 1] - 1e-9)) bad.push(`alpha not monotone: ${as_.join(' ')}`);
+  if (!(as_[0] <= 0.08 && as_[1] <= 0.20)) bad.push(`near-tear not almost transparent: ${as_[0]}, ${as_[1]}`);
+  if (!(as_[5] >= 0.6 && as_[7] >= 0.99)) bad.push(`stretched sheet not light enough: t=0.1 → ${as_[5]}, t=0.3 → ${as_[7]}`);
+  if (!(alpha(skin(0.1, 1)) > alpha(skin(0.1)) && lum(skin(0.1, 1)) > lum(skin(0.1)))) bad.push('rim not denser and lighter');
+  // drawn on the table: rgba fillStyles whose alpha follows the thickness (no opaque khaki path left)
+  h.run('thick.fill(0.12);draw();');
+  const fills1 = h.drawCalls.filter(c => c.fillStyle && String(c.fillStyle).startsWith('rgba')).map(c => alpha(c.fillStyle));
+  h.drawCalls.length = 0;
+  h.run('thick.fill(0.004);draw();');
+  const fills2 = h.drawCalls.filter(c => c.fillStyle && String(c.fillStyle).startsWith('rgba')).map(c => alpha(c.fillStyle));
+  const rgb_ = h.drawCalls.filter(c => c.fillStyle && String(c.fillStyle).startsWith('rgb(')).length;   // holes are #100a06 (hex), not rgb()
+  if (fills1.length < 100 || fills2.length < 100) bad.push(`draw fills rgba ${fills1.length}/${fills2.length}`);
+  if (Math.min(...fills1) < 0.55) bad.push(`t=0.12 drawn alpha min ${Math.min(...fills1)}`);
+  if (Math.max(...fills2) > 0.15) bad.push(`near-tear t=0.004 drawn alpha max ${Math.max(...fills2)}`);
+  const out = { alpha: as_.join(' '), rimAlpha: [alpha(skin(0.1)), alpha(skin(0.1, 1))].join(' '), drawn: { t012: [Math.min(...fills1), Math.max(...fills1)], t0004: [Math.min(...fills2), Math.max(...fills2)], rgbPaths: rgb_ },
+    summary: `alpha ${as_.join(' ')}; rim ${alpha(skin(0.1))}→${alpha(skin(0.1, 1))}, lum ${lum(skin(0.1))}→${lum(skin(0.1, 1))}; drawn alpha t=0.12 ${Math.min(...fills1)}…${Math.max(...fills1)}, t=0.004 ${Math.min(...fills2)}…${Math.max(...fills2)}` };
+  if (bad.length) failWith({ ...out, bad }, bad.join('; '));
+  return out;
+});
 
 const reportDir = path.resolve(path.dirname(H.sourcePath), '..', '..', 'runs', 'checks');
 fs.mkdirSync(reportDir, { recursive: true });

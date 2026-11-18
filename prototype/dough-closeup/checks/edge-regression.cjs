@@ -135,13 +135,18 @@ function measure(polys, cell) {
 // Polygons of the sheet's cells as draw() sends them to the canvas (variant C: the real canvas).
 function drawnQuads(h) {
   const ctx = h.run('ctx'), keep = {}, polys = []; let cur = null;
+  // Build 81: the table skin fills with rgba (alpha shows thinness); holes are still #hex, the
+  // disc base is an ellipse. Dough quads are the four-point rgba?() fills; the margarine brick by
+  // the pan is rgba too — drop everything within a palm of its spot, it is not the sheet.
+  const butter = h.run(`(()=>{const b=butterSpot();return {x:prX(b.x,b.y),y:prY(b.x,b.y)}})()`);
+  const far = ps => { let x = 0, y = 0; for (const p of ps) { x += p.x; y += p.y; } return Math.hypot(x / ps.length - butter.x, y / ps.length - butter.y) > h.run('PAN_R') * 0.25; };
   for (const k of ['beginPath', 'moveTo', 'lineTo', 'closePath', 'fill', 'ellipse', 'quadraticCurveTo', 'arc', 'rect']) keep[k] = ctx[k];
   ctx.beginPath = () => { cur = { pts: [], curved: false }; };
   ctx.moveTo = (x, y) => { if (cur) cur.pts.push({ x, y }); };
   ctx.lineTo = (x, y) => { if (cur) cur.pts.push({ x, y }); };
   ctx.ellipse = ctx.quadraticCurveTo = ctx.arc = ctx.rect = () => { if (cur) cur.curved = true; };
   ctx.closePath = () => { keep.closePath.call(ctx); };
-  ctx.fill = () => { if (cur && !cur.curved && cur.pts.length === 4 && /^rgb\(/.test(String(ctx.fillStyle))) polys.push(cur.pts); cur = null; };
+  ctx.fill = () => { if (cur && !cur.curved && cur.pts.length === 4 && /^rgba?\(/.test(String(ctx.fillStyle)) && far(cur.pts)) polys.push(cur.pts); cur = null; };
   try { h.run('draw()'); } finally { Object.assign(ctx, keep); }
   return polys;
 }
@@ -312,6 +317,50 @@ test('G6', 'the smoothing never collapses or flips a cell and never draws a rim 
   const out = { limits: own, rows, bad, summary: Object.entries(rows).map(([k, v]) => `${k}: no limits — ${f(v.unlimited)}\n       with limits (cap ${own.cap}, area ${own.area}) — ${f(v.limited)}; physics rim: turns ${r3(v.physics.turns)}, sharp ${v.physics.sharp}`).join('\n     ') };
   if (!Object.values(rows).some(v => v.unlimited.flipped + v.unlimited.collapsed > 0)) bad.push('no state collapses a cell without the limits — the check measures nothing');
   if (bad.length) failWith(out, bad.join('; '));
+  return out;
+});
+// ── G7: build 81 — the edge of a hole is smoothed by the same window as the rim ────────────────
+// A punched hole leaves torn quads; they are drawn as the dark under-sheet (#hex, not captured),
+// so the captured polygons are the intact cells and their free sides give two closed loops: the
+// rim and the hole. The hole loop must read as one smooth loop after the same window smoothing.
+test('G7', 'a punched hole: the outline of the intact cells has two closed loops and the hole loop is smooth, not a staircase (same window, same limits as the rim)', () => {
+  const h = boot(TUNE, 390, 844); press(h);
+  for (let k = 0; k < 4; k++) pull(h, k * Math.PI / 2, 0.8, 1.5);
+  h.run('{const c=centerOfSheet();punchHole({x:0.42,y:0.56});}');   // inside the sheet: the hole loop must not touch the rim
+  h.tick(2);
+  snapSheet(h);
+  const cell = cellTable(h), bad = [], rows = {};
+  const chainMetrics = polys => {
+    const { chains } = outline(polys);
+    return chains.filter(c => c.closed).map(c => {
+      const t = chainTurns(c);
+      const f = fit(c, 1, 1), p = c.pts, n = p.length;   // fit only for length: use the same window as measure()
+      let len = 0; for (let i = 0; i + 1 < n; i++) len += dist(p[i], p[i + 1]); len += dist(p[n - 1], p[0]);
+      const diag = Math.hypot(Math.max(...p.map(q => q.x)) - Math.min(...p.map(q => q.x)), Math.max(...p.map(q => q.y)) - Math.min(...p.map(q => q.y)));
+      const ff = fit(c, diag / 4000, diag * 0.03), m = ff.fit.length;
+      let fitLen = 0; for (let i = 0; i + 1 < m; i++) fitLen += dist(ff.fit[i], ff.fit[i + 1]); fitLen += dist(ff.fit[m - 1], ff.fit[0]);
+      let sharp = 0, maxTurn = 0, turn = 0;
+      for (const a of t) { turn += a; if (a > Math.PI / 6) sharp++; if (a > maxTurn) maxTurn = a; }
+      return { pts: n, len: r3(len), lenOverFit: r3(len / fitLen), turns: r3(turn / (2 * Math.PI)), sharp, maxTurnDeg: r3(maxTurn * 180 / Math.PI) };
+    }).sort((a, b) => a.len - b.len);   // the hole loop is the shorter one
+  };
+  const m = [0, null].map(k => withRim(h, k, () => { backSheet(h); return chainMetrics(drawnQuads(h)); }));
+  rows.before = m[0]; rows.after = m[1];
+  const hole = { before: m[0][0], after: m[1][0] }, rim = { before: m[0][1], after: m[1][1] };
+  if (!(m[0].length === 2 && m[1].length === 2 && m[0].every(c => c.pts > 8) )) bad.push(`expected two closed loops (rim + hole), got ${m[0].map(c => c.pts).join(', ')} before / ${m[1].map(c => c.pts).join(', ')} after`);
+  if (!bad.length) {
+    // The hole stays RAGGED by design (a torn blob, not a circle): judged is the staircase —
+    // alternating ~90° steps double the turning sum — not the absence of corners altogether.
+    if (!(hole.after.turns <= 1.25 && hole.after.turns <= 0.65 * hole.before.turns)) bad.push(`hole loop turns ${hole.before.turns} → ${hole.after.turns}: the staircase is still there`);
+    if (!(hole.after.maxTurnDeg <= 55)) bad.push(`hole loop sharpest vertex ${hole.before.maxTurnDeg}° → ${hole.after.maxTurnDeg}°: a step corner survived`);
+    if (!(hole.after.lenOverFit <= hole.before.lenOverFit && hole.after.sharp <= hole.before.sharp)) bad.push(`hole loop got rougher: len/fit ${hole.before.lenOverFit} → ${hole.after.lenOverFit}, sharp ${hole.before.sharp} → ${hole.after.sharp}`);
+    if (!(hole.after.len <= hole.before.len * 1.05)) bad.push(`hole loop length ${hole.before.len} → ${hole.after.len}: smoothing opened the hole by more than 5 %`);
+  }
+  backSheet(h); h.run('draw();');
+  const moved = h.run('(()=>{let m=0;for(let i=0;i<N;i++)m=Math.max(m,Math.abs(px[i]-__edge.px[i]),Math.abs(py[i]-__edge.py[i]));return m;})()');
+  if (moved > 0) bad.push(`drawing moved physics nodes by ${moved}`);
+  const out = { hole, rim, moved, summary: `hole loop: len/fit ${hole.before.lenOverFit}→${hole.after.lenOverFit}, turns ${hole.before.turns}→${hole.after.turns}, sharp ${hole.before.sharp}→${hole.after.sharp} (sharpest ${hole.before.maxTurnDeg}°→${hole.after.maxTurnDeg}°); rim loop sharp ${rim.before.sharp}→${rim.after.sharp}; physics moved ${moved}` };
+  if (bad.length) failWith({ ...out, bad }, bad.join('; '));
   return out;
 });
 
