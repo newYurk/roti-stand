@@ -576,7 +576,7 @@ test('T10k', 'on the tava, folded roti: a press that slides 20 px over 1 s stays
     const from = start === 'middle' ? s.centre : h.dishToClient({ x: (b.left + b.right) / 2, y: b.bottom });
     dishDrive(h, walk(s.g, from, [{ to: s.table, v: 3 }], { gap: () => 16.67, hold: 150, stop: 100, seed: 5 }));
     hint.push({ start, message: h.run('dish.message'), mode: h.run('dish.mode'), phase: h.run('phase') }); }
-  const bad = rows.filter(r => r.outcome !== r.want || (r.want === 'press' && !(r.press_ms >= 900))), badHint = hint.filter(x => !/Сначала сверни/.test(x.message) || x.mode !== 'fold' || x.phase !== 'PAN');
+  const bad = rows.filter(r => r.outcome !== r.want || (r.want === 'press' && !(r.press_ms >= 900))), badHint = hint.filter(x => !/^сначала заверни края$/.test(x.message) || x.mode !== 'fold' || x.phase !== 'PAN');
   const by = n => JSON.stringify(count(rows.filter(r => r.name === n), 'outcome'));
   const out = { rows, hint, summary: `slide ${by('slide 20 px / 1 s')}; drag at once ${by('drag at once 30 px')}; long press then 40 px ${by('press 400 ms, then 40 px')}; unfolded hint ${hint.length - badHint.length}/${hint.length}` };
   if (bad.length || badHint.length) failWith({ ...out, bad, badHint }, `wrong ${bad.length + badHint.length}: ` + out.summary);

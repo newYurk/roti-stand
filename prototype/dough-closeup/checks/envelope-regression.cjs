@@ -187,7 +187,7 @@ function flick(h, k, kind, i, cad, seed) {
   const o0 = kind === 'in' ? { px: L, angleDeg: ang, lat: (i % 3 - 1) * 0.1 } : kind === 'out' ? { px: L, depth: -1, angleDeg: ang, lat: (i % 3 - 1) * 0.1 } : { px: L, sideways: true, angleDeg: (i % 2 ? 180 : 0) + ang / 2 };
   return dishDrive(h, strokePts(strokeEnds(h, k, { ...o0, from }), { v, gap: cad, stop: 0, seed }));
 }
-test('E4', 'fold or flip at every cadence: a fast stroke INTO the sheet is a fold (snapped) while the envelope is open — with or without filling; fast outward and sideways flicks flip; on the finished envelope a fast flick in any direction flips and a slow inward stroke still folds', () => {
+test('E4', 'fold or flip at every cadence: a fast stroke INTO the sheet is a fold (snapped) while the envelope is open — with or without filling; fast outward and sideways flicks flip; on the finished envelope a fast flick in any direction flips and a slow inward stroke does nothing (build 78: never a fifth fold)', () => {
   const rows = []; let n = 0;
   for (const [w, hh] of [[390, 844], [844, 390]]) for (const [cname, cad] of CADENCES) for (let k = 0; k < 4; k++) for (let i = 0; i < (w === 390 ? 2 : 1); i++) {
     for (const stage of [0, 2, 4]) for (const kind of ['in', 'out', 'side']) {
@@ -205,11 +205,12 @@ test('E4', 'fold or flip at every cadence: a fast stroke INTO the sheet is a fol
   const bad = rows.filter(r => !want(r));
   const table = []; for (const stage of [0, 2, 4]) for (const kind of ['in', 'out', 'side']) { const line = { 'flaps before': stage, flick: kind }; for (const [cname] of CADENCES) line[cname] = Object.entries(count(rows.filter(r => r.stage === stage && r.kind === kind && r.cadence === cname).map(r => ({ o: r.outcome + (r.snap ? '+snap' : '') })), 'o')).map(([a, c]) => `${a} ${c}`).join(', '); table.push(line); }
   console.table(table);
-  // the finished envelope and a slow inward stroke: still a (free) fold
+  // the finished envelope and a slow inward stroke: nothing — the envelope has four folds and stays so
+  // (until build 78 this was a free fifth fold; the playtest of 17.11 called it a bug: «Складок: 5»)
   const slow = []; for (const [cname, cad] of CADENCES) { const h = dishOnPan(390, 844, { filling: true }); for (const p of [0, 1, 2, 3]) fold(h, p, { depth: 0.8 }); const r = dishDrive(h, strokePts(strokeEnds(h, 2, { from: 0.5, depth: 0.6 }), { v: 150, gap: cad, seed: 5900 + slow.length })); const s = state(h); slow.push({ cadence: cname, outcome: r.outcome, snap: r.log.snap, folds: s.folds, flips: s.flips }); }
-  const badSlow = slow.filter(r => !(r.outcome === 'fold' && r.snap === false && r.folds === 5 && r.flips === 0));
+  const badSlow = slow.filter(r => !(r.outcome === 'none' && r.folds === 4 && r.flips === 0));
   const c = (stage, kind) => { const q = rows.filter(r => r.stage === stage && r.kind === kind); return `${q.filter(want).length}/${q.length}`; };
-  const out = { table, slow, runs: rows.length, summary: `${rows.length} flicks (speed logged ${Math.min(...rows.map(r => r.speed))}…${Math.max(...rows.map(r => r.speed))} px/s). Open sheet: in→fold+snap ${c(0, 'in')}, out→flip ${c(0, 'out')}, sideways→flip ${c(0, 'side')}. Two flaps: in→fold+snap ${c(2, 'in')}, out→flip ${c(2, 'out')}, sideways→flip ${c(2, 'side')}. Finished envelope: in→flip ${c(4, 'in')}, out→flip ${c(4, 'out')}, sideways→flip ${c(4, 'side')}; slow inward on the envelope → free fold ${slow.length - badSlow.length}/${slow.length}; wrong ${bad.length + badSlow.length}` };
+  const out = { table, slow, runs: rows.length, summary: `${rows.length} flicks (speed logged ${Math.min(...rows.map(r => r.speed))}…${Math.max(...rows.map(r => r.speed))} px/s). Open sheet: in→fold+snap ${c(0, 'in')}, out→flip ${c(0, 'out')}, sideways→flip ${c(0, 'side')}. Two flaps: in→fold+snap ${c(2, 'in')}, out→flip ${c(2, 'out')}, sideways→flip ${c(2, 'side')}. Finished envelope: in→flip ${c(4, 'in')}, out→flip ${c(4, 'out')}, sideways→flip ${c(4, 'side')}; slow inward on the envelope → nothing, 4 folds ${slow.length - badSlow.length}/${slow.length}; wrong ${bad.length + badSlow.length}` };
   if (bad.length || badSlow.length) failWith({ ...out, bad: bad.slice(0, 16), badSlow }, out.summary);
   return out;
 });
