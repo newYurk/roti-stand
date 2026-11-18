@@ -4031,9 +4031,13 @@ function noteRelease(v){   // числа жеста для журнала: по 
 }
 // ── Тяга: край идёт за пальцем по полю смещений; длины покоя пересчитываются на отпускании.
 // Физика на время тяги стоит (step): рост — функция пути пальца, а не времени удержания, поэтому
-// «липкой буксировки», снятой раньше, здесь нет. У тяги есть длина: палец уходит вперёд, тесто
-// отстаёт по tanh («резинка»), а когда палец ушёл далеко за предел — «пальцы соскользнули»,
-// тяга фиксируется сама. Предел — ещё и мишень: у дотянутой стороны хода нет, она упирается.
+// «липкой буксировки», снятой раньше, здесь нет. Сборка 81 (плейтест 77, п. 10): ПОКА ПАЛЕЦ
+// ДЕРЖИТ, край под пальцем идёт за ним — до предела разрыва: полоса между пальцем и листом
+// утончается (прозрачность из скина стола), у предела край дрожит на 2–3 px. Пунктир язык не
+// останавливает — его встречает отпускание: pullCommit возвращает узлы к пунктиру и только тогда
+// пересчитывает длины покоя («остаточное растяжение — при отпускании»). Предел разрыва —
+// физический: самая тонкая ячейка полосы не тоньше PULL_TEAR_T (двойной порог разрыва);
+// тяга не рвёт никогда — рвёт только шлепок (сборка 81, п. 9 спеки).
 const PULL_SIGMA = 1.0;           // рад: угловая ширина поля тяги. 0,55 давало язык: соседи не шли, одни
                                   // тяги за углы строили звезду, а готовность требовала 16 тяг (ревью 17.11, P7)
 const PULL_OUT_COS = Math.cos(65*Math.PI/180);   // конус тяги уже конуса шлепка: вбок край не тащим
@@ -4048,6 +4052,10 @@ const PULL_BLOCK = 0.06;          // gs: меньше запаса до мише
 const PULL_FAST_CAP = 0.40;       // gs: предел хода края под махом на пороге шлепка и быстрее
 const PULL_FLY_KEEP = 0.5;        // доля языка, остающаяся к удару (на main дуга хвата к удару держала ~0,6 подъёма)
 const PULL_NUDGE = 0.10;          // gs: настолько упёршаяся сторона подаётся под пальцем и возвращается
+const PULL_TEAR_T = 0.032;        // предел разрыва тяги: тоньше этой толщины полосу не тянем. Замер (Node,
+                                  // готовый лист): полоса при ходе 200 px — 0,033, при 244 px — 0,030; предел
+                                  // встаёт на ~210 px. Уже тоньше пола полоса тянется ещё на 15 %, не намертво
+const PULL_TONGUE = 0.62;         // рад: язык тяги — секторы, свободные от пунктира, пока палец держит
 let pullN = 0;                    // зафиксированных тяг на этом листе (контур листа рисуется по кромке)
 // Ход края от скорости руки: полный до V_PULL_FULL, дальше падает до PULL_GAIN_FAST на пороге
 // шлепка и остаётся таким под быстрым махом. Гасить его под махом до нуля пробовали (17.11):
@@ -4082,12 +4090,51 @@ function pullBegin(){
   const ab = new Float32Array(N), rim = [];
   for(let i=0;i<N;i++) ab[i] = (Math.atan2(py[i]-tc.y, px[i]-tc.x) + Math.PI)/(2*Math.PI)*RIM_BINS - 0.5;
   for(const i of edgeNodes) if(!(conDeg && conDeg[i] <= 0) && w[i] > 0) rim.push(i);
+  // Сборка 81: полоса тяги — целые ячейки языка (по ним считается предел разрыва), и секторы языка
+  // (±PULL_TONGUE от направления хвата, с растушёвкой в два сектора): пока палец держит, они
+  // свободны от пунктира — край идёт за пальцем; остальная кромка зажата, как раньше.
+  const strip = [];
+  for(let q=0;q<quads.length;q++){
+    if(quadCons[q].some(cc=>cc.broken)) continue;
+    let mx = 0; for(const id of quads[q]) if(w[id] > mx) mx = w[id];
+    if(mx >= 0.25) strip.push(q);
+  }
+  let thin0 = 1;
+  for(const q of strip) thin0 = Math.min(thin0, quadRest ? quadRest[q]/Math.max(1e-6, area(quads[q])) : 1);
+  const tongue = new Float32Array(RIM_BINS), binW = 2*Math.PI/RIM_BINS;
+  for(let b=0;b<RIM_BINS;b++){
+    let d = Math.abs((b+0.5)*binW - Math.PI - th); d = Math.min(d, 2*Math.PI - d);
+    tongue[b] = d <= PULL_TONGUE ? 1 : Math.max(0, 1 - (d - PULL_TONGUE)/(2*binW));
+  }
   action.pull = { c, tc, rg, nx:gx/rg, ny:gy/rg, bx:Float32Array.from(px), by:Float32Array.from(py), w, ab, rim,
-    e:0, raw:0, gain:1, fast:0, k:1, dx:0, dy:0, cap };
+    strip, tongue, thin0, e:0, raw:0, gain:1, fast:0, k:1, dx:0, dy:0, ux:gx/rg, uy:gy/rg, cap,
+    limKin:0, atLimit:false, followed:false };
   action.state = "PULLING";
 }
+// Предел разрыва тяги: наибольший ход e ≤ want, при котором самая тонкая ячейка полосы ещё не
+// тоньше пола (PULL_TEAR_T; полоса, уже тоньше пола, тянется ещё на 15 %). Площадь ячейки при
+// ходе e — по её четырём узлам (база + ход×вес); секторные зажимы не учтены, оценка смотрит в
+// сторону разрыва с запасом. Тяга не рвёт — рвёт только шлепок.
+function pullTearLimit(P, ux, uy, want){
+  if(want <= 0 || !P.strip.length || !quadRest) return want;
+  const floor = Math.min(PULL_TEAR_T, P.thin0*0.85);
+  const areaAt = (q, e)=>{
+    const s = quads[q]; let acc = 0;
+    for(let k2=0;k2<4;k2++){
+      const i = s[k2], j = s[(k2+1)%4];
+      acc += (P.bx[i]+ux*e*P.w[i])*(P.by[j]+uy*e*P.w[j]) - (P.bx[j]+ux*e*P.w[j])*(P.by[i]+uy*e*P.w[i]);
+    }
+    return Math.abs(acc)/2;
+  };
+  const thin = (e)=>{ let m = 1; for(const q of P.strip){ const t = quadRest[q]/Math.max(1e-6, areaAt(q, e)); if(t < m) m = t; } return m; };
+  if(thin(want) >= floor) return want;
+  let lo = 0, hi = want;
+  for(let it=0; it<6; it++){ const m = (lo+hi)*0.5; if(thin(m) >= floor) lo = m; else hi = m; }
+  return lo;
+}
 // fast — 0…1: насколько рука быстрее порога шлепка (язык укорачивается до PULL_FAST_CAP).
-function pullTo(p, gain, fast){
+// follow — палец держит медленную тягу: край идёт за ним до предела разрыва (сборка 81).
+function pullTo(p, gain, fast, follow){
   const P = action.pull; let dx = p.x-action.down.x, dy = p.y-action.down.y; const len = Math.hypot(dx,dy);
   if(gain != null) P.gain = gain;
   if(fast != null) P.fast = Math.max(0, Math.min(1, fast));
@@ -4102,14 +4149,31 @@ function pullTo(p, gain, fast){
     const along = Math.max(0, dx*ux + dy*uy);
     // упёршаяся сторона чуть подаётся и вернётся на отпускании; в длины покоя это не идёт
     let lim = P.cap > 0 ? P.cap : PULL_NUDGE*gestureScale;
-    // Под махом быстрее порога шлепка язык короткий (PULL_FAST_CAP): длинный, отпущенный на подъёме,
-    // выворачивал ячейки при ударе (Node 17.11, шесть случайных серий тяг и шлепков: 323 против 193).
-    // В коридоре V_PULL_FULL…V_SLAP язык не укорачивается: там это ещё тяга, и её рост резать нечем.
-    lim += (Math.min(lim, PULL_FAST_CAP*gestureScale) - lim) * P.fast;
-    e = P.gain * lim * Math.tanh(along/lim);
-  }
+    if(follow){
+      // Сборка 81: язык следует за пальцем до предела разрыва (не до пунктира и не до cap);
+      // пунктир и cap встречают язык на отпускании (pullCommit). Дотянутая сторона только подаётся.
+      const give = PULL_NUDGE*gestureScale;
+      const want = P.cap > 0 ? along*P.gain : Math.min(along*P.gain, give);
+      e = pullTearLimit(P, ux, uy, want);
+      P.limKin = P.cap > 0 ? e : give;
+      P.atLimit = along*P.gain > P.limKin + 1;
+      P.followed = true;
+    } else {
+      // Под махом быстрее порога шлепка язык короткий (PULL_FAST_CAP): длинный, отпущенный на подъёме,
+      // выворачивал ячейки при ударе (Node 17.11, шесть случайных серий тяг и шлепков: 323 против 193).
+      // В коридоре V_PULL_FULL…V_SLAP язык не укорачивается: там это ещё тяга, и её рост резать нечем.
+      lim += (Math.min(lim, PULL_FAST_CAP*gestureScale) - lim) * P.fast;
+      e = P.gain * lim * Math.tanh(along/lim);
+      P.limKin = lim; P.atLimit = false;
+    }
+  } else { P.limKin = P.cap > 0 ? Infinity : 0; P.atLimit = false; }
   P.e = P.cap > 0 ? e : 0;
-  dx = ux*e*P.k; dy = uy*e*P.k;
+  P.ux = ux; P.uy = uy;
+  pullPlace(P, ux, uy, e, follow && P.cap > 0);
+}
+// Расстановка узлов тяги: секторные зажимы к пунктиру; follow=true освобождает секторы языка.
+function pullPlace(P, ux, uy, e, follow){
+  const dx = ux*e*P.k, dy = uy*e*P.k;
   // Ход зажат ПО УГЛУ: в каждом секторе кромка идёт наружу не дальше контура мишени × (1+PULL_OVER).
   // Запас считался только в точке хвата, и соседи уезжали за пунктир (ревью 17.11, P6: 1,21 мишени).
   // Доля хода s — одна на сектор (наименьшая по узлам кромки в нём и в соседних секторах) и
@@ -4136,6 +4200,10 @@ function pullTo(p, gain, fast){
     if(w > 0 && e > 0){
       const f = P.ab[i], b0 = Math.floor(f), t = f - b0, i0 = ((b0 % RIM_BINS) + RIM_BINS) % RIM_BINS;
       k = S2[i0] + (S2[(i0+1)%RIM_BINS] - S2[i0])*t;
+      if(follow){
+        const tf = Math.max(0, Math.min(1, P.tongue[i0] + (P.tongue[(i0+1)%RIM_BINS] - P.tongue[i0])*t));
+        k += (1-k)*tf;   // секторы языка идут за пальцем и через пунктир; к соседям — плавный переход
+      }
     }
     px[i] = P.bx[i] + dx*w*k; py[i] = P.by[i] + dy*w*k; prx[i]=px[i]; pry[i]=py[i]; vx[i]=0; vy[i]=0;
   }
@@ -4153,6 +4221,12 @@ function pullCommit(){
     const blocked = !!P && P.cap <= 0 && P.raw > 0;
     pullRestore(); lastDecision = blocked ? "сторона дотянута — тяни, где до пунктира далеко" : "тяга коротка";
     clearAction(); return;
+  }
+  // Сборка 81: язык мог уйти за пальцем за пунктир — коммит возвращает его к пунктиру: узлы
+  // встают с общими зажимами и ходом не дальше cap; остаточное растяжение — в длинах покоя.
+  if(P.followed && P.cap > 0 && P.e > P.cap){
+    pullPlace(P, P.ux, P.uy, P.cap, false);
+    P.e = P.cap;
   }
   for(const cc of cons){ if(cc.broken) continue;
     const o = Math.hypot(P.bx[cc.a]-P.bx[cc.b], P.by[cc.a]-P.by[cc.b]), n = Math.hypot(px[cc.a]-px[cc.b], py[cc.a]-py[cc.b]);
@@ -4220,9 +4294,10 @@ function updateActionMove(p, tEv, client){
       if(len < 1e-9 || (dx*rad.x + dy*rad.y)/len < PULL_OUT_COS) return;
       pullBegin();
     }
-    pullTo(p, pullGain(v.speed), (v.speed - V_SLAP)/(PULL_FAST_BAND*V_SLAP));
-    const P = action.pull, lim = Math.max(P.cap, PULL_MIN*gestureScale);
-    // пальцы соскользнули: тяга — единица действия, а не буксировка
+    pullTo(p, pullGain(v.speed), (v.speed - V_SLAP)/(PULL_FAST_BAND*V_SLAP), true);
+    const P = action.pull, lim = Math.max(P.cap, P.limKin || 0, PULL_MIN*gestureScale);
+    // пальцы соскользнули: тяга — единица действия, а не буксировка. Предел — фактический ход
+    // языка (сборка 81: до предела разрыва), а не только запас до пунктира.
     if(P.cap > 0 && P.raw >= lim*PULL_SLIP && v.speed < V_SLAP*0.6 && action.last.t - action.stroke.start >= 120){
       noteRelease(v); pullCommit();
     }
@@ -4270,7 +4345,7 @@ function releaseAction(tEv){
     } else if(judgeEndedStroke()) return;
     const v = fresh ? sampleVelocity() : { x:0, y:0, speed:0 };
     if(action.state === "ARMED"){ clearAction(); return; }   // не сдвинула или вела внутрь — ничего
-    pullTo(action.last, pullGain(v.speed), 0);
+    pullTo(action.last, pullGain(v.speed), 0, true);
     noteRelease(v); pullCommit(); return;
   }
   if(action.state === "LIFTING"){ toFlying(); return; }    // шлепок
@@ -4302,7 +4377,7 @@ function updateAction(dt){
     if(performance.now() - action.stroke.lastMoveT > staleMs()){
       if(judgeEndedStroke()) return;                         // короткий рывок и стоп — шлепок бьёт сам
       const P = action.pull;
-      if(P && (P.gain < 1 || P.fast > 0)) pullTo(action.last, Math.min(1, P.gain + dt*4), Math.max(0, P.fast - dt*6));
+      if(P && (P.gain < 1 || P.fast > 0)) pullTo(action.last, Math.min(1, P.gain + dt*4), Math.max(0, P.fast - dt*6), true);
     }
   } else if(action.state === "ARMED" && stepNo !== 1){
     if(action.stroke && performance.now() - action.stroke.lastMoveT > staleMs()) judgeEndedStroke();
@@ -6153,6 +6228,12 @@ function draw(){
     // так видно, что он оторвался от доски и летит, хотя узлы физики стоят.
     if(!xf) rimDraw();
     const X = xf ? viewX() : dX, Y = xf ? viewY() : dY;
+    // Дрожь края у предела разрыва (сборка 81, спека п. 10): пока палец тянет у предела,
+    // язык мелко трясётся вдоль тяги — только в рисунке; физика и коммит стоят ровно на пределе.
+    if(!xf && phase === "TABLE" && action.state === "PULLING" && action.pull && action.pull.atLimit){
+      const P = action.pull, t = performance.now(), off = (1.9 + 0.9*Math.sin(t/310)) * Math.sin(t/43);
+      for(let i=0;i<N;i++) if(P.w[i] > 0.55){ dX[i] += P.ux*off; dY[i] += P.uy*off; }
+    }
     if(xf){
       const gx = xf.cx + xf.ox, gy = xf.cy + xf.oy, gr = sheetRadius()*1.03;
       g.fillStyle = "rgba(6,3,1,0.42)";
