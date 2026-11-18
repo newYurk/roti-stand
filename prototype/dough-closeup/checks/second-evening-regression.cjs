@@ -128,10 +128,15 @@ function toTable(h) {
 const rotiBox = h => h.J(`(()=>{const b=dish.cutBounds,up=tableLiftCanvas()*cv.getBoundingClientRect().height/cv.height,
   P=(x,y)=>{const q=__harness.dishToClient({x,y});return {x:q.x,y:q.y-up}};
   return {c:P(dish.cutCenter.x,dish.cutCenter.y),l:P(b.left,dish.cutCenter.y),r:P(b.right,dish.cutCenter.y),t:P(dish.cutCenter.x,b.top),b:P(dish.cutCenter.x,b.bottom)}})()`);
+// Build 80: «нарезано» is three edge-to-edge cuts of two directions (1 + 2); one cut no longer serves.
 function cut(h) {
-  const B = rotiBox(h), dx = (B.r.x - B.l.x) * 0.2;
+  const B = rotiBox(h), w = B.r.x - B.l.x, dx = w * 0.2, dy = (B.b.y - B.t.y) * 0.2;
   drive(h, line({ x: B.l.x - dx, y: B.c.y }, { x: B.r.x + dx, y: B.c.y }, { v: 380, hold: 60 }));
   assert.equal(h.run('dish.cuts.length'), 1, 'one cut through the envelope');
+  assert.equal(h.run('cutEnough()'), false, 'one cut is not «нарезано»');
+  for (const k of [-1, 1]) drive(h, line({ x: B.c.x + k * w / 6, y: B.t.y - dy }, { x: B.c.x + k * w / 6, y: B.b.y + dy }, { v: 380, hold: 60 }));
+  assert.equal(h.run('dish.cuts.length'), 3, 'three cuts, each from edge to edge');
+  assert.equal(h.run('cutEnough()'), true, 'two across one: «нарезано»');
 }
 function serve(h, to) {
   const B = rotiBox(h);
@@ -157,7 +162,19 @@ const fryNow = h => h.J('{t:dish.panTime,cook:meanCook(),dry:meanDry(),crisp:dis
 function until(h, cond, max = 60 * 400) { let n = 0; while (!h.run(cond) && n < max) { h.frames(1); n++; } assert.ok(h.run(cond), `waited ${n} frames for ${cond}`); return n; }
 function onPan(h) { stretched(h); toPan(h); }
 function arrive(h) { until(h, 'GST.here'); until(h, 'guestPic()===2'); until(h, 'guestPic()===1'); }
-function finish(h, crisp) { envelope(h); toTable(h); cut(h); if (crisp !== undefined) h.run(`dishCrisp=${crisp}`); }
+// Merge with the frying batch (build 79): an open sheet no longer browns, so a roti folded and served at once is
+// RAW and Som refuses it. As in guest-regression.cjs, the folded envelope fries on until its steel side is
+// «бледное» (model time, a few seconds); the answer for such a roti is a nod, as these checks expect.
+const PALE = 'fryStep(meanCook())>=1';
+function finish(h, crisp) { if (!h.run('envelopeDone()')) envelope(h); if (!h.run(PALE)) until(h, PALE); toTable(h); cut(h); if (crisp !== undefined) h.run(`dishCrisp=${crisp}`); }
+// a 700 px/s flick from the right edge turns the finished envelope (as in guest-regression.cjs)
+function flick(h, v = 700) {
+  const e = h.J(`(()=>{const b=dishBounds();return [__harness.dishToClient({x:b.right-0.02,y:(b.top+b.bottom)/2}),__harness.dishToClient({x:b.right+0.5,y:(b.top+b.bottom)/2})]})()`);
+  const a = e[0], dir = Math.sign(e[1].x - a.x) || 1, pts = [{ x: a.x, y: a.y, t: 0 }];
+  for (let i = 1; i <= 9; i++) pts.push({ x: a.x + dir * v * i / 60, y: a.y, t: 120 + i * 1000 / 60 });
+  pts.push({ ...pts.at(-1), t: pts.at(-1).t + 1 });
+  drive(h, pts, { settle: 50 });
+}
 const nextBall = h => { tap(h, h.spots().bowl); assert.equal(h.eve().ball, true, 'a ball is taken from the bowl'); };
 const FRESH = { v: 1, here: false, gone: false, knocked: false, answers: [], gifts: [], taken: 0 };
 
@@ -275,7 +292,9 @@ test('S1', 'evening 1 → night → lump → evening 2 by touches: n is 2, the s
   assert.equal(h.SHF().bananas, 2, 'her bananas are a bunch for two roti'); assert.equal(h.shelfDrawn().bananas, 2);
   sec(h, 6); if (h.n().open) tap(h, h.n().leftPage);
   // ball 2: fried to «приготовленное» → crunch → jam
-  nextBall(h); onPan(h); until(h, 'guestCookStep()>=2'); finish(h); serve(h, h.gs().som);
+  // build 79: crunch needs BOTH sides «приготовленное» — fold, fry, flip, fry the second side
+  nextBall(h); onPan(h); envelope(h); until(h, 'guestCookStep()>=2'); h.frames(2); until(h, 'guestPic()===1'); flick(h, 700); assert.equal(h.run('dish.flips'), 1);
+  until(h, 'guestCookStep()>=2'); h.frames(2); until(h, 'guestPic()===1'); finish(h); serve(h, h.gs().som);
   assert.deepEqual(h.g().answers.map(a => a.answer), ['nod', 'crunch']);
   assert.equal(h.SHF().jam, 3); assert.equal(h.SHF().jar, true);
   sec(h, 6); if (h.n().open) tap(h, h.n().leftPage);
@@ -314,7 +333,7 @@ test('S2', 'bananas: a bunch for two roti — 2 → 1 → gone as drawn; many sl
   for (let i = 0; i < 2; i++) {
     if (i) nextBall(h);
     onPan(h); h.frames(3);
-    assert.equal(h.run('eveningLive("Положи банан и яйцо, потом заверни края")'), 'коснись середины — ляжет банан · потом заверни четыре стороны к середине');
+    // build 80: the stand writes the hint line itself (one short line), evening.js no longer rewrites it
     const c = sheetMid(h); tap(h, c);
     assert.equal(bananasOn(h), 1, `roti ${i + 1}: a touch of the middle lays a banana`);
     assert.equal(h.SHF().bananas, 1 - i, 'the first slice takes one banana off the bunch');
@@ -406,6 +425,7 @@ test('S3', 'jam: touch the jar, lead a finger over the cut roti — a jam stripe
   assert.equal(h.SHF().jam, 0); assert.equal(h.SHF().jar, true, 'the empty jar stays on the shelf');
   assert.deepEqual(h.shev(), ['use:jam', 'use:jam', 'use:jam', 'empty:jam']);
   assert.equal(h.shelfDrawn().glasses, 1);
+  assert.equal(h.rects('shelfDraw(ctx,1,1,eveGeo());').filter(x => x.fill === '#3a2c1e').length, 3, 'three level marks on the jar');
   tap(h, h.sh().jarAt);
   assert.equal(h.SHF().jar, false, 'a touch puts the empty jar away'); assert.equal(h.shelfDrawn().glasses, 0); assert.equal(h.shev().at(-1), 'putaway:jar');
   // the notebook is not blocked by the touches of the jar (no finger is left hanging)
@@ -457,6 +477,7 @@ test('S5', 'a new gift of the same kind refills, not adds; after 7 evenings the 
   h.run('shelfGift("bananas")'); assert.equal(h.SHF().bananas, 2, 'one banana left + a new bunch = one full bunch');
   h.run('shelfGift("bananas")'); assert.equal(h.SHF().bananas, 2);
   h.run('shelfGift("jam")'); h.run('shelfGift("jam")'); assert.equal(h.SHF().jam, 3); assert.equal(h.SHF().jar, true);
+  h.frames(40);                                            // the gifts land on the shelf
   assert.deepEqual(h.shelfDrawn(), { bananas: 2, red: 19, glasses: 1, lids: 1 }, 'one bunch and one jar are drawn');
   assert.deepEqual(h.shev(), ['refill:bananas', 'refill:bananas', 'refill:jam', 'refill:jam']);
   // seven evenings in a row; script shortcut: every evening is written as finished with a nod and a crunch from Som (GST), her gifts go through shelfGift as in guestServe
@@ -465,6 +486,7 @@ test('S5', 'a new gift of the same kind refills, not adds; after 7 evenings the 
   for (let n = 1; n <= 7; n++) {
     light(g); g.frames(2);
     g.run(`for(const a of ["nod","crunch"]){GST.answers.push({ballNo:1,crisp:1,step:1,answer:a});GST.gifts.push(GUEST_GIFT[a]);shelfGift(GUEST_GIFT[a]);}`);
+    g.frames(40);              // the gifts land on the shelf
     g.run('SHF.empty=true;');   // the worst case: she has put an empty jar on the shelf and nobody put it away
     g.run('for(let i=0;i<3;i++) notebookSnap("counter"); EVE.ballsLeft=0; EVE.rotiDone=3; EVE.ball=false; eveLidEnd();'); g.frames(3);
     assert.equal(g.eve().over, true); assert.equal(g.SHF().n, n);
@@ -545,18 +567,22 @@ test('S7', 'the night frame of evening 2 shows today with yesterday small beside
   for (const [w, hh] of [[390, 844], [375, 667]]) {
     const h = shelf({ storage: saveNight(['nod', 'crunch'], { n: 2, pages: 2, sh: { bananas: 2, jam: 3, jar: true } }), w, hh }); h.frames(3);
     const N = h.ns(); assert.equal(N.frame, true); assert.equal(N.cards.length, 3); assert.equal(N.past.length, 3, 'yesterday: three cards');
-    assert.ok(N.past.every(p => p.s < N.cards[0].s / 2.5), `yesterday is small (${N.past[0].s.toFixed(1)} against ${N.cards[0].s.toFixed(1)} px)`);
-    assert.ok(N.past.every(p => p.x + p.s <= N.cards[0].x - 4), 'beside today, to the left');
+    assert.ok(N.past.every(p => Math.abs(p.s - N.cards[0].s) < 1e-6), `yesterday is the same size (${N.past[0].s.toFixed(0)} against ${N.cards[0].s.toFixed(0)} px)`);
+    assert.ok(N.past.every((p, i) => Math.abs(p.x - N.cards[i].x) < 1e-6), 'in the same columns as today');
+    assert.ok(N.past[0].y > N.cards[0].markY, 'yesterday is a row below today');
     const F = h.J('(()=>{const G=eveGeo(),F=guestShelf(G),k=cv.getBoundingClientRect().width/cv.width;return {x1:(F.x0+F.w)*k,lamp:(G.lamp.x-G.lamp.s*1.15)*k,cy0:G.counter.y0*k}})()');
-    assert.ok(N.past[0].x >= F.x1 && N.cards[2].x + N.cards[2].s <= F.lamp, `${w}×${hh}: the row stands between the shelf and the lamp`);
+    assert.ok(N.past[0].x >= F.x1 && N.past[2].x + N.past[2].s <= F.lamp, `${w}×${hh}: the rows stand between the shelf and the lamp`);
     assert.ok(N.past[2].y + N.past[2].s <= F.cy0 && N.cards[0].markY <= F.cy0, 'above the counter');
-    // marks (who got it) are drawn for today only: 3 marks — two Som (5 ellipses each… counted by her cloth) and a dog
+    // marks (who got it) are drawn for today only: two Som (her cloth) and a dog; yesterday has no marks
     const cloth = h.drawn('nightDraw(ctx,1,1,eveGeo());').filter(e => e.fill === '#8a4b3c').length;
     assert.equal(cloth, 2, 'two Som marks — today\'s; yesterday has no marks');
+    // yesterday is dimmed: a dark overlay sits over each yesterday card
+    const pastCards = h.J('(()=>{const R=nightRow(eveGeo());return R.past.length})()');
+    assert.equal(pastCards, 3);
     assert.equal(h.ngt().at(-1), 'frame:load'); assert.deepEqual(h.J('gestures.filter(g=>g.kind==="night").at(-1).yesterday'), ['som', 'som', 'dog']);
     assert.equal(h.run('eveningLive("")'), '', 'no words');
-    if (w === 390) h.summary = `390×844: today ${N.cards[0].s.toFixed(0)} px, yesterday ${N.past[0].s.toFixed(1)} px`;
-    else h.summary = `375×667: today ${N.cards[0].s.toFixed(0)} px, yesterday ${N.past[0].s.toFixed(1)} px`;
+    if (w === 390) h.summary = `390×844: today ${N.cards[0].s.toFixed(0)} px, yesterday ${N.past[0].s.toFixed(0)} px`;
+    else h.summary = `375×667: today ${N.cards[0].s.toFixed(0)} px, yesterday ${N.past[0].s.toFixed(0)} px`;
     results.sizes = (results.sizes || []).concat(h.summary);
     assert.deepEqual(h.errors, []);
   }
@@ -585,10 +611,34 @@ test('S8', 'without shelf.js the evening goes as in step 4 (bananas are not rati
   assert.deepEqual(h.saved().shelf, s.shelf, 'the shelf block of the save is not lost'); assert.equal(h.saved().n, 4);
   const bn = h0.run('BUILD').match(/· (\d+)$/)[1];
   const html = fs.readFileSync(path.join(path.dirname(H.sourcePath), 'index.html'), 'utf8');
-  assert.match(html, new RegExp('night\\.js\\?v=[^"]*b' + bn + '"></script>\\s*<script src="shelf\\.js\\?v=[^"]*b' + bn + '"'), 'index.html loads shelf.js after night.js');
+  assert.match(html, /night\.js\?v=[^"]*"><\/script>\s*<script src="shelf\.js\?v=[^"]*"/, 'index.html loads shelf.js after night.js');
   assert.match(html, new RegExp('stand\\.js\\?v=[^"]*b' + bn + '"'));
   assert.equal(h.run('loopErrs'), 0); assert.deepEqual(h.errors, []);
   return { summary: 'evening.js + guest.js + notebook.js + night.js alone: banana laid, save.shelf and n kept; BUILD ' + h0.run('BUILD').split('·').pop().trim() };
+});
+
+test('S9', 'the gift flies from Som to its shelf place in one straight move of 0.6 s and is saved at once — a reload mid-flight does not lose it', () => {
+  const h = shelf(); light(h);
+  onPan(h); arrive(h); finish(h); serve(h, h.gs().som);          // a short fry → nod → bananas
+  assert.equal(h.g().answers[0].answer, 'nod');
+  assert.equal(h.SHF().bananas, 2, 'the bunch is on the shelf at once (saved)');
+  const f = h.sh().flight;
+  assert.ok(f && f.gift === 'bananas' && f.dur === 0.6, 'the gift is flying');
+  assert.ok(f.t < f.dur, 'still on the way');
+  const S = h.J('shelfGeo(eveGeo())'), G = h.J('guestSlot(eveGeo())');
+  assert.ok(Math.hypot(f.from.x - (G.x0 + G.w / 2), f.from.y - (G.y0 + G.h * 0.6)) < 1e-6, 'starts at Som');
+  assert.ok(Math.hypot(f.to.x - S.bunch.x, f.to.y - S.bunch.y) < 1e-6, 'goes to the bunch place');
+  // a reload mid-flight: the gift is not lost, and after the reload the flight is over
+  const r = reloadS(h);
+  assert.equal(r.SHF().bananas, 2, 'the gift survives the reload');
+  assert.equal(r.sh().flight, null, 'after a reload the flight is over');
+  assert.equal(r.shelfDrawn().bananas, 2, 'and the bunch is drawn on the shelf');
+  // in h the flight finishes by itself: gone, the bunch sits on the shelf
+  sec(h, 0.5);
+  assert.equal(h.sh().flight, null, 'the flight is over after 0.6 s');
+  assert.equal(h.shelfDrawn().bananas, 2);
+  assert.equal(h.run('loopErrs'), 0); assert.deepEqual(h.errors, []);
+  return { summary: `gift flies ${f.dur} s from Som to the bunch place; saved at once, kept across a reload` };
 });
 
 const passed = results.filter(r => r.status === 'PASS').length;

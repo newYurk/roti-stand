@@ -128,10 +128,15 @@ function toTable(h) {
 const rotiBox = h => h.J(`(()=>{const b=dish.cutBounds,up=tableLiftCanvas()*cv.getBoundingClientRect().height/cv.height,
   P=(x,y)=>{const q=__harness.dishToClient({x,y});return {x:q.x,y:q.y-up}};
   return {c:P(dish.cutCenter.x,dish.cutCenter.y),l:P(b.left,dish.cutCenter.y),r:P(b.right,dish.cutCenter.y),t:P(dish.cutCenter.x,b.top),b:P(dish.cutCenter.x,b.bottom)}})()`);
+// Build 80: «нарезано» is three edge-to-edge cuts of two directions (1 + 2); one cut no longer serves.
 function cut(h) {
-  const B = rotiBox(h), dx = (B.r.x - B.l.x) * 0.2;
+  const B = rotiBox(h), w = B.r.x - B.l.x, dx = w * 0.2, dy = (B.b.y - B.t.y) * 0.2;
   drive(h, line({ x: B.l.x - dx, y: B.c.y }, { x: B.r.x + dx, y: B.c.y }, { v: 380, hold: 60 }));
   assert.equal(h.run('dish.cuts.length'), 1, 'one cut through the envelope');
+  assert.equal(h.run('cutEnough()'), false, 'one cut is not «нарезано»');
+  for (const k of [-1, 1]) drive(h, line({ x: B.c.x + k * w / 6, y: B.t.y - dy }, { x: B.c.x + k * w / 6, y: B.b.y + dy }, { v: 380, hold: 60 }));
+  assert.equal(h.run('dish.cuts.length'), 3, 'three cuts, each from edge to edge');
+  assert.equal(h.run('cutEnough()'), true, 'two across one: «нарезано»');
 }
 function serve(h, to) {
   const B = rotiBox(h);
@@ -157,7 +162,11 @@ const fryNow = h => h.J('{t:dish.panTime,cook:meanCook(),dry:meanDry(),crisp:dis
 function until(h, cond, max = 60 * 400) { let n = 0; while (!h.run(cond) && n < max) { h.frames(1); n++; } assert.ok(h.run(cond), `waited ${n} frames for ${cond}`); return n; }
 function onPan(h) { stretched(h); toPan(h); }
 function arrive(h) { until(h, 'GST.here'); until(h, 'guestPic()===2'); until(h, 'guestPic()===1'); }
-function finish(h, crisp) { envelope(h); toTable(h); cut(h); if (crisp !== undefined) h.run(`dishCrisp=${crisp}`); }
+// Merge with the frying batch (build 79): an open sheet no longer browns, so a roti folded and served at once is
+// RAW and Som refuses it. As in guest-regression.cjs, the folded envelope fries on until its steel side is
+// «бледное» (model time, a few seconds); the answer for such a roti is a nod, as these checks expect.
+const PALE = 'fryStep(meanCook())>=1';
+function finish(h, crisp) { if (!h.run('envelopeDone()')) envelope(h); if (!h.run(PALE)) until(h, PALE); toTable(h); cut(h); if (crisp !== undefined) h.run(`dishCrisp=${crisp}`); }
 const nextBall = h => { tap(h, h.spots().bowl); assert.equal(h.eve().ball, true, 'a ball is taken from the bowl'); };
 const FRESH = { v: 1, here: false, gone: false, knocked: false, answers: [], gifts: [], taken: 0 };
 

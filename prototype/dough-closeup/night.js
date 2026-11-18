@@ -9,11 +9,11 @@
    кому ушёл каждый (Сом / пёс / стойка); полку с подарками, тележку под крышкой и ком теста рисуют
    evening.js и guest.js, как раньше. После перезагрузки оконченный вечер открывается этим же кадром.
    Рамка вечера зовёт отсюда под typeof: nightDogHit, nightServe, nightTook, nightUpdate, nightDrawUnder,
-   nightDrawOver, nightDraw, nightLive, nightReset, nightState, nightExport. Без этого файла вечер идёт как в шаге 3.
+   nightDrawOver, nightDraw, nightReset, nightState, nightExport. Без этого файла вечер идёт как в шаге 3.
    Правила владелицы 17.11: плоские фигуры в палитре стенда, без свечения, частиц и анимаций — позы пса
    сменяются, а не двигаются (взмах хвоста — две нарисованные чёрточки); звука нет; слов нет.
-   ВТОРОЙ ВЕЧЕР И ДАЛЬШЕ (шаг 5 v0, shelf.js): слева от сегодняшних трёх снимков — вчерашние три, мелко,
-   столбиком, без меток; ни оценок, ни стрелок.
+   ВТОРОЙ ВЕЧЕР И ДАЛЬШЕ (шаг 5 v0, shelf.js): вчерашние три снимка — отдельной строкой под сегодняшними,
+   тех же размеров, приглушённые, без меток; ни оценок, ни стрелок.
    Пёс — заглушка: по решению 17.09 собак две (мама и дочка), окрас и имена не утверждены. */
 
 const NIGHT_V = 1;
@@ -73,17 +73,8 @@ function nightOverDog(client){
 // evening.js спрашивает это вместе со стойкой: отпущен ли роти там, где его подают.
 // Ненарезанный роти псу не подаётся и штриху из середины в его угол не мешает: это обычный рез (ревью шага 4).
 function nightDogHit(client){ return nightDogWants() && !!dish && dish.cuts.length > 0 && nightOverDog(client); }
-// Слова строки, пока роти берёт и пёс: «на стойку» спорило бы с жестом вниз, а про пса слов нет нигде.
-const NIGHT_WORDS = [
-  ["Разрезов", "нарезано · возьми за середину и неси"],
-  ["В руке — неси наверх", "в руке — неси и отпусти"],
-  ["Неси выше", "роти на столе · возьми за середину и неси"],
-];
-function nightLive(cur){
-  if(typeof cur !== "string" || !nightDogWants()) return null;
-  for(const [from, to] of NIGHT_WORDS) if(cur.startsWith(from)) return to;
-  return null;
-}
+// Слов про пса нет нигде; с сборки 80 строка стенда не называет, куда нести («нарезано — за середину и
+// неси»), поэтому своих слов у этого файла больше нет (nightLive убран).
 // evening.js зовёт это из eveningServed после гостьи (она смотрит первой), ДО сброса стенда.
 function nightServe(client){
   if(!nightDogHit(client)) return null;
@@ -117,12 +108,12 @@ function nightRow(G){
   const xa = Math.max(F.x0 + F.w, G.radio.x0 + G.radio.w + 38*u) + 10*u, xb = G.lamp.x - G.lamp.s*1.15 - 10*u;
   const ya = 30*u, yb = G.counter.y0 - 4*u;
   // вчерашние снимки (шаг 5): столбик из трёх мелких слева, высотой с сегодняшнюю карточку
-  const past = nightPast().length > 0, pg = 3*u, pgap = past ? gap : 0;
-  const side = Math.max(24*u, Math.min(past ? (xb - xa - gap*(n - 1) - pgap + 2*pg/3)/(n + 1/3) : (xb - xa - gap*(n - 1))/n, yb - ya - markH, 84*u));
-  const q = past ? (side - 2*pg)/3 : 0;
-  const w = side*n + gap*(n - 1) + q + pgap, x0 = (xa + xb)/2 - w/2 + q + pgap, y0 = ya + Math.max(0, (yb - ya - side - markH)/2);
+  const past = nightPast().length > 0, rowGap = past ? 6*u : 0;
+  const side = Math.max(24*u, Math.min((xb - xa - gap*(n - 1))/n, (yb - ya - markH - rowGap)/(past ? 2 : 1), 84*u));
+  const w = side*n + gap*(n - 1), x0 = (xa + xb)/2 - w/2;
+  const y0 = ya + Math.max(0, (yb - ya - (past ? side*2 + markH + rowGap : side + markH))/2);
   return { side, markH, cells:[0, 1, 2].map(i => ({ x:x0 + i*(side + gap), y:y0, s:side, mx:x0 + i*(side + gap) + side/2, my:y0 + side + markH*0.55 })),
-    past:past ? [0, 1, 2].map(i => ({ x:x0 - pgap - q, y:y0 + i*(q + pg), s:q })) : [] };
+    past:past ? [0, 1, 2].map(i => ({ x:x0 + i*(side + gap), y:y0 + side + markH + rowGap, s:side })) : [] };
 }
 // Где что, в CSS px окна — для проверок касаниями.
 function nightSpots(){
@@ -200,16 +191,17 @@ function nightDraw(g, sx, sy, G){
       g.fillStyle = "#3a2c1e"; g.fillRect((C.x + q)*sx, (C.y + q)*sy, (C.s - 2*q)*sx, (C.s - 2*q)*sy);
       g.fillStyle = "#c9a15a"; g.beginPath(); g.ellipse((C.x + C.s/2)*sx, (C.y + C.s/2)*sy, C.s*0.30*sx, C.s*0.28*sy, 0, 0, Math.PI*2); g.fill();
     }
-    nbMark(g, sx, sy, s.to, C.mx, C.my, u*0.72);
+    nbMark(g, sx, sy, s.to, C.mx, C.my, u*0.72, s.answer);
   });
-  nightPast().forEach((s, i) => {                          // вчера: те же снимки мелко, без меток
-    const C = R.past[i], im = typeof nbPic === "function" ? nbPic(s.img) : null, p = Math.max(1, 1.5*u);
+  nightPast().forEach((s, i) => {                          // вчера: те же снимки строкой ниже, приглушённые, без меток
+    const C = R.past[i], im = typeof nbPic === "function" ? nbPic(s.img) : null;
     g.fillStyle = "#b9a988"; g.fillRect(C.x*sx, C.y*sy, C.s*sx, C.s*sy);
-    if(im) g.drawImage(im, (C.x + p)*sx, (C.y + p)*sy, (C.s - 2*p)*sx, (C.s - 2*p)*sy);
+    if(im) g.drawImage(im, (C.x + q)*sx, (C.y + q)*sy, (C.s - 2*q)*sx, (C.s - 2*q)*sy);
     else {
-      g.fillStyle = "#3a2c1e"; g.fillRect((C.x + p)*sx, (C.y + p)*sy, (C.s - 2*p)*sx, (C.s - 2*p)*sy);
+      g.fillStyle = "#3a2c1e"; g.fillRect((C.x + q)*sx, (C.y + q)*sy, (C.s - 2*q)*sx, (C.s - 2*q)*sy);
       g.fillStyle = "#c9a15a"; g.beginPath(); g.ellipse((C.x + C.s/2)*sx, (C.y + C.s/2)*sy, C.s*0.30*sx, C.s*0.28*sy, 0, 0, Math.PI*2); g.fill();
     }
+    g.fillStyle = "rgba(8,6,10,0.45)"; g.fillRect(C.x*sx, C.y*sy, C.s*sx, C.s*sy);   // приглушено
   });
 }
 
