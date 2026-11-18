@@ -457,6 +457,7 @@ test('S5', 'a new gift of the same kind refills, not adds; after 7 evenings the 
   h.run('shelfGift("bananas")'); assert.equal(h.SHF().bananas, 2, 'one banana left + a new bunch = one full bunch');
   h.run('shelfGift("bananas")'); assert.equal(h.SHF().bananas, 2);
   h.run('shelfGift("jam")'); h.run('shelfGift("jam")'); assert.equal(h.SHF().jam, 3); assert.equal(h.SHF().jar, true);
+  h.frames(40);                                            // the gifts land on the shelf
   assert.deepEqual(h.shelfDrawn(), { bananas: 2, red: 19, glasses: 1, lids: 1 }, 'one bunch and one jar are drawn');
   assert.deepEqual(h.shev(), ['refill:bananas', 'refill:bananas', 'refill:jam', 'refill:jam']);
   // seven evenings in a row; script shortcut: every evening is written as finished with a nod and a crunch from Som (GST), her gifts go through shelfGift as in guestServe
@@ -465,6 +466,7 @@ test('S5', 'a new gift of the same kind refills, not adds; after 7 evenings the 
   for (let n = 1; n <= 7; n++) {
     light(g); g.frames(2);
     g.run(`for(const a of ["nod","crunch"]){GST.answers.push({ballNo:1,crisp:1,step:1,answer:a});GST.gifts.push(GUEST_GIFT[a]);shelfGift(GUEST_GIFT[a]);}`);
+    g.frames(40);              // the gifts land on the shelf
     g.run('SHF.empty=true;');   // the worst case: she has put an empty jar on the shelf and nobody put it away
     g.run('for(let i=0;i<3;i++) notebookSnap("counter"); EVE.ballsLeft=0; EVE.rotiDone=3; EVE.ball=false; eveLidEnd();'); g.frames(3);
     assert.equal(g.eve().over, true); assert.equal(g.SHF().n, n);
@@ -593,6 +595,30 @@ test('S8', 'without shelf.js the evening goes as in step 4 (bananas are not rati
   assert.match(html, new RegExp('stand\\.js\\?v=[^"]*b' + bn + '"'));
   assert.equal(h.run('loopErrs'), 0); assert.deepEqual(h.errors, []);
   return { summary: 'evening.js + guest.js + notebook.js + night.js alone: banana laid, save.shelf and n kept; BUILD ' + h0.run('BUILD').split('·').pop().trim() };
+});
+
+test('S9', 'the gift flies from Som to its shelf place in one straight move of 0.6 s and is saved at once — a reload mid-flight does not lose it', () => {
+  const h = shelf(); light(h);
+  onPan(h); arrive(h); finish(h); serve(h, h.gs().som);          // a short fry → nod → bananas
+  assert.equal(h.g().answers[0].answer, 'nod');
+  assert.equal(h.SHF().bananas, 2, 'the bunch is on the shelf at once (saved)');
+  const f = h.sh().flight;
+  assert.ok(f && f.gift === 'bananas' && f.dur === 0.6, 'the gift is flying');
+  assert.ok(f.t < f.dur, 'still on the way');
+  const S = h.J('shelfGeo(eveGeo())'), G = h.J('guestSlot(eveGeo())');
+  assert.ok(Math.hypot(f.from.x - (G.x0 + G.w / 2), f.from.y - (G.y0 + G.h * 0.6)) < 1e-6, 'starts at Som');
+  assert.ok(Math.hypot(f.to.x - S.bunch.x, f.to.y - S.bunch.y) < 1e-6, 'goes to the bunch place');
+  // a reload mid-flight: the gift is not lost, and after the reload the flight is over
+  const r = reloadS(h);
+  assert.equal(r.SHF().bananas, 2, 'the gift survives the reload');
+  assert.equal(r.sh().flight, null, 'after a reload the flight is over');
+  assert.equal(r.shelfDrawn().bananas, 2, 'and the bunch is drawn on the shelf');
+  // in h the flight finishes by itself: gone, the bunch sits on the shelf
+  sec(h, 0.5);
+  assert.equal(h.sh().flight, null, 'the flight is over after 0.6 s');
+  assert.equal(h.shelfDrawn().bananas, 2);
+  assert.equal(h.run('loopErrs'), 0); assert.deepEqual(h.errors, []);
+  return { summary: `gift flies ${f.dur} s from Som to the bunch place; saved at once, kept across a reload` };
 });
 
 const passed = results.filter(r => r.status === 'PASS').length;
