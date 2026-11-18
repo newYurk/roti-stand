@@ -427,6 +427,89 @@ test('D6', 'without night.js the evening is the one of step 3: the old closing l
   return { summary: 'evening.js + guest.js + notebook.js alone: old closing line, save.night kept' };
 });
 
+test('D7', 'the snapshot of a roti given to Som keeps her answer, and the mark under it is her answer face: nod (level mouth, head tilted), crunch (closed eyes, crumbs); an old snapshot without an answer keeps the old mark', () => {
+  const h = night(); light(h);
+  onPan(h); arrive(h); finish(h); serve(h, h.gs().som);          // short fry → nod
+  assert.deepEqual(h.g().answers.map(a => a.answer), ['nod']);
+  const snaps = h.NB().evenings.at(-1).snaps;
+  assert.equal(snaps[0].to, 'som'); assert.equal(snaps[0].answer, 'nod', 'the snapshot keeps the answer');
+  // the mark under a Som snapshot draws her answer face, the old mark has no features
+  const mark = ans => h.J(`(()=>{const E=[],R=[],S=[],k={ellipse:ctx.ellipse,stroke:ctx.stroke,rotate:ctx.rotate,fillRect:ctx.fillRect};
+    ctx.ellipse=(x,y,rx,ry)=>{E.push({f:ctx.fillStyle,x,y,rx,ry})};ctx.rotate=a=>R.push(a);ctx.stroke=()=>S.push(1);
+    try{nbMark(ctx,1,1,"som",100,100,1,${ans === null ? 'null' : JSON.stringify(ans)})}finally{Object.assign(ctx,k)}return {E,R,S}})()`);
+  const mNod = mark('nod');
+  assert.deepEqual(mNod.R, [0.16], 'the nod head is tilted');
+  assert.equal(mNod.E.filter(e => e.f === '#1d150e' && e.rx < 1.4).length, 2, 'two open eyes');
+  assert.equal(mNod.S.length, 3, 'two earrings + one level mouth');
+  const mCrunch = mark('crunch');
+  assert.deepEqual(mCrunch.R, [], 'no tilt on the crunch');
+  assert.equal(mCrunch.E.filter(e => e.f === '#f0c674').length, 6, 'crumbs');
+  assert.equal(mCrunch.E.filter(e => e.f === '#1d150e').length, 0, 'no open eyes — the eyes are closed');
+  assert.equal(mCrunch.S.length, 5, 'two earrings + two closed eyes + a smile');
+  const mOld = mark(null);
+  assert.deepEqual(mOld.R, [], 'the old mark is not tilted');
+  assert.equal(mOld.E.filter(e => e.f === '#f0c674').length, 0);
+  assert.equal(mOld.E.filter(e => e.f === '#1d150e').length, 0, 'the old mark has no face features');
+  assert.equal(mOld.S.length, 2, 'only the earrings');
+  const r = reloadD(h);
+  assert.equal(r.NB().evenings.at(-1).snaps[0].answer, 'nod', 'the answer survives a reload');
+  assert.equal(h.run('loopErrs'), 0); assert.deepEqual(h.errors, []);
+  return { summary: `answer kept on the snapshot: ${snaps[0].answer}; nod: tilt + open eyes + level mouth, crunch: crumbs + closed eyes, old: neutral` };
+});
+
+// ── night with shelf.js (for the yesterday row, step 5): shelf.js loads last, after night.js ──
+const shelfScript = { file: path.join(path.dirname(H.sourcePath), 'shelf.js'), src: fs.readFileSync(path.join(path.dirname(H.sourcePath), 'shelf.js'), 'utf8') };
+function nightShelf(opts = {}) {
+  const h = night(opts);
+  vm.runInContext(shelfScript.src, h.context, { filename: shelfScript.file, timeout: 10000 });
+  return h;
+}
+
+test('D8', 'the night frame of the second evening shows yesterday as a separate row below today, the same size, dimmed and without marks', () => {
+  const snap = (to, k) => ({ to, img: null, crisp: 1, step: 1, ts: `2026-11-17T12:0${k}:00.000Z` });
+  const store = [['roti_evening', JSON.stringify({ v: 1, lamp: false, ballsLeft: 0, rotiDone: 3, lid: true, over: true, ball: false, n: 2,
+    guest: { v: 1, here: false, gone: true, knocked: true, answers: [], gifts: [], taken: 0, events: [] },
+    notebook: { v: 1, cur: true, peeked: true, evenings: [
+      { ts: '2026-11-16T12:00:00.000Z', n: 1, snaps: ['som', 'som', 'dog'].map((to, k) => snap(to, k)) },
+      { ts: '2026-11-17T12:00:00.000Z', n: 2, snaps: ['som', 'dog', 'counter'].map((to, k) => snap(to, k)) } ], events: [] },
+    night: { v: 1, dog: 0, shown: true, events: [] },
+    shelf: { v: 1, n: 2, bananas: 0, jam: 0, jar: false, empty: false, banBall: 0, jamBall: 0, som: { jar: false, early: false }, jarIn: null, begun: true, events: [] } })]];
+  for (const [w, hh] of [[390, 844], [375, 667]]) {
+    const h = nightShelf({ storage: store, w, hh }); h.frames(3);
+    const N = h.ns();
+    assert.equal(N.frame, true); assert.equal(N.cards.length, 3); assert.equal(N.past.length, 3, 'three yesterday cards');
+    assert.ok(N.past.every((p, i) => Math.abs(p.s - N.cards[i].s) < 1e-6), `yesterday is the same size (${N.past[0].s.toFixed(0)} = ${N.cards[0].s.toFixed(0)} px on ${w}×${hh})`);
+    assert.ok(N.past.every((p, i) => Math.abs(p.x - N.cards[i].x) < 1e-6), 'the same columns as today');
+    assert.ok(N.past[0].y > N.cards[0].markY, 'yesterday is a row below today');
+    const cy0 = h.J('(()=>{const G=eveGeo(),r=cv.getBoundingClientRect();return r.top+G.counter.y0*r.height/cv.height})()');
+    assert.ok(N.past[2].y + N.past[2].s <= cy0, 'above the counter');
+    // marks for today only; yesterday cards carry a dim overlay
+    const cloth = h.drawn('nightDraw(ctx,1,1,eveGeo());').filter(e => e.fill === '#8a4b3c').length;
+    assert.equal(cloth, 1, 'one Som mark — today\'s; yesterday has no marks');
+    const over = h.J('(()=>{const out=[],k=ctx.fillRect;ctx.fillRect=(x,y,w,h)=>{out.push({f:ctx.fillStyle,x,y,w,h})};try{nightDraw(ctx,1,1,eveGeo())}finally{ctx.fillRect=k}return out.filter(r=>r.f==="rgba(8,6,10,0.45)")})()');
+    assert.equal(over.length, 3, 'three dim overlays, one per yesterday card');
+    assert.deepEqual(h.errors, []);
+  }
+  return { summary: 'yesterday: a dimmed row below today, same size, no marks' };
+});
+
+test('D9', 'after the night the new evening starts with an empty counter, while the snapshot of a counter roti keeps its stand mark', () => {
+  const h = night({ storage: saveAt(2) });           // third ball in work, two soft roti given to Som
+  onPan(h); finish(h); serve(h);                      // the third roti goes to the counter
+  assert.equal(h.onCounter(), 1, 'the third roti lies on the counter');
+  endEvening(h); h.frames(3);
+  assert.deepEqual(h.ns().cards.map(c => c.to), ['som', 'som', 'counter']);
+  assert.equal(h.onCounter(), 1, 'at night the counter still shows it');
+  // the snapshot of a counter roti keeps the stand mark
+  const m = h.J('(()=>{const out=[],k=ctx.fillRect;ctx.fillRect=(x,y,w,h)=>out.push({f:ctx.fillStyle,x,y,w,h});try{nbMark(ctx,1,1,"counter",100,100,1)}finally{ctx.fillRect=k}return out})()');
+  assert.ok(m.some(r => r.f === '#3a2c1e' && r.w >= 20), 'the stand mark is drawn under the snapshot');
+  // the lump starts the new evening: the counter is empty
+  tap(h, h.spots().lump); h.frames(3);
+  assert.equal(h.eve().over, false); assert.equal(h.onCounter(), 0, 'the new evening starts with an empty counter');
+  assert.equal(h.run('loopErrs'), 0); assert.deepEqual(h.errors, []);
+  return { summary: 'counter: 1 at night → 0 in the new evening; the stand mark stays on the snapshot' };
+});
+
 const passed = results.filter(r => r.status === 'PASS').length;
 console.log(`\nnight: ${passed}/${results.length} passed`);
 try {
