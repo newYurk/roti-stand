@@ -165,7 +165,7 @@ const fryNow = h => h.J('{t:dish.panTime,cook:meanCook(),dry:meanDry(),crisp:dis
 // frames until cond (a stand expression) is true; returns the frames spent
 function until(h, cond, max = 60 * 400) { let n = 0; while (!h.run(cond) && n < max) { h.frames(1); n++; } assert.ok(h.run(cond), `waited ${n} frames for ${cond}`); return n; }
 function onPan(h) { stretched(h); toPan(h); }
-function arrive(h) { until(h, 'GST.here'); until(h, 'guestPic()===2'); until(h, 'guestPic()===1'); }
+function arrive(h) { until(h, 'GST.here'); until(h, 'guestPic()===2'); until(h, 'gKnock<=0'); }
 // Changed with the review fixes of the frying batch (17.11): an open sheet no longer browns (OPEN_COOK_CAP, below
 // «бледное» — see frying-regression F1), so «the sheet lay open while she came, then fold and serve» is a RAW roti
 // now and she refuses it. Where a test only needs a roti she takes, the folded envelope fries on until its steel
@@ -235,7 +235,7 @@ test('G2', 'a knock on every new frying step (hint, 0.8 s); no hint twice for on
   while (h.run('guestCookStep()') < 3 && frames < 60 * 240) {
     h.frames(1); frames++;
     const ev = h.grows();
-    if (ev.length > last) { last = ev.length; const r = ev.at(-1); seen.push(`${r.event}@${r.bottom}`); hintFrames = 0; while (h.pic() === 2) { h.frames(1); frames++; hintFrames++; } lasts.push({ event: r.event, s: hintFrames / 60 }); }
+    if (ev.length > last) { last = ev.length; const r = ev.at(-1); seen.push(`${r.event}@${r.bottom}`); hintFrames = 0; while (h.run('gKnock>0')) { h.frames(1); frames++; hintFrames++; } lasts.push({ event: r.event, s: hintFrames / 60 }); }
   }
   sec(h, 2);
   { const ev = h.grows(); if (ev.length > last) { last = ev.length; seen.push(`${ev.at(-1).event}@${ev.at(-1).bottom}`); } }
@@ -327,7 +327,7 @@ test('G4', 'the answer follows the frying ladder and BOTH sides: one side «пр
     if (fry !== 'short') {
       until(h, 'guestCookStep()>=2'); h.frames(2);
       assert.equal(h.grows().at(-1).event, 'hint'); assert.equal(h.grows().at(-1).bottom, 'приготовленное', 'her knock at this step is the «ready» sign');
-      until(h, 'guestPic()===1');
+      until(h, 'gKnock<=0');
     }
     if (fry.startsWith('flip')) {
       const t0 = h.run('dish.panTime'), n0 = h.gev().length;
@@ -335,7 +335,7 @@ test('G4', 'the answer follows the frying ladder and BOTH sides: one side «пр
       until(h, `guestCookStep()>=${fry === 'flip' ? 2 : 1}`); h.frames(2); flipS = h.run('dish.panTime') - t0;
       assert.equal(h.grows().at(-1).event, 'hint', 'she knocks at the steps of the second side too');
       assert.equal(h.gev().length, n0 + (fry === 'flip' ? 2 : 1));
-      until(h, 'guestPic()===1');
+      until(h, 'gKnock<=0');
     }
     if (h.run('dish.folds') < 4) { envelope(h); until(h, PALE); }   // 'short': folded late, taken off as soon as the steel side is «бледное»
     const sides = h.J('guestSides()');
@@ -402,7 +402,7 @@ test('G5', 'second ball — hers again, hints go on; after the second answer she
   h.run('COOK_RATE=FRY_RATES[40]'); const n0 = h.gev().length;   // script shortcut: fast frying preset
   until(h, 'guestCookStep()>=1'); h.frames(2);
   assert.equal(h.grows().at(-1).event, 'hint'); assert.equal(h.grows().at(-1).ballNo, 2, 'she knocks on the second ball too');
-  assert.equal(h.gev().length, n0 + 1); until(h, 'guestPic()===1');
+  assert.equal(h.gev().length, n0 + 1); until(h, 'gKnock<=0');
   cookSides(h, 0.3, 0.1);   // script: the steel side «приготовленное», the top «бледное» — with the crisp below it is a crunch
   finish(h, 7.2); serve(h, h.gs().som);
   assert.deepEqual(h.g().answers.map(a => a.answer), ['nod', 'crunch'], 'the second answer is honest too');
@@ -445,7 +445,7 @@ test('G6', 'the lid pause freezes her: no knock under the lid, the knock comes a
   assert.ok(n / 60 < 1.1, `the knock comes after the rest of its wait (${(n / 60).toFixed(2)} s)`);
   assert.deepEqual(h.gev(), ['arrive', 'knock']);
   // a hint under the lid waits too
-  until(h, 'guestPic()===1');
+  until(h, 'gKnock<=0');
   h.visibility(true); h.visibility(false);
   h.run('for(const t of dish.thermal) if(t){t.dry[0]=t.dry[1]=1;t.cook[0]=t.cook[1]=0.3;}');   // script: the roti is past «приготовленное»
   sec(h, 5); assert.deepEqual(h.gev(), ['arrive', 'knock'], 'no hint under the lid');
@@ -458,7 +458,7 @@ test('G6', 'the lid pause freezes her: no knock under the lid, the knock comes a
   assert.equal(h.run('eveningLive("")'), 'крышка — сдвинь её в сторону', 'one short lid line, with her or without (build 80)');
   sec(h, 4); assert.equal(h.run('gKnock'), age, 'the knock is frozen, not lost');
   off(); h.frames(1); assert.equal(h.pic(), 2, 'the knock goes on when the lid is off');
-  until(h, 'guestPic()===1');
+  until(h, 'gKnock<=0');
   // a reload between her coming and the first knock, and in the middle of it: the main knock is not eaten
   {
     const a = guest(); light(a); onPan(a); until(a, 'GST.here'); sec(a, 0.3);
@@ -470,7 +470,7 @@ test('G6', 'the lid pause freezes her: no knock under the lid, the knock comes a
     assert.ok(Math.abs(w - 1.5) < 0.1, `the main knock comes 1.5 s into the next frying (${w.toFixed(2)} s)`);
     assert.deepEqual(r0.gev(), ['arrive', 'knock']);
     sec(r0, 0.5); assert.equal(r0.g().knocked, false, 'not counted until it is over');
-    const r1 = reloadG(r0); onPan(r1); until(r1, 'guestPic()===2'); until(r1, 'guestPic()===1');
+    const r1 = reloadG(r0); onPan(r1); until(r1, 'guestPic()===2'); until(r1, 'gKnock<=0');
     assert.deepEqual(r1.gev(), ['arrive', 'knock', 'knock'], 'a knock cut by a reload is knocked again');
     assert.equal(r1.g().knocked, true); assert.equal(r1.saved().guest.knocked, true);
     const r3 = reloadG(r1); onPan(r3); sec(r3, 4);
@@ -528,7 +528,7 @@ test('G8', 'layout at 390×844 and 375×667: her picture is above the counter, b
     assert.ok(G.sit > 6 && G.sit < G.slot.h * 0.1, 'sitting is a small part of the picture, not a fixed 20 px');
     onPan(h); until(h, 'GST.here'); h.tick(2, 1 / 60, true);
     until(h, 'guestPic()===2'); h.tick(2, 1 / 60, true);
-    until(h, 'guestPic()===1'); finish(h, 0); serve(h, h.gs().som); assert.equal(h.pic(), 3); h.tick(2, 1 / 60, true);
+    until(h, 'gKnock<=0'); finish(h, 0); serve(h, h.gs().som); assert.equal(h.pic(), 3); h.tick(2, 1 / 60, true);
     sec(h, 3); assert.equal(h.gs().low, true, 'she sits'); h.tick(2, 1 / 60, true);
     nextBall(h); onPan(h); cookAll(h, 0.3); finish(h, 8); serve(h, h.gs().som); assert.equal(h.pic(), 4); h.tick(2, 1 / 60, true);   // script: «приготовленное» on both sides
     assert.equal(h.gs().low, false, 'the second answer is shown at full height, not behind the counter');
@@ -538,25 +538,28 @@ test('G8', 'layout at 390×844 and 375×667: her picture is above the counter, b
   return { summary: out.join(' · ') };
 });
 
-test('G9', 'build 80 — the knock is seen at the tava: she leans, points with a short arm from her side (build 89 r2) and the marks flash there (build 89: at the edge of the roti nearest to her while it is not flipped, not at the far rim); it repeats after 8 s of waiting over a FOLDED roti (never over an open sheet) until the roti is flipped or taken off; her eyes follow the roti and the folding finger; a roti carried past her onto the counter turns her head', () => {
+test('G9', 'build 80 — the knock is seen at the tava: she leans, knocks with her fist on the near edge of the counter (build 95; build 89 r2 pointed a finger) and the marks flash at the roti (build 89: at the edge of the roti nearest to her while it is not flipped, not at the far rim); over a FOLDED roti (never over an open sheet) it repeats after 3.5 s and between the knocks she stays leaning with the fist on the counter, until the VISIBLE side is cooked (build 95: a pale side flipped up — she knocks on) or the roti is taken off; her eyes follow the roti and the folding finger; a roti carried past her onto the counter turns her head', () => {
   const h = guest(); light(h); onPan(h); until(h, 'GST.here');
   // the main knock: arm at the rim of the tava, marks only around the two hits, she leans
   until(h, 'guestPic()===2');
   const S = h.spots(); let hits = 0, marks = 0, frames = 0, markNoHit = 0, rim = null, lean = 0, reachHit = 0, reachRest = 0;
-  while (h.pic() === 2) {
+  while (h.run('gKnock>0')) {
     const G = h.gs(); assert.ok(G.arm, 'the arm is out while she knocks'); rim = G.arm.at; lean = G.lean;
     if (G.arm.hit) { hits++; assert.ok(G.knock > 0, 'the tava jumps on the hit'); assert.ok(G.arm.marks, 'marks on every hit'); }
     if (G.arm.marks) marks++; if (G.arm.marks && !G.arm.hit) markNoHit++;
-    // build 89 round 2: she points from her side — a short arm (about her head), aimed at the marks, the finger jabs on the hit
-    const A = G.arm, toAt = Math.hypot(A.at.x - A.root.x, A.at.y - A.root.y), aim = ((A.tip.x - A.root.x) * (A.at.x - A.root.x) + (A.tip.y - A.root.y) * (A.at.y - A.root.y)) / (A.reach * toAt);
-    assert.ok(A.reach <= A.head * 1.15 && A.reach < toAt * 0.6, `a short arm from her side (${A.reach} px, head ${A.head}, to the spot ${toAt.toFixed(0)})`);
-    assert.ok(aim > 0.999 && A.root.y <= S.counterBottom, `the finger points at the spot from her side (aim ${aim.toFixed(4)})`);
+    // Changed in build 95 (review 18.11 p. 2): a finger pointing down read «put it here» — she knocks with her FIST on the edge of
+    // the counter nearest to the tava: the arm goes from her side down to that edge (not to the roti), the fist lands on the
+    // counter, and on the hit it is at the edge (lower half of the counter); the marks are still at the roti (above).
+    const A = G.arm, toEdge = Math.hypot(A.edge.x - A.root.x, A.edge.y - A.root.y), aim = ((A.tip.x - A.root.x) * (A.edge.x - A.root.x) + (A.tip.y - A.root.y) * (A.edge.y - A.root.y)) / (A.reach * toEdge);
+    assert.ok(aim > 0.999 && A.root.y <= S.counterBottom, `the arm goes from her side to the near edge of the counter (aim ${aim.toFixed(4)})`);
+    assert.ok(A.tip.y > G.counterTop && A.tip.y <= S.counterBottom + 0.5, `the fist is on the counter (${A.tip.y.toFixed(0)} in ${G.counterTop.toFixed(0)}…${S.counterBottom.toFixed(0)})`);
+    if (A.hit) assert.ok(A.tip.y > (G.counterTop + S.counterBottom) / 2, `on the hit the fist is at the edge nearest the tava (${A.tip.y.toFixed(0)})`);
     if (A.hit) reachHit = Math.max(reachHit, A.reach); else reachRest = Math.max(reachRest, A.reach);
     h.frames(1); frames++;
   }
   assert.ok(rim.y > S.counterBottom + 4 && rim.y < S.pan.y && Math.abs(rim.x - S.pan.x) <= S.panR, `the marks are on the tava, below the counter, on her side (${rim.x.toFixed(0)},${rim.y.toFixed(0)}; counter bottom ${S.counterBottom.toFixed(0)}, tava ${S.pan.x.toFixed(0)},${S.pan.y.toFixed(0)})`);
   assert.ok(hits >= 12 && marks > hits && markNoHit >= 12, `marks outlast the hits (${hits} hit frames, ${marks} mark frames)`);
-  assert.ok(reachHit > reachRest * 1.08, `the finger jabs on the hit (${reachRest} → ${reachHit} px)`);
+  assert.ok(reachHit > reachRest * 1.08, `the fist comes down on the hit, lifted between the two hits (${reachRest} → ${reachHit} px)`);
   assert.ok(lean > 5, `she leans to the tava while knocking (${lean} px)`); assert.equal(h.gs().arm, null, 'no arm between knocks'); assert.equal(h.gs().lean, 0);
   h.tick(2, 1 / 60, true); assert.equal(h.run('loopErrs'), 0);
   // Changed in the review of build 80: an OPEN sheet cannot be flipped, so she does not repeat the knock over it
@@ -569,24 +572,33 @@ test('G9', 'build 80 — the knock is seen at the tava: she leans, points with a
     h.touch('start', 't1', e[0].x, e[0].y); h.frames(6);
     for (let i = 1; i <= 12; i++) { h.touch('move', 't1', e[0].x + (e[1].x - e[0].x) * i / 14, e[0].y); h.frames(1); if (i === 2) { const at = h.gs().gaze; assert.ok(Math.abs(at.x - rest.x) > 0.1, `folding: her eyes go to the finger at the edge (gaze x ${rest.x} → ${at.x})`); } }
     h.touch('end', 't1', e[0].x + (e[1].x - e[0].x) * 12 / 14, e[0].y); h.frames(30); assert.equal(h.run('envelopeDone()'), true); }
-  // folded, not flipped: the knock repeats after 8 s of waiting, again and again (a hint of a new step restarts the wait)
+  // folded, not flipped: the knock repeats after 3.5 s of waiting (build 95; was 8 s), again and again (a hint of a new step restarts the wait)
   const n1a = h.gev().length; let t = 0; const at = [];
   while (at.length < 2 && t < 60 * 60) { h.frames(1); t++; const ev = h.gev().slice(n1a); if (ev.filter(e => e === 'again').length > at.length) at.push(t / 60); }
   { const ev = h.gev().slice(n1a); assert.ok(ev.every(e => e === 'again' || e === 'hint'), ev.join(' ')); assert.equal(ev.filter(e => e === 'again').length, 2);
     const i0 = ev.indexOf('again'), between = ev.slice(i0 + 1, ev.lastIndexOf('again')).length;
-    assert.ok(at[0] >= 8 - 0.1, `not earlier than 8 s after the fold (${at[0].toFixed(2)})`);
-    if (!between) assert.ok(Math.abs(at[1] - at[0] - 9.2) < 0.1, `every 8 s + 1.2 s of knocking (${at.map(x => x.toFixed(2)).join(', ')})`); }
-  until(h, 'guestPic()===1'); h.tick(2, 1 / 60, true);
+    assert.ok(at[0] >= 3.5 - 0.1, `not earlier than 3.5 s after the fold (${at[0].toFixed(2)})`);
+    if (!between) assert.ok(Math.abs(at[1] - at[0] - 4.7) < 0.1, `every 3.5 s + 1.2 s of knocking (${at.map(x => x.toFixed(2)).join(', ')})`); }
+  until(h, 'gKnock<=0'); h.tick(2, 1 / 60, true);
+  // build 95: between the knocks she does not calm down — still picture 2, leaning, the fist resting on the counter, no hit
+  for (let i = 0; i < 60; i++) { const G = h.gs(); if (h.run('gKnock>0')) break;
+    assert.equal(G.pic, 2, 'between the knocks: still the knocking picture'); assert.ok(G.urging && G.arm && !G.arm.hit && !G.arm.marks && G.knock === 0, 'the fist rests, the tava is still');
+    assert.ok(G.arm.reach >= G.arm.full - 0.1, 'the fist lies on the counter edge'); h.frames(1); }
   // eyes: down at the tava while the roti lies there
   const g0 = h.gs().gaze; assert.ok(g0.y > 0.9 && Math.abs(g0.x) < 0.35, `she looks down at the roti on the tava (${g0.x},${g0.y})`);
-  // flipped: no more repeats (the hints of the new side go on)
+  // Changed in build 95: the knock is held by the VISIBLE side, not by the flip. Flipped with a pale side up (0.2) — she knocks on;
+  // the visible side cooked (0.4, «приготовленное») — no more repeats and she sits back (picture 1)
   cookSides(h, 0.2, 0.02); flick(h, 700); assert.equal(h.run('dish.flips'), 1);
+  { const n = h.gev().length; sec(h, 6); assert.ok(h.gev().slice(n).includes('again'), `flipped pale side up: she still knocks (${h.gev().slice(n).join(' ')})`); }
+  until(h, 'gKnock<=0');
+  h.run(`for(let i=0;i<dish.thermal.length;i++){const t=dish.thermal[i];if(!t)continue;for(let s=0;s<2;s++) if(dish.topWeights[i][s]) t.cook[s]=0.4;}`);   // script: the visible side cooked
+  h.frames(2); assert.equal(h.run('guestUrging()'), false); assert.equal(h.pic(), 1, 'the visible side cooked: she stops and sits back');
   // in the air over the tava (script shortcut: startFlip, the same entry the flick uses): her eyes and head go up after it
   { assert.equal(h.run('startFlip({x:1,y:0},{x:0,y:0})'), true); h.frames(13); const up = h.gs().gaze, k = h.run('guestFlipUp()');
     assert.ok(k > 0.8 && up.y < g0.y - 0.15, `the roti in the air: she looks up after it (gaze y ${g0.y} → ${up.y}, head up ${k.toFixed(2)})`);
     h.tick(2, 1 / 60, true); h.frames(40); assert.equal(h.run('dish.flips'), 2); assert.equal(h.run('guestFlipUp()'), 0); flick(h, 700); assert.equal(h.run('dish.flips'), 3); }
   const n1 = h.gev().length; sec(h, 20);
-  assert.ok(!h.gev().slice(n1).includes('again'), `no repeat after the flip: ${h.gev().slice(n1).join(' ')}`);
+  assert.ok(!h.gev().slice(n1).includes('again'), `no repeat once the visible side is cooked: ${h.gev().slice(n1).join(' ')}`);
   // taken off the tava: nothing; the eyes go with the roti in the hand, and on the counter she turns her head after it
   const b = guest(); light(b); onPan(b); arrive(b); finish(b);
   const n2 = b.gev().length; sec(b, 12); assert.deepEqual(b.gev().slice(n2), [], 'a roti on the table: she does not knock');
@@ -615,7 +627,7 @@ test('G9', 'build 80 — the knock is seen at the tava: she leans, points with a
 const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
 function knockFrames(h) {                    // the frames of one knock: the arm and the marks
   until(h, 'guestPic()===2'); const out = [];
-  while (h.pic() === 2) { const G = h.gs(); if (G.arm) out.push(G.arm); h.frames(1); }
+  while (h.run('gKnock>0')) { const G = h.gs(); if (G.arm) out.push(G.arm); h.frames(1); }
   return out;
 }
 test('G10', 'build 89 — the knock marks lie at the palest point of the roti edge (nearer to it than to the rim; not flipped — the edge nearest to her) and her arm is out; raw visible side taken to the table → one «no» (0.6 s, two shakes, then she looks at the tava); cooked → none; a carry back to the tava leaves it on the table (build 88), no second «no»; serving and the answer unchanged', () => {

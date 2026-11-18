@@ -11,7 +11,7 @@
 // до 400%+ и лист «рвётся» в середине от любого движения. Замер это обнаружил сразу.
 // Число узлов сохранено (1 060 после обрезки по кругу; прежняя оценка «~1150» была на глаз,
 // пересчитано 07.09.2026), однородность рёбер восстановлена.
-const BUILD = "2026-11-18 · строки не спорят с Сом, уголок показывает изнанку, конверт тоньше; еда; доводка · 93";
+const BUILD = "2026-11-18 · Сом стучит костяшками, маргарин виден, уголок без кольца, сгущёнка щедрее · 95";
 const GRID = 38;                   // 38x38, в круг попадает 1 060 узлов (посчитано, не оценка)
 let SUBSTEPS = 8;                  // T2: 8–10 подшагов, 1 итерация
 let DAMP = 0.986;
@@ -846,6 +846,7 @@ function updatePanPress(dt){
   const g=dishGesture;
   if(g && g.zone==="edge" && !g.press && !g.moved && g.onMat && performance.now()-g.t0>=PRESS_EDGE_HOLD_MS){
     g.press=adoptPress(g.start); g.latched=true;
+    if(cornerLift) g.press.lift=true;          // сборка 95: этим пальцем поднят угол — пятна прижима не рисуем (drawPressDents)
   }
   for(const p of panPress) p.level=p.held ? Math.min(1,p.level+dt/PRESS_RISE) : p.level*Math.exp(-dt/PRESS_DECAY);
   if(panPress.some(p=>!p.held && p.level<=.01)) panPress=panPress.filter(p=>p.held || p.level>.01);
@@ -885,7 +886,27 @@ const BUTTER_MIN = 0.3, BUTTER_PER_STAMP = 0.0016;  // мазок вдоль с�
 // Доля куска: 1 — целый. Кусок бесконечный (ресурсом он не стал): дотаял до BUTTER_MIN — после мазка рядом кладут
 // новый (butterRenew), без строки и звука. Сборка 92: раньше огрызок BUTTER_MIN так и лежал до конца вечера.
 let butterLeft = 1;
-function butterRenew(){ if(butterLeft<=BUTTER_MIN+1e-9) butterLeft=1; }
+// Сборка 95 (ревью 18.11, п. 4): кусок находится сам — касание оставляет на нём выемку от пальца (butterDents,
+// доли длины и ширины куска на его верхней грани, последние BUTTER_DENTS) и отщипывает BUTTER_PER_TOUCH: брусок
+// мнётся и тает к концу вечера и без мазков. Новый кусок (butterRenew, новый вечер) — целый, без выемок.
+const BUTTER_PER_TOUCH = 0.025, BUTTER_DENTS = 7;
+let butterDents = [];
+function butterRenew(){ if(butterLeft<=BUTTER_MIN+1e-9){ butterLeft=1; butterDents=[]; } }
+// Касание куска (клиентские px): где на верхней грани — перебором сетки по нарисованному бруску (сейчашнего размера).
+function butterTouch(client){
+  if(client && typeof cv!=="undefined" && cv.getBoundingClientRect){
+    const r=cv.getBoundingClientRect(), k=cv.width/(r.width||1), c={x:(client.x-r.left)*k,y:(client.y-r.top)*k};
+    const b=butterSpot(), tx=-Math.sin(b.a), ty=Math.cos(b.a), nx=Math.cos(b.a), ny=Math.sin(b.a);
+    const left=Math.sqrt(butterLeft), L=PAN_R*.09*left, W=PAN_R*.06*left, H=PAN_R*.035*TILT*butterLeft;
+    let best=null, bd=Infinity;
+    for(let i=-6;i<=6;i++) for(let j=-6;j<=6;j++){
+      const u=i/6*.75, v=j/6*.7, X=b.x+tx*u*L+nx*v*W, Y=b.y+ty*u*L+ny*v*W, d=Math.hypot(prX(X,Y)-c.x,prY(X,Y)-H-c.y);
+      if(d<bd){ bd=d; best={u,v}; }
+    }
+    if(best){ butterDents.push(best); if(butterDents.length>BUTTER_DENTS) butterDents.shift(); }
+  }
+  butterLeft=Math.max(BUTTER_MIN,butterLeft-BUTTER_PER_TOUCH);
+}
 let fatGesture = null, fatUnder = 0, dishCrisp = 0, smearSoundAt = 0;
 let fatCanvas = null, fatCtx = null, fatDrawnAt = 0, fatDirty = false;
 function butterSpot(){
@@ -985,7 +1006,7 @@ function smearStroke(a,b){
 let fatTmp = null;
 function updateFat(dt){
   fatUnder=0;
-  if(typeof EVE!=="undefined" && !EVE.lamp && !EVE.over){ butterLeft=1; learnReset(); }   // новый вечер — новый кусок, и жесты подсказываются заново
+  if(typeof EVE!=="undefined" && !EVE.lamp && !EVE.over){ butterLeft=1; butterDents=[]; learnReset(); }   // новый вечер — новый кусок, и жесты подсказываются заново
   if(!fatMap) return;
   // Лужица расходится: шаг диффузии по четырём соседям, за борт плиты жир не уходит.
   const N=FAT_N, kd=Math.min(.2,FAT_SPREAD*dt);
@@ -3569,13 +3590,22 @@ function cornerFaceAt(q,top){
 // (поздно), горелое — почти чёрный. q оставлен для совместимости вызовов.
 const CORNER_UNDER = [[238,226,192],[236,218,170],[224,166,72],[150,90,40],[62,38,22]];
 function cornerUnderStep(){ return fryStep(dishSideMean("cook","contactWeights")); }
-function cornerUnderColor(q){ return CORNER_UNDER[cornerUnderStep()].slice(); }
+// Сборка 95 (ревью 18.11, п. 3): цвет изнанки — ровно тот, каким эта сторона будет сверху после переворота
+// (кадр h), чтобы игрок учился по нему: нижняя грань под серединой шапки, её сторона на стали, посчитанная
+// как перевёрнутая грань (crustFace той же грани с turned наоборот: фон, кайма у края), плюс средняя доля
+// пятен корки (как их кладёт crustMix). Палитра CORNER_UNDER осталась запасной — когда грани под углом нет.
+function cornerUnderColor(q){
+  const f=q ? cornerFaceAt(q,false) : null;
+  if(!f || !dish.thermal || !dish.thermal[f.source]) return CORNER_UNDER[cornerUnderStep()].slice();
+  const P=crustFace({...f,turned:!f.turned}), cov=spotCoverAt(P.c,P.edge), m=cov ? cov*spotStrength(P.c,P.edge) : 0;
+  return P.ground.map((v,i)=>Math.round(v*(1-m*(1-SPOT_TINT[i]))));
+}
 function cornerTopColor(q){ const f=cornerFaceAt(q,true); return f ? dishCrustColor(f) : [227,213,178]; }
 // Угол не поворачивается плоской доской на петле, а сворачивается завитком: точка на расстоянии s от петли
 // уходит по дуге радиуса r = reach/θ на угол s/r — у петли лист почти лежит, кончик поднят на θ и
 // смотрит низом. Рисуется полосами поперёк завитка (снизу к кончику), верх и низ — своими цветами,
 // свет по наклону. Под углом на таве — мягкая тень (shadowBlur), сталь в следе шапки темнее.
-const CORNER_CURL_STRIPS = 12, CORNER_SHADOW_A = 0.38, CORNER_CURL_ARC = 0.4;   // сила тени под завитком у петли; доля вылета, которая гнётся
+const CORNER_CURL_STRIPS = 12, CORNER_SHADOW_A = 0.38, CORNER_CURL_ARC = 0.4, CORNER_SHADOW_W = 0.22;   // сила тени под завитком у петли; доля вылета, которая гнётся
 function drawCornerLift(g,screen,lifted,cap,e,sx,sy){
   const {P,hinge,m,reach,mid}=cap, th=e*CORNER_LIFT_DEG*Math.PI/180; if(th<1e-3) return;
   // Сборка 91 (ревью 18.11, п. 2): гнётся только полоса у петли (CORNER_CURL_ARC вылета), дальше угол лежит
@@ -3599,8 +3629,10 @@ function drawCornerLift(g,screen,lifted,cap,e,sx,sy){
   // конец градиента — проекция кончика угла на ось m в экране
   const ux=a1.x-a0.x, uy=a1.y-a0.y, uu=ux*ux+uy*uy||1, k=((at.x-a0.x)*ux+(at.y-a0.y)*uy)/uu;
   const OFF=1e4, M=g.getTransform(), gr=g.createLinearGradient(a0.x+OFF,a0.y,a0.x+OFF+ux*k,a0.y+uy*k);
-  gr.addColorStop(0,"rgba(0,0,0,1)"); gr.addColorStop(.55,"rgba(0,0,0,.35)"); gr.addColorStop(1,"rgba(0,0,0,0)");
-  g.save(); g.shadowColor=`rgba(10,5,2,${(CORNER_SHADOW_A*e).toFixed(3)})`; g.shadowBlur=Math.max(2,6*sx*e);
+  // Сборка 95 (ревью 18.11, п. 3): тень — узкая полоса под самим загибом (CORNER_SHADOW_W вылета), без ореола
+  // по следу шапки: широкая размытая тень ложилась на сталь тёмным пятном и читалась пригаром.
+  gr.addColorStop(0,"rgba(0,0,0,1)"); gr.addColorStop(CORNER_SHADOW_W,"rgba(0,0,0,0)"); gr.addColorStop(1,"rgba(0,0,0,0)");
+  g.save(); g.shadowColor=`rgba(10,5,2,${(CORNER_SHADOW_A*e).toFixed(3)})`; g.shadowBlur=Math.max(1,2*sx*e);
   g.shadowOffsetX=-OFF*M.a; g.shadowOffsetY=-OFF*M.b; g.fillStyle=gr;
   path(S.map(q=>({x:q.x+OFF,y:q.y}))); g.fill(); g.restore();
   }
@@ -4103,9 +4135,15 @@ function tableLiftCanvas(){
   return C.R.lift/C.q/sy;
 }
 // Вмятина под пальцем: мягкое тёмное пятно на поверхности, глубже с силой прижима.
+// Сборка 95 (ревью 18.11, п. 3): пятно прижима — только на тесте (обрезано по оболочке роти: на стали тёмное
+// кольцо у края читалось пригаром) и не у касания, которое поднимает угол (p.lift — палец поддевает, а не жмёт;
+// в модели прижим тот же, меняется только картинка).
 function drawPressDents(g,screen,H,zk,pose,sx,sy){
-  for(const p of panPress){
-    if(!(p.level>.02)) continue;
+  const list=panPress.filter(p=>p.level>.02 && !p.lift), hull=dish && dish.hull;
+  if(!list.length) return;
+  g.save();
+  if(hull && hull.length>2){ g.beginPath(); hull.forEach((q,i)=>{ const c=screen(q); i ? g.lineTo(c.x,c.y) : g.moveTo(c.x,c.y); }); g.closePath(); g.clip(); }
+  for(const p of list){
     const c=screen(p), lift=H ? H.at(p)*zk : 0;
     const rx=Math.hypot(screen({x:p.x+PRESS_R,y:p.y}).x-c.x,screen({x:p.x+PRESS_R,y:p.y}).y-c.y);
     const ry=Math.hypot(screen({x:p.x,y:p.y+PRESS_R}).x-c.x,screen({x:p.x,y:p.y+PRESS_R}).y-c.y);
@@ -4114,6 +4152,7 @@ function drawPressDents(g,screen,H,zk,pose,sx,sy){
       g.beginPath(); g.ellipse(c.x,c.y-lift*(1-.25*p.level),rx*k,ry*k,0,0,Math.PI*2); g.fill();
     }
   }
+  g.restore();
 }
 // Бледная разметка конверта: середина листа в половину его размера — сюда кладётся начинка и сюда
 // ложатся кромки клапанов. Сторона, которая уже завёрнута, свою линию теряет; у готового конверта
@@ -6636,7 +6675,7 @@ function onDown(id, cx, cy, t){
   if(performance.now()<inputQuietUntil) return;
   // Кусок маргарина отвечает и на пустой таве (сборка 78): мазок по стали оставляет лужицу. В вечере —
   // при зажжённой лампе и снятой крышке, в том числе пока стол свободен (там рамка вечера забирает касания).
-  if(!dish && !fatGesture && action.pointerId===null && butterFree() && onButter(toLocal(cx,cy),{x:cx,y:cy})){ fatGesture={id,last:toLocal(cx,cy)}; return; }
+  if(!dish && !fatGesture && action.pointerId===null && butterFree() && onButter(toLocal(cx,cy),{x:cx,y:cy})){ fatGesture={id,last:toLocal(cx,cy)}; butterTouch({x:cx,y:cy}); return; }
   if(typeof eveningDown==="function" && eveningDown(id, cx, cy, t)) return;   // лампа, миска, крышка, радио; стол до лампы молчит
   // Нажатие сразу после поворота колесом фиксирует поворот и идёт дальше как обычный жест
   // (иначе первый рез или складка после прокрутки пропадали).
@@ -6659,7 +6698,7 @@ function onDown(id, cx, cy, t){
               logTwistTry(fatGesture ? "маргарин" : !can ? "нельзя: "+dishModeWord() : "не начался");
             }
             // Порядок попадания: кусок маргарина → лист → сталь.
-            if(!fatGesture && !dishGesture && dish.mode==="fold" && onButter(p,{x:cx,y:cy})){ fatGesture={id,last:p}; return; }
+            if(!fatGesture && !dishGesture && dish.mode==="fold" && onButter(p,{x:cx,y:cy})){ fatGesture={id,last:p}; butterTouch({x:cx,y:cy}); return; }
             if(fatGesture) return;
             beginDishGesture(id,dishInputLocal(cx,cy),{x:cx,y:cy},t); return; }
   if(action.pointerId !== null){
@@ -7641,6 +7680,14 @@ function drawButterBlock(g, sx, sy){
   g.fillStyle="#c9a64a"; poly(base,0);
   g.fillStyle="#e8cc72"; poly(base,H*sy);
   g.fillStyle="rgba(255,244,190,.5)"; poly([corner(-L*.7,-W*.6),corner(L*.2,-W*.6),corner(L*.2,-W*.1),corner(-L*.7,-W*.1)],H*sy);
+  // выемки от пальцев (сборка 95): впадина темнее грани, у дальнего края — светлый ободок, как вмятина в мягком
+  for(const d of butterDents){
+    const c=corner(d.u*L,d.v*W), e=corner(d.u*L+W*.42,d.v*W), f=corner(d.u*L,d.v*W+W*.42);
+    const rx=Math.max(1,Math.hypot(e.x-c.x,e.y-c.y)), ry=Math.max(1,Math.hypot(f.x-c.x,f.y-c.y)*.8), y=c.y-H*sy;
+    g.fillStyle="rgba(255,246,200,.75)"; g.beginPath(); g.ellipse(c.x,y+ry*.25,rx,ry,b.a,0,Math.PI*2); g.fill();
+    g.fillStyle="#b8933a"; g.beginPath(); g.ellipse(c.x,y,rx*.92,ry*.88,b.a,0,Math.PI*2); g.fill();
+    g.fillStyle="#d4b25a"; g.beginPath(); g.ellipse(c.x,y+ry*.22,rx*.7,ry*.55,b.a,0,Math.PI*2); g.fill();
+  }
 }
 // Жир под краем роти шипит: мелкие светлые пузырьки вдоль кромки там, где под ней лужица. Чем больше
 // жира в этом месте, тем их больше; каждый живёт 2–3 кадра. Это и есть «маргарин работает» — глазами.
@@ -7677,12 +7724,53 @@ function drawFatFizz(g, sx, sy){
       if(f<FIZZ_MIN || rnd()>Math.min(.9,.35+f*2.2)) continue;
       const out=.012+.05*rnd(), dl=Math.hypot(x-c.x,y-c.y)||1;   // чуть снаружи кромки
       const qx=pose.x+(x+(x-c.x)/dl*out)*pose.scale, qy=pose.y+(y+(y-c.y)/dl*out)*pose.scale;
-      const big=rnd()<.25;
-      g.fillStyle=big ? "rgba(255,250,228,.95)" : "rgba(255,244,205,.8)";
-      const s=px1*(big ? 2 : 1);
-      g.fillRect(Math.round(prX(qx,qy)*sx-s/2),Math.round(prY(qx,qy)*sy-s/2),Math.ceil(s),Math.ceil(s));
+      // Сборка 95 (ревью 18.11, п. 4): пузырёк — светлое колечко 1,5–3 CSS px с тёмной серединкой, а не точка в
+      // 1 px: на телефоне шипение у кромки было не видно. Число и порог — прежние.
+      const big=rnd()<.3, r=px1*(big ? 1.5 : .95), X=prX(qx,qy)*sx, Y=prY(qx,qy)*sy;
+      g.fillStyle="rgba(255,248,222,.92)"; g.beginPath(); g.arc(X,Y,r,0,Math.PI*2); g.fill();
+      if(big){ g.fillStyle="rgba(120,84,30,.55)"; g.beginPath(); g.arc(X,Y,r*.45,0,Math.PI*2); g.fill(); }
     }
   }
+  drawFatEdgeBrown(g,sx,sy,H,pose,c);
+}
+// Сборка 95 (ревью 18.11, п. 4): «на смазанном месте румянится быстрее» — видно сверху. Там, где у кромки жир
+// (тот же порог FIZZ_MIN, что у пузырьков и хруста), из-под края выглядывает узкая кайма нижней стороны цветом
+// её настоящей прожарки (cook стороны на стали ближайшей нижней грани), когда низ там не ниже «бледного»; жир сошёл —
+// кайма остаётся там, где край прожарен больше среднего по кромке (FAT_EDGE_AHEAD). На сухом бледном краю каймы нет.
+// Точки кромки и их грани считаются раз на геометрию (fatEdgeSamples), цвет — каждый кадр из dish.thermal.
+const FAT_EDGE_AHEAD = 0.02;            // насколько низ у края прожарен больше среднего по кромке, чтобы кайма осталась без жира
+let fatEdgeCache = null;
+function fatEdgeSamples(H,c){
+  if(fatEdgeCache && fatEdgeCache.hull===H && fatEdgeCache.faces===dish.faces) return fatEdgeCache.pts;
+  const dough=dish.faces.filter(f=>f.kind==="dough"), pts=[];
+  for(let i=0;i<H.length;i++){
+    const a=H[i], b=H[(i+1)%H.length], len=Math.hypot(b.x-a.x,b.y-a.y), n=Math.max(1,Math.round(len/FIZZ_STEP));
+    for(let k=0;k<n;k++){
+      const u0=k/n, u1=(k+1)/n, p={x:a.x+(b.x-a.x)*(u0+u1)/2,y:a.y+(b.y-a.y)*(u0+u1)/2};
+      const qx=p.x+(c.x-p.x)*.04, qy=p.y+(c.y-p.y)*.04;
+      const f=dough.find(f=>pointInFace(f.points,qx,qy)); if(!f) continue;
+      pts.push({p,a:{x:a.x+(b.x-a.x)*u0,y:a.y+(b.y-a.y)*u0},b:{x:a.x+(b.x-a.x)*u1,y:a.y+(b.y-a.y)*u1},src:f.source,side:f.turned ? 1 : 0});
+    }
+  }
+  fatEdgeCache={hull:H,faces:dish.faces,pts}; return pts;
+}
+function drawFatEdgeBrown(g,sx,sy,H,pose,c){
+  if(!dish.thermal) return 0;
+  const css=sx*(typeof devicePixelRatio==="number" ? devicePixelRatio : 1), S=q=>{ const X=pose.x+q.x*pose.scale, Y=pose.y+q.y*pose.scale; return {x:prX(X,Y)*sx,y:prY(X,Y)*sy}; };
+  const pts=fatEdgeSamples(H,c).map(q=>{ const t=dish.thermal[q.src]; return t ? {q,c:t.cook[q.side]} : null; }).filter(Boolean);
+  if(!pts.length) return 0;
+  const mean=pts.reduce((s,p)=>s+p.c,0)/pts.length; let drawn=0;
+  g.save(); g.lineCap="round"; g.lineWidth=Math.max(1.5,2.2*css);
+  for(const {q,c:cook} of pts){
+    // видно, где низ у края уже румянится (не ниже «бледного») и либо там сейчас жир, либо он прожарен
+    // заметно больше среднего по кромке — то есть румянился быстрее (жир сошёл, а след остался)
+    if(cook<FRY_STEPS[0] || !(fatAtEdge(q.p.x,q.p.y,c)>=FIZZ_MIN || cook>mean+FAT_EDGE_AHEAD)) continue;
+    const col=cookColor([221,199,152],crustGround(cook)), A=S(q.a), B=S(q.b), d=Math.max(1,1.2*css);
+    g.strokeStyle=`rgba(${col.map(Math.round).join(",")},${Math.min(1,.35+(cook-FRY_STEPS[0])/.15).toFixed(3)})`;
+    g.beginPath(); g.moveTo(A.x,A.y+d); g.lineTo(B.x,B.y+d); g.stroke(); drawn++;
+  }
+  g.restore();
+  return drawn;                                  // сколько отрезков каймы нарисовано (для проверок)
 }
 
 function shade(t){ const c = mix(t); return `rgb(${c[0]},${c[1]},${c[2]})`; }

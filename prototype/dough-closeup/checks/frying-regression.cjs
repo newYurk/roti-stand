@@ -160,7 +160,7 @@ const fryNow = h => h.J('{t:dish.panTime,cook:meanCook(),dry:meanDry(),crisp:dis
 // frames until cond (a stand expression) is true; returns the frames spent
 function until(h, cond, max = 60 * 400) { let n = 0; while (!h.run(cond) && n < max) { h.frames(1); n++; } assert.ok(h.run(cond), `waited ${n} frames for ${cond}`); return n; }
 function onPan(h) { stretched(h); toPan(h); }
-function arrive(h) { until(h, 'GST.here'); until(h, 'guestPic()===2'); until(h, 'guestPic()===1'); }
+function arrive(h) { until(h, 'GST.here'); until(h, 'guestPic()===2'); until(h, 'gKnock<=0'); }
 function finish(h, crisp) { envelope(h); toTable(h); cut(h); if (crisp !== undefined) h.run(`dishCrisp=${crisp}`); }
 // script shortcuts for the colour of the roti: every side set to c / the side on the steel and the side
 // seen from above set apart (dry is set to 1: colour without dryness does not exist in the model)
@@ -539,6 +539,33 @@ test('F6', 'the refusal is not a dead end: a raw cut roti refused by Som is carr
     h.tick(3, 1 / 60, true); assert.equal(h.run('loopErrs'), 0); assert.deepEqual(h.errors, []);
     out.push(`${w}px: back on the tava, «приготовленное» +${side.toFixed(1)} s, then crunch`);
   }
+  return { summary: out.join(' · ') };
+});
+
+// Build 95 (review 18.11 p. 4): the margarine finds itself — a touch of the block leaves a finger dent and pinches a little off;
+// where the fat reaches the edge of the envelope the bubbles show and the steel side there peeks out in its own (browning)
+// colour; a dry edge shows nothing. Touches are real; the colour of the steel side is set by script for the dry/greased compare.
+test('F7', 'build 95 — margarine is visible: a touch leaves a dent (at most 7) and the block gets smaller; a fresh block has no dents; fat at the edge of the envelope: a browning rim of the steel side there (the bubbles are drawn by the old drawFatFizz, bigger — look only), a dry edge — none', () => {
+  const out = [];
+  const h = guest(); fried(h);
+  const B = h.J('(()=>{const r=cv.getBoundingClientRect(),k=r.width/cv.width,P=butterPolys(),c=P.top.reduce((s,q)=>({x:s.x+q.x/4,y:s.y+q.y/4}),{x:0,y:0});return {x:r.left+c.x*k,y:r.top+c.y*k}})()');
+  const b0 = h.run('butterLeft');
+  tap(h, B); assert.equal(h.run('butterDents.length'), 1, 'a touch leaves a dent'); assert.ok(Math.abs(h.run('butterLeft') - (b0 - h.run('BUTTER_PER_TOUCH'))) < 1e-9, 'and pinches a little off');
+  const d = h.J('butterDents[0]'); assert.ok(Math.abs(d.u) < 0.4 && Math.abs(d.v) < 0.4, `the dent is where the finger was — the middle of the top (${d.u.toFixed(2)}, ${d.v.toFixed(2)})`);
+  for (let i = 0; i < 9; i++) tap(h, { x: B.x + (i % 3 - 1) * 4, y: B.y });
+  assert.equal(h.run('butterDents.length'), 7, 'at most 7 dents'); assert.ok(h.run('butterLeft') < b0 - 0.2, `ten touches: visibly smaller (${h.run('butterLeft').toFixed(2)})`);
+  out.push(`ten touches: block ${b0} → ${h.run('butterLeft').toFixed(3)}, ${h.run('butterDents.length')} dents`);
+  h.run('butterLeft=BUTTER_MIN;butterRenew()'); assert.equal(h.run('butterDents.length'), 0, 'a fresh block is whole');   // script: the block melted down
+  // the edge: steel side «бледное»+ everywhere (script), fat only along the right edge
+  h.run(`for(let i=0;i<dish.thermal.length;i++){const t=dish.thermal[i];if(!t)continue;t.dry[0]=t.dry[1]=1;for(let s=0;s<2;s++) if(dish.contactWeights[i][s]) t.cook[s]=0.2;}`);
+  const ctx = 'cv.getContext("2d")', count = `drawFatEdgeBrown(${ctx},1,1,dish.hull,dishPose(),hullCentre(dish.hull))`;
+  assert.equal(h.run(count), 0, 'no fat: no rim');
+  const K = corners(h, 1.08); smear(h, [K[0], K[3]]); h.frames(20);
+  const n = h.run(count), all = h.run('fatEdgeSamples(dish.hull,hullCentre(dish.hull)).length');
+  assert.ok(n >= 4 && n < all * 0.6, `fat along one side: the rim shows there only (${n} of ${all} edge points)`);
+  out.push(`fat along the right side: rim at ${n} of ${all} edge points`);
+  h.run('fatMap=null'); assert.equal(h.run(count), 0, 'fat gone, the edge cooked evenly: no rim');
+  assert.equal(h.run('loopErrs'), 0); assert.deepEqual(h.errors, []);
   return { summary: out.join(' · ') };
 });
 

@@ -288,7 +288,7 @@ test('G5', 'touching the edge of the roti on the tava without a flick lifts that
   const e2 = h.J(`(()=>{const b=dishBounds();return __harness.dishToClient({x:b.right-0.02,y:b.top+(b.bottom-b.top)*.75})})()`);
   h.touch('start', 't1', e2.x, e2.y); h.frames(40); h.tick(1, 1 / 60, true);
   const held = h.run('cornerLiftAmount()'), cap = h.J('(()=>{const c=cornerLiftCap();return c?c.P.length:0})()');
-  const under = h.J('cornerUnderColor()'), top = h.J('cornerTopColor(cornerLiftCap().mid)');
+  const under = h.J('cornerUnderColor(cornerLiftCap().mid)'), top = h.J('cornerTopColor(cornerLiftCap().mid)');
   assert.ok(held > 0.99, `held 0.7 s: still up (${r3(held)})`); assert.ok(cap >= 3, 'the lifted cap is a polygon');
   // round 2: only the corner nearest the finger — a small triangle (legs ≈ ¼ side), not a strip of the side
   const geo = h.J(`(()=>{const c=cornerLiftCap(),H=dish.hull,a=cornerLift.a;let near=Infinity;for(const p of H)near=Math.min(near,Math.hypot(p.x-a.x,p.y-a.y));
@@ -319,7 +319,7 @@ test('G7', 'build 91 — held, the corner grows to a quarter of the side from th
     const early = h.J('(()=>{const c=cornerLiftCap();return c.reach/c.side})()');
     h.frames(36); h.tick(1, 1 / 60, true);
     const late = h.J('(()=>{const c=cornerLiftCap();return c.reach/c.side})()');
-    const under = h.J('cornerUnderColor()'), top = h.J('cornerTopColor(cornerLiftCap().mid)'), st = h.run('cornerUnderStep()');
+    const under = h.J('cornerUnderColor(cornerLiftCap().mid)'), top = h.J('cornerTopColor(cornerLiftCap().mid)'), st = h.run('cornerUnderStep()');
     h.touch('end', 't1', e2.x, e2.y); h.frames(30); h.tick(1, 1 / 60, true);
     assert.equal(h.run('!!cornerLift'), false, 'released: it lies down');
     assert.equal(st, step, `the steel side is at step ${step} (${st})`);
@@ -362,6 +362,40 @@ test('G6', 'a sheet torn by fast slaps, carried to the tava, lands as a roti and
   assert.equal(h.run('!!dish && dish.mode==="fold"'), true, 'the torn sheet is a roti on the tava');
   assert.equal(h.run('loopErrs'), 0); assert.deepEqual(h.errors, []);
   return { summary: `torn after ${n} fast slaps (${torn()} cells), hole chains ${chains.map(c => c.len).join('/')} nodes, no gaps; on the tava: dish ${h.run('dish.mode')}, holes ${h.run('dish.holes')}, frame errors 0` };
+});
+
+// ── G8: build 95 (review 18.11 p. 3) — the lifted corner has no dark ring on the steel; its underside is the colour that side
+// shows on top after a real flip ──
+// Script shortcut, named: the colours of the sides are set by script (dry = 1, steel side c, top 0.02, as G7); touches and the
+// flick are real. The press under a held edge (model) stays; only its dent is not drawn for the finger that lifts the corner.
+test('G8', 'build 95 — the corner: the held edge press is marked as the lifting finger, so its dent is not drawn (no dark ring next to the fold); the underside of the lifted corner matches the same side on top after a flick (pale, cooked, browned)', () => {
+  const rows = [];
+  for (const c of [0.15, 0.4, 0.8]) {
+    const h = evening(); light(h); stretched(h); toPan(h); envelope(h);
+    h.run(`for(let i=0;i<dish.thermal.length;i++){const t=dish.thermal[i];if(!t)continue;t.dry[0]=t.dry[1]=1;for(let s=0;s<2;s++) if(dish.contactWeights[i][s]) t.cook[s]=${c}; else t.cook[s]=0.02;}`);
+    const e2 = h.J(`(()=>{const b=dishBounds();return __harness.dishToClient({x:b.right-0.02,y:b.top+(b.bottom-b.top)*.75})})()`);
+    h.touch('start', 't1', e2.x, e2.y); h.frames(40); h.tick(1, 1 / 60, true);
+    const press = h.J('panPress.map(p=>({lift:!!p.lift,level:p.level}))');
+    assert.ok(press.length >= 1 && press.every(p => p.lift), `the held edge presses (model), marked as the lifting finger: ${JSON.stringify(press)}`);
+    const under = h.J('cornerUnderColor(cornerLiftCap().mid)');
+    h.touch('end', 't1', e2.x, e2.y); h.frames(30); h.tick(1, 1 / 60, true);
+    flick(h); h.frames(40); h.tick(1, 1 / 60, true);
+    // script: the same colours again (the flip swapped which side is on the steel; the old steel side is now on top)
+    h.run(`for(let i=0;i<dish.thermal.length;i++){const t=dish.thermal[i];if(!t)continue;for(let s=0;s<2;s++) if(dish.topWeights[i][s]) t.cook[s]=${c};}`);
+    assert.equal(h.run('dish.flips'), 1, 'flipped by a flick');
+    // the same place on top after the flip: lift a corner of the flipped roti and read the TOP at the middle of its cap,
+    // with the mean spot share (as cornerUnderColor reads the underside)
+    const e3 = h.J(`(()=>{const b=dishBounds();return __harness.dishToClient({x:b.right-0.02,y:b.top+(b.bottom-b.top)*.75})})()`);
+    h.touch('start', 't1', e3.x, e3.y); h.frames(40); h.tick(1, 1 / 60, true);
+    const after = h.J(`(()=>{const q=cornerLiftCap().mid,f=cornerFaceAt(q,true),P=crustFace(f),cov=spotCoverAt(P.c,P.edge),k=cov?cov*spotStrength(P.c,P.edge):0;
+      return P.ground.map((v,i)=>v*(1-k*(1-SPOT_TINT[i])))})()`);
+    h.touch('end', 't1', e3.x, e3.y); h.frames(30);
+    assert.ok(Math.abs(lum(under) - lum(after)) < 14, `c ${c}: underside ${under.join(',')} (lum ${lum(under).toFixed(0)}) ≈ that side on top after the flip ${after.map(Math.round).join(',')} (lum ${lum(after).toFixed(0)})`);
+    assert.equal(h.run('loopErrs'), 0); assert.deepEqual(h.errors, []);
+    rows.push({ c, under, after });
+  }
+  const L = rows.map(r => lum(r.under)); assert.ok(L[0] > L[1] && L[1] > L[2], `darker with the step: ${L.map(x => x.toFixed(0)).join(' → ')}`);
+  return { summary: rows.map(r => `steel ${r.c}: under lum ${lum(r.under).toFixed(0)}, top after flip lum ${lum(r.after).toFixed(0)}`).join(' · ') };
 });
 
 const passed = results.filter(r => r.status === 'PASS').length;
