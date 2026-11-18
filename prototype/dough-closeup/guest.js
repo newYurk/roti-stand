@@ -212,7 +212,9 @@ function guestUpdate(dt){
     if(s > gStep){ gStep = s; guestKnock(GUEST_HINT_S, "hint"); return; }
   }
   // Повтор: роти всё лежит той же стороной — она стучит снова, пока его не перевернут или не снимут.
-  if(guestWantsFlip()){
+  // Только у готового конверта (ревью сборки 80): раскрытый лист переворачивать нечем, а она стучала по нему
+  // каждые 9 с, пока игрок клал банан и заворачивал. Первый стук (она пришла) — как был.
+  if(guestWantsFlip() && envelopeDone()){
     gAgain += dt;
     if(gAgain >= GUEST_AGAIN_S) guestKnock(GUEST_KNOCK_S, "again");
   } else gAgain = 0;
@@ -244,6 +246,7 @@ function guestRotiAt(){
   let x = pose.x + c.x*pose.scale, y = pose.y + c.y*pose.scale, up = 0;
   const g = dishGesture;
   if(g && g.slide){ x += g.slide.x*pose.scale; y += g.slide.y*pose.scale; }
+  else if(g && g.moved && g.end && dish.mode === "fold"){ x = pose.x + g.end.x*pose.scale; y = pose.y + g.end.y*pose.scale; }   // сгиб: смотрит на палец
   if(dishMove){                                            // перелёт с тавы на стол
     const u = Math.max(0, Math.min(1, (performance.now() - dishMove.t0)/1000/dishMove.T));
     x = panC.x + (x - panC.x)*u; y = panC.y + (y - panC.y)*u;
@@ -352,7 +355,7 @@ function guestFigure(g, sx, sy, G){
 }
 // Рука через стойку к борту тавы и метки стука У БОРТА (сборка 80). Рисуется поверх стойки и тавы, пока
 // идёт стук: рукав от стойки, предплечье, кулак на борту; на каждом ударе кулак опускается вместе с тавой,
-// а от него расходятся три короткие светлые чёрточки. Плоские фигуры в палитре стенда.
+// а от него расходятся четыре короткие светлые чёрточки. Плоские фигуры в палитре стенда.
 function guestArm(g, sx, sy, G){
   if(!guestKnocking()) return;
   const u = G.u, S = guestSlot(G), K = guestKnockAt(G, S), drop = K.hit ? 3*u : 0;
@@ -365,7 +368,6 @@ function guestArm(g, sx, sy, G){
   g.save();
   seg(a, mid(0.45), 17, "#8a4b3c");                        // рукав
   seg(mid(0.45), b, 11, "#c08a5a");                        // предплечье
-  seg(mid(0.74), mid(0.80), 12.5, "#b9b3a8");              // браслет
   g.fillStyle = "#c08a5a"; g.beginPath(); g.ellipse(b.x*sx, b.y*sy, 9*u*sx, 7.5*u*sy, 0, 0, Math.PI*2); g.fill();   // кулак
   if(K.marks){
     for(const [dx, dy, ex, ey] of [[-13, 2, -24, -3], [13, 2, 24, -3], [-7, 11, -13, 20], [7, 11, 13, 20]])
@@ -421,7 +423,10 @@ function guestPlaceholder(g, sx, sy, S, dy, pic, turn = 0, gaze = { x:0, y:1 }){
   // голова: в кивке наклонена и чуть опущена
   const tilt = pic === 3 ? 0.16 : 0, hx = 0.5, hy = pic === 3 ? 0.445 : 0.42;
   g.save(); g.translate(X(hx), Y(hy)); g.rotate(tilt); g.translate(-X(hx), -Y(hy));
-  g.translate(R(0.045*turn), 0);                            // «нет»: голова уходит в сторону, лицо — ещё дальше (face)
+  // Взгляд за роти должен читаться (ревью сборки 80: ход зрачка был 1–2 px): зрачок ходит на GAZE_EYE рамки,
+  // и голова чуть идёт следом (GAZE_HEAD), как при повороте вслед роти на стойке.
+  const GAZE_EYE = 0.065, GAZE_HEAD = 0.03, follow = pic === 1 && !(gHead > 0);
+  g.translate(R(0.045*turn + (follow ? GAZE_HEAD*gaze.x : 0)), 0);   // «нет»: голова уходит в сторону, лицо — ещё дальше (face)
   const face = 0.085*turn;
   ell(hx, hy - 0.27, 0.075, 0.07, HAIR);                   // пучок
   ell(hx, hy - 0.05, 0.215, 0.26, HAIR);                   // волосы
@@ -436,8 +441,8 @@ function guestPlaceholder(g, sx, sy, S, dy, pic, turn = 0, gaze = { x:0, y:1 }){
     for(const [cx, cy] of [[-0.13, 0.13], [0.12, 0.11], [0.14, 0.18], [-0.11, 0.19], [0.03, 0.235], [-0.045, 0.24]]) ell(hx + cx, hy + cy, 0.014, 0.016, "#f0c674");   // крошки
   } else {
     // 1 — глаза идут за роти (без роти — вниз, на таву); 2 — смотрит на тебя; 3 — прямо
-    const follow = pic === 1 && !(gHead > 0), r = pic === 2 ? 0.03 : 0.023;
-    const ex = follow ? gaze.x*0.032 : 0, ey = follow ? gaze.y*0.03 : 0;
+    const r = pic === 2 ? 0.03 : 0.023;
+    const ex = follow ? gaze.x*GAZE_EYE : 0, ey = follow ? (gaze.y*2 - 1)*GAZE_EYE : 0;
     for(const s of [-1, 1]) ell(hx + face + ex + s*0.075*(1 - 0.3*Math.abs(turn)), hy + 0.01 + ey, r, r*1.1, DARK);
     stroke(pic === 3 ? [[hx - 0.07, hy + 0.135], [hx + 0.07, hy + 0.135]] : [[hx + face - 0.035, hy + 0.135], [hx + face + 0.035, hy + 0.135]], 0.02, DARK);
   }
