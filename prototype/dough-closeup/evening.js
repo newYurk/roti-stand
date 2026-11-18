@@ -6,17 +6,18 @@
    eveningCounterHit / eveningServed / eveningExport — всё под typeof, поэтому без этого
    файла (проверки в Node) и в режиме стенда (?dev=1, «панель стенда» в радио) стенд работает как раньше.
    Правило владелицы 17.11: без украшений — лампа, миска, шарики, крышка, радио и небо здесь плоские
-   фигуры в палитре стенда; ни свечения, ни теней, ни анимаций, ни звуков. Слова — только в радио
+   фигуры в палитре стенда; ни свечения, ни теней, ни звуков. Движение — только то, что что-то сообщает:
+   негорящая лампа покачивается (сборка 80) — это вход в игру. Слова — только в радио
    и в одной служебной строке сверху (#live); мелкая подсказка стенда (#hint) в игре спрятана: на
    маленьком телефоне она вместе со строкой ложилась на радио и стойку.
    Гость (guest.js, шаг 2 v0) грузится после этого файла; отсюда его зовут под typeof: guestUpdate,
-   guestDraw, guestDrawOver, guestServe, guestLive, guestReset, guestState, guestExport, guestTook. Без него вечер
+   guestDraw, guestDrawOver, guestServe, guestWatch, guestReset, guestState, guestExport, guestTook. Без него вечер
    идёт как в шаге 1.
    Тетрадь (notebook.js, шаг 3 v0) грузится после гостя; её зовут так же под typeof: notebookDown / Move / Up,
    notebookUpdate, notebookDrawItem, notebookDraw, notebookSnap, notebookNewEvening, notebookOpen,
    notebookState, notebookExport. Её снимки лежат в том же сохранении (roti_evening.notebook) и вечер
    заново не стирает прошлые вечера. Экран не гаснет, пока лампа горит (eveWakeSync, внизу файла).
-   Пёс и ночной кадр (night.js, шаг 4 v0) грузятся последними; их зовут под typeof: nightDogHit, nightServe, nightLive,
+   Пёс и ночной кадр (night.js, шаг 4 v0) грузятся последними; их зовут под typeof: nightDogHit, nightServe,
    nightTook, nightUpdate, nightDrawUnder, nightDrawOver, nightDraw, nightReset, nightState, nightExport.
    С ним строка «вечер окончен» пустая: конец вечера показывает ночной кадр. */
 
@@ -26,6 +27,10 @@ const EVE_IDLE_HINT_MS = 6000;      // подсказка «шарик в мис
 const EVE_LID_ON = 0.6;             // крышка легла, если её середина ближе этой доли радиуса тавы к центру
 const EVE_SKY = ["#5b4a55", "#40384a", "#292838", "#14141d"];   // сумерки → вечер → поздний вечер → ночь
 const EVE_COUNT = ["ни одного", "один", "два", "три"];
+// Негорящая лампа качается (сборка 80, плейтест 17.11 п. 11: тёмный экран 30 с не пускал в игру — отвечала
+// только тусклая лампа в углу). Раз в EVE_SWING_EVERY секунд она покачивается сама; любой тап в темноте
+// мимо неё (миска, тава, стол) качает её сильнее — глаз идёт к тому, что шевельнулось. Слов нет.
+const EVE_SWING_EVERY = 5, EVE_SWING_FIRST = 1.5, EVE_SWING_S = 1.8, EVE_SWING_IDLE = 0.16, EVE_SWING_TAP = 0.34;   // с, с, с, рад, рад
 
 function eveFresh(){ return { v:EVE_VERSION, lamp:false, ballsLeft:EVE_BALLS, rotiDone:0, lid:false, over:false, ball:false }; }
 let EVE = eveFresh();
@@ -37,6 +42,7 @@ let eveGuestRaw = null;             // сохранённый гость, пок
 let eveNbRaw = null;                // сохранённая тетрадь, пока notebook.js ещё не загрузился
 let eveNightRaw = null;             // сохранённые пёс и ночной кадр, пока night.js ещё не загрузился
 let eveServePt = null;              // где отпущен роти (client px): гость смотрит, над ним ли
+let eveSwing = { a:0, t:0, wait:EVE_SWING_FIRST, n:0 };   // качание негорящей лампы: размах, возраст, до следующего, счётчик (для проверок)
 const eveRoot = document.documentElement || document.body;
 const eveEl = id => document.getElementById(id);
 
@@ -132,7 +138,19 @@ function eveningServed(){
   if(typeof notebookSnap === "function") notebookSnap(to || "counter");   // снимок в тетрадь — тоже до сброса: роти ещё цел
   EVE.rotiDone = Math.min(EVE_BALLS, EVE.rotiDone + 1); EVE.ball = false;
   eveFreshLump(); sheetHidden = true;
+  if(!to && typeof guestWatch === "function") guestWatch(eveServePt);     // роти унесли мимо неё на стойку — она поворачивает голову вслед
   eveLog("serve", to ? { to } : undefined); eveHintRefresh();
+}
+function eveSwingStart(a){ eveSwing.a = a; eveSwing.t = 0; eveSwing.wait = EVE_SWING_EVERY; eveSwing.n++; }
+// Угол лампы на шнуре, радианы: два с половиной качания, затухая. 0 — висит прямо.
+function eveLampAngle(){
+  const u = eveSwing.t/EVE_SWING_S;
+  return eveSwing.a > 0 && u < 1 ? eveSwing.a*Math.sin(u*Math.PI*5)*(1 - u)*(1 - u) : 0;
+}
+function eveSwingUpdate(dt){
+  if(EVE.lamp || EVE.over){ eveSwing.a = 0; eveSwing.wait = EVE_SWING_FIRST; return; }
+  eveSwing.t += dt; eveSwing.wait -= dt;
+  if(eveSwing.wait <= 0) eveSwingStart(EVE_SWING_IDLE);
 }
 function eveLidHome(){ return EVE.lamp && !EVE.over && !EVE.lid && !EVE.ball && EVE.ballsLeft === 0; }
 function eveLidEnd(){
@@ -209,7 +227,8 @@ function eveningSpots(){
   const lid = eveLidAt(G);
   return { lamp:c(G.lamp), radio:c(G.radio), bowl:c(G.bowl), pan:c(G.pan), work:c(G.work), lump:c(G.lump),
     counter:c({ x:(G.counter.x0 + G.counter.x1)/2, y:(G.counter.y0 + G.counter.y1)/2 }),
-    counterBottom:r.top + G.counter.y1*ky, lid:lid ? c(lid) : null, lidHome:eveLidHome(), panR:PAN_R*k };
+    counterBottom:r.top + G.counter.y1*ky, lid:lid ? c(lid) : null, lidHome:eveLidHome(), panR:PAN_R*k,
+    swing:+eveLampAngle().toFixed(4), swings:eveSwing.n };
 }
 
 // ─────────────────────────── ввод (стенд зовёт первым; true — касание забрано)
@@ -228,6 +247,7 @@ function eveningDown(id, cx, cy, t){
   }
   if(!EVE.lamp){                                           // до лампы стол на жесты не отвечает
     if(Math.hypot(p.x - G.lamp.x, p.y - G.lamp.y) <= G.lamp.hit) eveLight();
+    else eveSwingStart(EVE_SWING_TAP);                     // тап в темноте: лампа качнулась — «начни с меня»
     return true;
   }
   const lid = eveLidAt(G);
@@ -294,26 +314,22 @@ eveBind("evLog", async () => {
 
 // ─────────────────────────── служебная строка сверху
 // Стенд зовёт это каждый кадр со своей строкой (cur). null — оставить её как есть; иначе — наши слова.
-// Слова стенда про кнопки, которых в игре нет («заново», «сейчас порвётся», яйцо), здесь заменяются простыми.
+// Сборка 80: слова игры пишет сам стенд — одна короткая строка, подсказка гаснет после первого удачного
+// жеста (stand.js: tip/learn). Здесь остались только слова рамки (крышка, миска) и замена двух строк
+// прибора стенда про кнопки, которых в игре нет («сейчас порвётся», «заново»).
 const EVE_WORDS = [
-  ["Положи банан", "коснись середины — ляжет банан · потом заверни четыре стороны к середине"],
-  ["Банан", "банан лежит · заверни четыре стороны к середине"],
-  ["На столе", "на столе · проведи через роти — разрежь"],
-  ["Разрезов", "нарезано · возьми за середину и унеси наверх, на стойку"],
-  ["порвался без", "порвался — ничего, неси на таву"],
-  ["лист уже порван", "лист порван — ничего, неси на таву"],
+  ["порвался без", "порвался — неси на таву"],
+  ["лист уже порван", "порван — неси на таву"],
 ];
 function eveningLive(cur){
   if(eveDev) return null;
   if(typeof notebookOpen === "function" && notebookOpen()) return "";   // в тетради слов нет
   if(EVE.over) return typeof nightDraw === "function" ? "" : `вечер окончен · ${EVE_COUNT[EVE.rotiDone] || EVE.rotiDone} роти`;   // с night.js конец вечера — ночной кадр, без слов
   if(!EVE.lamp) return "";
-  if(EVE.lid) return (typeof guestLive === "function" && guestLive(null)) || "тава под крышкой — сними крышку в сторону, и жарка пойдёт дальше";
+  if(EVE.lid) return "крышка — сдвинь её в сторону";
   const idle = performance.now() - eveIdleAt > EVE_IDLE_HINT_MS;
   if(!EVE.ball) return !idle ? "" : EVE.ballsLeft > 0 ? "следующий шарик — в миске" : "накрой таву крышкой";
   const m = typeof cur === "string" ? cur : "";
-  if(typeof guestLive === "function"){ const s = guestLive(m); if(s) return s; }
-  if(typeof nightLive === "function"){ const s = nightLive(m); if(s) return s; }   // роти берёт и пёс: без «на стойку»
   for(const [from, to] of EVE_WORDS) if(m.startsWith(from)) return to;
   return null;
 }
@@ -322,6 +338,7 @@ function eveningLive(cur){
 function eveningUpdate(dt){
   if(eveDev) return;
   if(frameOn) setFrame("");                                // рамы-картинки — прибор стенда; вечер идёт на своём столе
+  eveSwingUpdate(dt);
   if(eveStageNow() !== eveStage) eveSave();                // шаг сменился — сохранить
   if(typeof guestUpdate === "function") guestUpdate(dt);
   if(typeof notebookUpdate === "function") notebookUpdate(dt);
@@ -372,14 +389,17 @@ function eveningDraw(g, sx, sy, layer){
   // лампа не горит — тележка в сумерках: один плоский тёмный слой, без градиента
   if(!EVE.lamp) box(0, G.sky.y1, G.W, G.H - G.sky.y1, "rgba(8,6,10,0.55)");
   // лампа над тележкой
-  const L = G.lamp, s = L.s;
-  box(L.x - Math.max(.5, 0.75*u), 0, Math.max(1, 1.5*u), L.y - s, "#1d150e");
+  const L = G.lamp, s = L.s, swing = eveLampAngle();
+  g.save();
+  if(swing){ g.translate(L.x*sx, 0); g.rotate(swing); g.translate(-L.x*sx, 0); }   // качается на шнуре, вокруг точки подвеса
+  box(L.x - Math.max(.5, 0.75*u), 0, Math.max(1, 1.5*u), L.y - s, EVE.lamp ? "#1d150e" : "#4b4338");   // негорящая: шнур виден на тёмном небе
   g.fillStyle = EVE.lamp ? "#d98b3a" : "#3a342d";
   g.beginPath();
   g.moveTo((L.x - s*0.45)*sx, (L.y - s)*sy); g.lineTo((L.x + s*0.45)*sx, (L.y - s)*sy);
   g.lineTo((L.x + s*1.15)*sx, (L.y + s*0.15)*sy); g.lineTo((L.x - s*1.15)*sx, (L.y + s*0.15)*sy);
   g.closePath(); g.fill();
   ell({ x:L.x, y:L.y + s*0.42 }, s*0.5, s*0.5, EVE.lamp ? "#f0c674" : "#4b4338");
+  g.restore();
   // вечер окончен: ком теста на столе — касание начинает следующий вечер
   if(EVE.over) ell(G.lump, G.lump.r, G.lump.r*0.8, "#f0e0b0");
   if(typeof nightDraw === "function") nightDraw(g, sx, sy, G);         // ночной кадр: снимки вечера над стойкой

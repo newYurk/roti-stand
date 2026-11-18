@@ -9,7 +9,7 @@
    кому ушёл каждый (Сом / пёс / стойка); полку с подарками, тележку под крышкой и ком теста рисуют
    evening.js и guest.js, как раньше. После перезагрузки оконченный вечер открывается этим же кадром.
    Рамка вечера зовёт отсюда под typeof: nightDogHit, nightServe, nightTook, nightUpdate, nightDrawUnder,
-   nightDrawOver, nightDraw, nightLive, nightReset, nightState, nightExport. Без этого файла вечер идёт как в шаге 3.
+   nightDrawOver, nightDraw, nightReset, nightState, nightExport. Без этого файла вечер идёт как в шаге 3.
    Правила владелицы 17.11: плоские фигуры в палитре стенда, без свечения, частиц и анимаций — позы пса
    сменяются, а не двигаются (взмах хвоста — две нарисованные чёрточки); звука нет; слов нет.
    Пёс — заглушка: по решению 17.09 собак две (мама и дочка), окрас и имена не утверждены. */
@@ -71,17 +71,8 @@ function nightOverDog(client){
 // evening.js спрашивает это вместе со стойкой: отпущен ли роти там, где его подают.
 // Ненарезанный роти псу не подаётся и штриху из середины в его угол не мешает: это обычный рез (ревью шага 4).
 function nightDogHit(client){ return nightDogWants() && !!dish && dish.cuts.length > 0 && nightOverDog(client); }
-// Слова строки, пока роти берёт и пёс: «на стойку» спорило бы с жестом вниз, а про пса слов нет нигде.
-const NIGHT_WORDS = [
-  ["Разрезов", "нарезано · возьми за середину и неси"],
-  ["В руке — неси наверх", "в руке — неси и отпусти"],
-  ["Неси выше", "роти на столе · возьми за середину и неси"],
-];
-function nightLive(cur){
-  if(typeof cur !== "string" || !nightDogWants()) return null;
-  for(const [from, to] of NIGHT_WORDS) if(cur.startsWith(from)) return to;
-  return null;
-}
+// Слов про пса нет нигде; с сборки 80 строка стенда не называет, куда нести («нарезано — за середину и
+// неси»), поэтому своих слов у этого файла больше нет (nightLive убран).
 // evening.js зовёт это из eveningServed после гостьи (она смотрит первой), ДО сброса стенда.
 function nightServe(client){
   if(!nightDogHit(client)) return null;
