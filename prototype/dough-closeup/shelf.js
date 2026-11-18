@@ -29,7 +29,7 @@ const SHELF_CELL = 30, SHELF_HIT = 22;       // CSS px: шаг вещей на �
 const SHELF_W = 82;                          // доска полки: три места с шагом 30 (у гостьи без этого файла она 74)
 const SHELF_FLIGHT_S = 0.6;                  // сколько подарок Сом летит от неё до полки (одно прямое движение)
 const SHELF_TINT = { fill:"#a8402c", rim:"rgba(29,21,14,0.55)" };   // полоса варенья: цвет банки
-const SHELF_GLASS = "#8b7f6e", SHELF_LID = "#d9d2c0", SHELF_LABEL = "#e8dcc0", SHELF_RED = "#a8402c", SHELF_YELLOW = "#e3c04a";
+const SHELF_GLASS = "#8b7f6e", SHELF_LID = "#d9d2c0", SHELF_LABEL = "#e8dcc0", SHELF_RED = "#a8402c", SHELF_YELLOW = "#e3c04a", SHELF_MARK = "#3a2c1e";
 
 function shelfFresh(){
   return { v:SHELF_V, n:1, bananas:0, jam:0, jar:false, empty:false, banBall:0, jamBall:0,
@@ -296,21 +296,25 @@ function shelfUpdate(dt){
   }
   if(!window.drizzleModeOn || !dish || dish.mode !== "cut") shelfDisarm();   // роти со стола ушёл
 }
-// Банка: стекло, варенье до уровня (ступени — трети), крышка, наклейка. open — крышка приподнята: варенье в руке.
+// Банка: стекло, варенье до уровня (ступени — трети), крышка, наклейка и три риски уровня (3 → 2 → 1 → 0).
+// open — крышка приподнята: варенье в руке.
 function shelfJarDraw(g, sx, sy, x, y, u, level, open, label){
-  g.fillStyle = SHELF_GLASS; g.fillRect((x - 8*u)*sx, (y - 19*u)*sy, 16*u*sx, 19*u*sy);
-  const h = 19*u*Math.max(0, Math.min(1, level/SHELF_JAM));
-  if(h > 0){ g.fillStyle = SHELF_RED; g.fillRect((x - 8*u)*sx, (y - h)*sy, 16*u*sx, h*sy); }
-  g.fillStyle = SHELF_LID; g.fillRect((x - 9*u)*sx, (y - (open ? 31 : 23)*u)*sy, 18*u*sx, 5*u*sy);
-  if(label){ g.fillStyle = SHELF_LABEL; g.fillRect((x - 4*u)*sx, (y - 13*u)*sy, 8*u*sx, 6*u*sy); }
+  const w = 10*u, h0 = 19*u;                                // полширины и высота стекла
+  g.fillStyle = SHELF_GLASS; g.fillRect((x - w)*sx, (y - h0)*sy, 2*w*sx, h0*sy);
+  const h = h0*Math.max(0, Math.min(1, level/SHELF_JAM));
+  if(h > 0){ g.fillStyle = SHELF_RED; g.fillRect((x - w)*sx, (y - h)*sy, 2*w*sx, h*sy); }
+  g.fillStyle = SHELF_MARK;                                 // три риски: верх каждой трети
+  for(let k = 1; k <= SHELF_JAM; k++){ const my = y - h0*k/SHELF_JAM; g.fillRect((x - w - 1.5*u)*sx, (my - Math.max(0.5, 0.5*u))*sy, (2*w + 3*u)*sx, Math.max(1, 0.8*u*sy)); }
+  g.fillStyle = SHELF_LID; g.fillRect((x - w - 1*u)*sx, (y - (open ? 31 : 23)*u)*sy, (2*w + 2*u)*sx, 5*u*sy);
+  if(label){ g.fillStyle = SHELF_LABEL; g.fillRect((x - 5*u)*sx, (y - 13*u)*sy, 10*u*sx, 6*u*sy); }
 }
-// Связка: по банану на роти, веером от одной ножки.
+// Связка: по банану на роти, веером от одной ножки — видно 2 → 1 → нет.
 function shelfBunchDraw(g, sx, sy, x, y, u, count){
   g.fillStyle = SHELF_YELLOW;
   for(const a of [-0.6, 0.35].slice(0, count)){             // верхушки сходятся у ножки, низы расходятся
-    g.beginPath(); g.ellipse((x + Math.sin(a)*8*u)*sx, (y - 7*u - Math.cos(a)*2*u)*sy, 4.5*u*sx, 11*u*sy, -a, 0, Math.PI*2); g.fill();
+    g.beginPath(); g.ellipse((x + Math.sin(a)*9*u)*sx, (y - 8*u - Math.cos(a)*2*u)*sy, 5.5*u*sx, 13*u*sy, -a, 0, Math.PI*2); g.fill();
   }
-  g.fillStyle = "#5a4326"; g.fillRect((x - 3*u)*sx, (y - 21*u)*sy, 4*u*sx, 5*u*sy);
+  g.fillStyle = "#5a4326"; g.fillRect((x - 3*u)*sx, (y - 24*u)*sy, 4*u*sx, 5*u*sy);
 }
 // guest.js зовёт это вместо своей полки (после неба, до стойки).
 function shelfDraw(g, sx, sy, G){

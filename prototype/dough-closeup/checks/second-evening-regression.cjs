@@ -406,6 +406,7 @@ test('S3', 'jam: touch the jar, lead a finger over the cut roti — a jam stripe
   assert.equal(h.SHF().jam, 0); assert.equal(h.SHF().jar, true, 'the empty jar stays on the shelf');
   assert.deepEqual(h.shev(), ['use:jam', 'use:jam', 'use:jam', 'empty:jam']);
   assert.equal(h.shelfDrawn().glasses, 1);
+  assert.equal(h.rects('shelfDraw(ctx,1,1,eveGeo());').filter(x => x.fill === '#3a2c1e').length, 3, 'three level marks on the jar');
   tap(h, h.sh().jarAt);
   assert.equal(h.SHF().jar, false, 'a touch puts the empty jar away'); assert.equal(h.shelfDrawn().glasses, 0); assert.equal(h.shev().at(-1), 'putaway:jar');
   // the notebook is not blocked by the touches of the jar (no finger is left hanging)
