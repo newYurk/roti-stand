@@ -116,7 +116,7 @@ function notebookSnap(to){
   if(to === "som" && typeof GST !== "undefined" && GST.answers.length){ const a = GST.answers[GST.answers.length - 1]; step = Math.max(step, a.step || 0); answer = a.answer; }
   to = to === "som" || to === "dog" ? to : "counter";       // «dog» — шаг 4 (night.js): роти ушёл псу
   const snap = { to, img, crisp:+(+dishCrisp || 0).toFixed(1), step, ts:new Date().toISOString() };
-  if(to === "som" && (answer === "nod" || answer === "crunch")) snap.answer = answer;   // лицо ответа (сборка 82)
+  if(to === "som" && (answer === "nod" || answer === "crunch")) snap.answer = answer;   // лицо ответа (сборка 80)
   ev.snaps.push(snap);
   while(ev.snaps.length > NB_PER_EVENING) ev.snaps.shift();
   nbQuiet = NB_QUIET_S;
