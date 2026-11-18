@@ -203,7 +203,12 @@ function night(opts) {
   h.drawn = code => h.J(`(()=>{const keep=ctx.ellipse,out=[];ctx.ellipse=(x,y,rx,ry)=>out.push({fill:ctx.fillStyle,stroke:ctx.strokeStyle,x,y,rx,ry});
     try{${code}}finally{ctx.ellipse=keep}return out})()`);
   // roti-coloured ellipses inside the counter
-  h.onCounter = () => { const C = h.J('eveGeo().counter'); return h.drawn('eveningDraw(ctx,1,1,0);').filter(e => e.fill === '#c9a15a' && e.x >= C.x0 && e.x <= C.x1 && e.y >= C.y0 && e.y <= C.y1).length; };
+  // build 91: the counter roti is a square (fillRect), no longer an ellipse — both are recorded, by their centre
+  h.counterRoti = () => { const C = h.J('eveGeo().counter');
+    return h.J(`(()=>{const ke=ctx.ellipse,kr=ctx.fillRect,out=[];ctx.ellipse=(x,y,rx,ry)=>out.push({kind:'ellipse',fill:ctx.fillStyle,x,y,w:2*rx,h:2*ry});
+      ctx.fillRect=(x,y,w,hh)=>out.push({kind:'rect',fill:ctx.fillStyle,x:x+w/2,y:y+hh/2,w,h:hh});
+      try{eveningDraw(ctx,1,1,0)}finally{ctx.ellipse=ke;ctx.fillRect=kr}return out})()`).filter(e => e.fill === '#c9a15a' && e.x >= C.x0 && e.x <= C.x1 && e.y >= C.y0 && e.y <= C.y1); };
+  h.onCounter = () => h.counterRoti().length;
   return h;
 }
 const reloadD = (h, opts = {}) => night({ storage: [...h.storage], ...opts });
@@ -504,6 +509,10 @@ test('D9', 'after the night the new evening starts with an empty counter, while 
   endEvening(h); h.frames(3);
   assert.deepEqual(h.ns().cards.map(c => c.to), ['som', 'som', 'counter']);
   assert.equal(h.onCounter(), 1, 'at night the counter still shows it');
+  // build 91 (review 18.11, p. 4): at night it is square, as all evening — not a round cake
+  { const R = h.counterRoti()[0], TL = h.run('TILT');
+    assert.equal(R.kind, 'rect', `the counter roti is a square, not an ellipse (${R.kind})`);
+    assert.ok(Math.abs(R.h / R.w - TL) < 0.12, `seen in the tilt of the table: h/w ${(R.h / R.w).toFixed(2)} vs TILT ${TL}`); }
   // the snapshot of a counter roti keeps the stand mark
   const m = h.J('(()=>{const out=[],k=ctx.fillRect;ctx.fillRect=(x,y,w,h)=>out.push({f:ctx.fillStyle,x,y,w,h});try{nbMark(ctx,1,1,"counter",100,100,1)}finally{ctx.fillRect=k}return out})()');
   assert.ok(m.some(r => r.f === '#3a2c1e' && r.w >= 20), 'the stand mark is drawn under the snapshot');
