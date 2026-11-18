@@ -371,9 +371,13 @@ function guestArm(g, sx, sy, G){
   };
   const mid = t => ({ x:a.x + (b.x - a.x)*t, y:a.y + (b.y - a.y)*t });
   g.save();
-  seg(a, mid(0.45), 17, "#8a4b3c");                        // рукав
-  seg(mid(0.45), b, 11, "#c08a5a");                        // предплечье
-  g.fillStyle = "#c08a5a"; g.beginPath(); g.ellipse(b.x*sx, b.y*sy, 9*u*sx, 7.5*u*sy, 0, 0, Math.PI*2); g.fill();   // кулак
+  // С настоящими картинками (сборка 81) она стучит на картинке 2 сама, а плоская рука от стойки до тавы читалась
+  // палкой: остаются только метки удара у борта и вздрагивание тавы. Рука — только у плоской заглушки.
+  if(!guestPictures()){
+    seg(a, mid(0.45), 17, "#8a4b3c");                      // рукав
+    seg(mid(0.45), b, 11, "#c08a5a");                      // предплечье
+    g.fillStyle = "#c08a5a"; g.beginPath(); g.ellipse(b.x*sx, b.y*sy, 9*u*sx, 7.5*u*sy, 0, 0, Math.PI*2); g.fill();   // кулак
+  }
   if(K.marks){
     for(const [dx, dy, ex, ey] of [[-13, 2, -24, -3], [13, 2, 24, -3], [-7, 11, -13, 20], [7, 11, 13, 20]])
       seg({ x:K.rim.x + dx*u, y:K.rim.y + dy*u }, { x:K.rim.x + ex*u, y:K.rim.y + ey*u }, 2.5, "#f0e0b0");
