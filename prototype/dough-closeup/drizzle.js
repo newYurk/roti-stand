@@ -274,9 +274,24 @@ function _sag(ctx, a, b, tint, width) {
   const gap = Math.hypot(b.x - a.x, b.y - a.y);
   if (gap < 0.5 || gap > SAG_MAX * width + 6) return false;
   const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2 + Math.max(width * 1.2, gap * 0.7);
+  if (tint.pool) _pool(ctx, a, b, gap, tint, width);
   ctx.strokeStyle = tint.sag; ctx.lineWidth = Math.max(0.8, width * 0.75);
   ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.quadraticCurveTo(mx, my, b.x, b.y); ctx.stroke();
   return true;
+}
+// Сгущёнка затекает в рез (tint.pool, сборка 95, ревью 18.11 п. 5): там, где нить перешла щель, она стекает
+// вдоль щели в обе стороны (узкий потёк по линии реза) и собирается лужицей на стыке — овал поперёк щели чуть
+// шире струи, с бликом. Направление щели — поперёк отрезка a→b (концы нити легли на края соседних кусков).
+function _pool(ctx, a, b, gap, tint, width) {
+  const ux = (b.x - a.x) / gap, uy = (b.y - a.y) / gap, tx = -uy, ty = ux, c = { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+  const run = width * 2.4, rot = Math.atan2(ty, tx);
+  ctx.save(); ctx.lineCap = "round";
+  ctx.strokeStyle = tint.sag; ctx.lineWidth = Math.max(0.8, width * 0.5);
+  ctx.beginPath(); ctx.moveTo(c.x - tx * run, c.y - ty * run); ctx.lineTo(c.x + tx * run, c.y + ty * run); ctx.stroke();
+  ctx.fillStyle = tint.sag; ctx.beginPath(); ctx.ellipse(c.x, c.y, width * 1.15, Math.max(width * 0.7, gap * 0.5 + width * 0.35), rot, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = tint.fill; ctx.beginPath(); ctx.ellipse(c.x, c.y - width * 0.12, width * 0.8, Math.max(width * 0.45, gap * 0.35 + width * 0.2), rot, 0, Math.PI * 2); ctx.fill();
+  if (tint.gloss) { ctx.fillStyle = tint.gloss; ctx.beginPath(); ctx.ellipse(c.x - width * 0.25, c.y - width * 0.35, width * 0.3, width * 0.16, rot, 0, Math.PI * 2); ctx.fill(); }
+  ctx.restore();
 }
 function _flatSegments(ctx, segs, tint, width, edge) {
   for (let i = 0; i < segs.length; i++) {

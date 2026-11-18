@@ -283,10 +283,12 @@ test('P5', 'the milk: a touch of the tin takes it, a finger led over the roti la
   assert.equal(h.run('_trails[0].tint.milk'), true, 'the stripe is milk');
   // build 92: creamy and translucent with a highlight (was opaque white, «like toothpaste»)
   const fill = h.run('_trails[0].tint.fill').match(/[\d.]+/g).map(Number);
-  assert.ok(fill[0] > fill[2] + 20 && fill[3] < 0.95 && fill[3] > 0.5, `creamy, translucent (${h.run('_trails[0].tint.fill')})`);
+  // build 95 (review 18.11 p. 5): ivory — warm (red over blue), not white, nearly opaque, still letting the dough through a little
+  assert.ok(fill[0] > fill[2] + 40 && fill[1] > fill[2] + 25 && fill[2] < 200 && fill[3] < 0.97 && fill[3] > 0.85, `ivory (${h.run('_trails[0].tint.fill')})`);
   assert.equal(typeof h.run('_trails[0].tint.gloss'), 'string', 'with a highlight');
   assert.equal(typeof h.run('_trails[0].tint.edge'), 'string', 'with a dark edge (build 85b)');
-  const wk = h.run('_flatWidth(_trails[0].tint)/_flatWidth(null)'); assert.ok(Math.abs(wk - 0.5) < 1e-6, `thinner than the jam (×${wk})`);
+  // build 95: thicker (was 0.5 of the jam — «a thin white thread»), still a little thinner than the jam
+  const wk = h.run('_flatWidth(_trails[0].tint)/_flatWidth(null)'); assert.ok(Math.abs(wk - 0.8) < 1e-6, `0.8 of the jam (×${wk})`);
   // the stripe goes with the tray: its points stay inside the drawn roti while the finger carries it up
   const inside = () => h.J(`(()=>{const p=dishShownPose(),pts=_trails[0].pts.filter(q=>q&&!q.break);
     const S=pts.map(q=>_screen(q.x,q.y,q.face)),H=dish.hull.map(q=>({x:prX(p.x+q.x*p.scale,p.y+q.y*p.scale),y:prY(p.x+q.x*p.scale,p.y+q.y*p.scale)}));
@@ -361,6 +363,10 @@ test('P9', 'build 92 — the food looks like food: the heap is slices of differe
     assert.ok(Z.flips >= 3 && Z.amp > 2.5, `${w}: a zigzag (${Z.flips} swings, ±${Z.amp.toFixed(1)} CSS px)`);
     h.run('__sag=0;{const s=_sag;_sag=function(){const r=s.apply(this,arguments);if(r)__sag++;return r}}'); h.run('drizzleDraw(cv.getContext("2d"))');
     assert.ok(h.run('__sag') >= 1, `${w}: it sags into the cut gap it crossed (${h.run('__sag')} per frame)`);
+    // build 95 (review 18.11 p. 5): at every crossed gap it runs into the cut and pools at the joint
+    h.run('__pool=0;{const s=_pool;_pool=function(){__pool++;return s.apply(this,arguments)}}'); h.run('drizzleDraw(cv.getContext("2d"))');
+    assert.equal(h.run('__pool'), h.run('__sag') / 2, `${w}: a pool at every gap it sags into (${h.run('__pool')} pools)`);
+    assert.equal(h.run('_trails[0].tint.pool'), true);
     assert.equal(h.run('loopErrs'), 0); assert.deepEqual(h.errors, []);
     out.push(`${w}: ${B.n} slices, ${B.ov} overlaps, sizes ×${B.rk.toFixed(2)}; zigzag ${Z.flips} swings ±${Z.amp.toFixed(1)} px; sags ${h.run('__sag')}`);
   }

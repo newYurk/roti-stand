@@ -36,7 +36,10 @@ const GUEST_KNOCK_WAIT = 1.5, GUEST_KNOCK_S = 1.2, GUEST_HINT_S = 0.8, GUEST_ANS
 const GUEST_SHAKE_HEAD_S = 1.1;                        // качает головой: картинка 1, голова два раза в стороны
 const GUEST_SHAKE = [[0.10, 0.22], [0.40, 0.52]];      // два вздрагивания тавы, секунды от начала стука
 const GUEST_SHAKE_PX = 2;
-const GUEST_AGAIN_S = 8;                               // повтор стука, пока роти на таве не перевёрнут и не дошёл до «хруста»
+// Повтор стука, пока видимая сторона роти не дошла до её «хруста» (guestWantsFlip). Сборка 95 (ревью 18.11, п. 2):
+// было 8 с со сложенными руками между стуками — на кадре она «успокаивалась» при сыром верхе. Теперь между стуками
+// она не садится: наклонена, кулак лежит на краю стойки, взгляд на роти (guestUrging), стук — каждые 3,5 с.
+const GUEST_AGAIN_S = 3.5;
 const GUEST_MARK_S = 0.14;                             // метки у борта держатся столько после каждого удара — глаз успевает
 const GUEST_LEAN = 0.07;                               // наклон к таве на время стука, доля высоты рамки
 const GUEST_FLIP_UP = 0.04;                            // переворот: голова на миг поднимается за взлетевшим роти, доля высоты рамки
@@ -54,6 +57,7 @@ let guestEvents = [];                // журнал гостя: хранитс�
 // показ ответа, ступень, на которую она уже стучала, наибольшая ступень жарки этого роти (gBest —
 // только в выгрузку guestExport; ответ с партии «жарка» даёт guestVerdict по обеим сторонам), «села».
 let gWait = 0, gKnock = 0, gKnockAge = 0, gAnswer = 0, gStep = 0, gBest = 0, gBall = 0, gSat = false, gMain = false, gHead = 0, gFlips = 0;
+let gKnockBall = 0;                                             // шарик, по которому был последний стук (guestUrging)
 let gAgain = 0, gWatch = 0, gWatchDir = 0, gWatchAt = null;   // до повтора стука; взгляд вслед: остаток, сторона (−1, 0 — вниз, 1), куда
 let gHeadT = GUEST_SHAKE_HEAD_S, gNoLook = 0, gMode = null;  // длина идущего качания головой; «нет»: остаток взгляда на таву; режим блюда в прошлом кадре
 let gPale = null;                                       // кэш самой бледной точки края (guestPaleEdge)
@@ -65,6 +69,27 @@ if(typeof Image !== "undefined"){
   const first = new Image();
   first.onload = () => { for(const f of GUEST_FILES.slice(1)){ const im = new Image(); im.src = f; gImgs.push(im); } };
   first.src = GUEST_FILES[0]; gImgs.push(first);
+}
+// Картинка 2 со взглядом на роти (сборка 95, ревью 18.11, п. 2): на som-2 она смотрит на игрока. Голова берётся
+// с картинки 1 (глаза вниз, на таву), плечи и стучащая рука — с картинки 2; шов на шее размыт (GUEST_HEAD_SEAM,
+// доли высоты). Собирается один раз, когда обе картинки загружены; без document (проверки в Node) — som-2 как есть.
+const GUEST_HEAD_SEAM = [0.54, 0.62];
+let gKnockImg = null;
+function guestKnockImage(){
+  if(gKnockImg) return gKnockImg;
+  const a = gImgs[0], b = gImgs[1];
+  if(typeof document === "undefined" || !document.createElement) return b;
+  try{
+    const w = b.naturalWidth, h = b.naturalHeight, mk = () => { const c = document.createElement("canvas"); c.width = w; c.height = h; return c; };
+    const head = mk(), hg = head.getContext("2d"), out = mk(), og = out.getContext("2d");
+    if(!hg || !og) return b;
+    hg.drawImage(a, 0, 0, w, h); hg.globalCompositeOperation = "destination-in";
+    const gr = hg.createLinearGradient(0, GUEST_HEAD_SEAM[0]*h, 0, GUEST_HEAD_SEAM[1]*h);
+    gr.addColorStop(0, "rgba(0,0,0,1)"); gr.addColorStop(1, "rgba(0,0,0,0)"); hg.fillStyle = gr; hg.fillRect(0, 0, w, h);
+    og.drawImage(b, 0, 0); og.drawImage(head, 0, 0);
+    out.naturalWidth = w; out.naturalHeight = h;
+    return gKnockImg = out;
+  }catch(e){ return b; }
 }
 function guestPictures(){ return gImgs.length === 4 && gImgs.every(im => im.complete && im.naturalWidth > 0); }
 
@@ -106,19 +131,25 @@ function guestFryNow(){
 function guestReset(){
   GST = guestFresh(); guestEvents = [];
   gWait = gKnock = gKnockAge = gAnswer = gStep = gBest = gBall = gHead = gFlips = gAgain = gWatch = gWatchDir = 0; gSat = gMain = false; panKnock = 0;
-  gWatchAt = null; gHeadT = GUEST_SHAKE_HEAD_S; gNoLook = 0; gMode = null; gPale = null;
+  gWatchAt = null; gHeadT = GUEST_SHAKE_HEAD_S; gNoLook = 0; gMode = null; gPale = null; gKnockBall = 0;
 }
 
 // ─────────────────────────── ход гостя
 function guestFrying(){ return EVE.ball && phase === "PAN" && !!dish && dish.mode === "fold"; }
-// Чего она ждёт стуком: чтобы роти перевернули (или дожарили до её «хруста» маргарином под краем).
+// Чего она ждёт стуком: чтобы видимая сторона (верх) дошла до «приготовленного» — её «хруста» (fryVerdict). Сборка 95
+// (ревью 18.11, п. 2): стук держится по прожарке, не по перевороту — перевернули бледной стороной вверх, она стучит
+// дальше; перестаёт, когда сверху румяная сторона или приговор уже «хруст» (маргарин под краем) — дальше только горелое.
 function guestWantsFlip(){
-  if(!guestFrying() || (dish.flips || 0) > 0) return false;
+  if(!guestFrying()) return false;
   const S = guestSides();
-  return guestVerdict(S.bottom, S.top, S.crisp) !== "crunch";
+  return fryStep(S.top) < 2 && guestVerdict(S.bottom, S.top, S.crisp) !== "crunch";
 }
+// Между стуками у готового конверта, пока она ждёт хруста: не садится и не складывает руки (картинка 2 без ударов).
+// Только после её стука по этому шарику (gKnockBall): на втором шарике, едва конверт сложен, она ещё сидит — первым
+// идёт стук («теплее» или повтор), потом уже ожидание с кулаком на стойке.
+function guestUrging(){ return GST.here && GST.knocked && gAnswer <= 0 && !EVE.lid && gKnockBall === guestBallNo() && guestWantsFlip() && envelopeDone(); }
 function guestKnock(seconds, event){
-  gKnock = seconds; gKnockAge = 0; gMain = event === "knock"; gAgain = 0; gPale = null;   // место стука — заново (guestPaleEdge)
+  gKnock = seconds; gKnockAge = 0; gMain = event === "knock"; gAgain = 0; gPale = null; gKnockBall = guestBallNo();   // место стука — заново (guestPaleEdge)
   guestLog(event, guestFryNow());
 }
 function guestLeave(why){
@@ -333,19 +364,19 @@ function guestPaleEdge(G, S){
 // видны (удар и GUEST_MARK_S после него).
 function guestKnockAt(G, S){
   const hx = S.x0 + S.w*0.80, k = Math.max(-0.8, Math.min(0.8, (hx - G.pan.x)/PAN_R*0.55));   // от плеча наискось к середине борта
-  const hit = GUEST_SHAKE.some(([a, b]) => gKnockAge >= a && gKnockAge < b);
-  const marks = GUEST_SHAKE.some(([a, b]) => gKnockAge >= a && gKnockAge < b + GUEST_MARK_S);
+  const hit = gKnock > 0 && GUEST_SHAKE.some(([a, b]) => gKnockAge >= a && gKnockAge < b);
+  const marks = gKnock > 0 && GUEST_SHAKE.some(([a, b]) => gKnockAge >= a && gKnockAge < b + GUEST_MARK_S);
   const rim = { x:G.pan.x + k*PAN_R*1.02, y:G.pan.y - PAN_R*TILT*1.02*Math.sqrt(1 - k*k) }, pale = guestPaleEdge(G, S);
   return { hand:{ x:hx, y:S.zone.y1 - 6*G.u }, rim, at:pale ? { x:pale.x, y:pale.y } : rim, pale, hit, marks };
 }
 // Наклон, доля высоты рамки: стучит — наклонилась к таве; смотрит вслед роти прямо под собой — тоже (поза).
 function guestLean(){ return (guestPic() === 2 ? GUEST_LEAN : 0) + (gWatchDir === 0 ? GUEST_LEAN*guestWatchK() : 0); }
-function guestKnocking(){ return GST.here && gKnock > 0 && !EVE.lid && gAnswer <= 0; }
+function guestKnocking(){ return GST.here && (gKnock > 0 || guestUrging()) && !EVE.lid && gAnswer <= 0; }
 function guestPic(){
   if(!GST.here) return 0;
   if(gAnswer > 0) return GST.answers[GST.answers.length - 1].answer === "crunch" ? 4 : 3;
   if(EVE.lid) return 1;                                    // под крышкой она просто ждёт
-  return gKnock > 0 ? 2 : 1;
+  return gKnock > 0 || guestUrging() ? 2 : 1;
 }
 // Своих слов в строке у неё нет (сборка 80): строка стенда не называет, кому нести, — её видно. html.guest
 // (stand.css) остаётся меткой «она у стойки» для проверок и стилей.
@@ -384,9 +415,9 @@ function guestSpots(){
     shelf:c(F.x0 + F.w/2, F.y), shelfTop:r.top + (F.y - 23*G.u)*ky, gifts:GST.gifts.slice(), knock:panKnock*ky, head:+guestHeadTurn().toFixed(3),
     gaze:(g => ({ x:+g.x.toFixed(3), y:+g.y.toFixed(3) }))(guestGaze(G, S)), lean:+(guestLean()*S.h*ky).toFixed(2), watch:+guestWatchK().toFixed(3), watchDir:gWatchDir,
     arm:guestKnocking() ? (K => ({ rim:c(K.rim.x, K.rim.y), at:c(K.at.x, K.at.y), hit:K.hit, marks:K.marks,
-      ...(A => ({ root:c(A.root.x, A.root.y), tip:c(A.tip.x, A.tip.y), reach:+(A.reach*ky).toFixed(1), head:+(A.head*ky).toFixed(1) }))(guestArmPose(G, S, K)),
+      ...(A => ({ root:c(A.root.x, A.root.y), tip:c(A.tip.x, A.tip.y), edge:c(A.edge.x, A.edge.y), reach:+(A.reach*ky).toFixed(1), full:+(A.full*ky).toFixed(1), head:+(A.head*ky).toFixed(1) }))(guestArmPose(G, S, K)),
       pale:K.pale ? { cook:+K.pale.cook.toFixed(3), low:+K.pale.low.toFixed(3), edge:K.pale.samples.map(q => ({ ...c(q.x, q.y), cook:+q.cook.toFixed(3), src:q.src, side:q.side })) } : null }))(guestKnockAt(G, S)) : null,
-    again:+gAgain.toFixed(2), noLook:+gNoLook.toFixed(2) };
+    again:+gAgain.toFixed(2), noLook:+gNoLook.toFixed(2), urging:guestUrging(), counterTop:r.top + G.counter.y0*ky };
 }
 
 // ─────────────────────────── кадр (evening.js зовёт после неба и до стойки)
@@ -408,7 +439,7 @@ function guestFigure(g, sx, sy, G){
   const S = guestSlot(G), dy = guestPicRect(G, S, pic).dy;
   g.save(); g.beginPath(); g.rect(0, 0, G.W*sx, S.zone.y1*sy); g.clip();
   if(guestPictures()){
-    const im = gImgs[pic - 1], k = Math.min(S.w/im.naturalWidth, S.h/im.naturalHeight), w = im.naturalWidth*k, h = im.naturalHeight*k;
+    const im = pic === 2 ? guestKnockImage() : gImgs[pic - 1], k = Math.min(S.w/im.naturalWidth, S.h/im.naturalHeight), w = im.naturalWidth*k, h = im.naturalHeight*k;
     const turn = guestHeadTurn(), x0 = S.x0 + (S.w - w)/2, y0 = S.y0 + S.h - h + dy;
     if(gHead > 0) guestShakeImage(g, sx, sy, im, x0, y0, w, h, turn);   // «нет»: качается голова, плечи стоят
     else {                                                 // вслед роти на стойке: картинка чуть сжимается и уходит в сторону
@@ -440,45 +471,57 @@ function guestPicRect(G, S, pic){
   const im = gImgs[pic - 1], k = Math.min(S.w/im.naturalWidth, S.h/im.naturalHeight), w = im.naturalWidth*k, h = im.naturalHeight*k;
   return { x:S.x0 + (S.w - w)/2, y:S.y0 + S.h - h + dy, w, h, dy };
 }
-// Рука (сборка 89, раунд 2). Раунд 1 тянул руку от стойки через всю стойку и стол до тавы — так далеко человек
-// не достаёт, читалось палкой. Теперь она показывает со своей стороны: наклонилась (наклон сборки 80), из
-// стучащего кулака (GUEST_HAND на картинке 2, у края стойки) выходит короткое предплечье длиной примерно с её
-// голову (GUEST_REACH высоты картинки), указательный палец направлен в самое бледное место края роти. На каждом
-// ударе палец коротко тычет вперёд (GUEST_JAB длины руки), тава вздрагивает, метки стука вспыхивают В САМОМ
-// МЕСТЕ на роти (K.at), не у пальца. Цвета — кожа, обводка и браслет её картинок.
-const GUEST_REACH = 0.42, GUEST_JAB = 0.14;
+// Рука (сборка 89, раунд 2): из стучащего кулака картинки 2 (GUEST_HAND, у края стойки) выходит короткое предплечье.
+// Сборка 95 (ревью 18.11, п. 2): указательный палец вниз в стойку читался «клади сюда» — теперь она стучит КУЛАКОМ
+// (костяшками вниз) по краю стойки, ближнему к таве: предплечье тянется от её края стойки к ближнему (чуть к таве по x),
+// не дальше GUEST_REACH её картинки. На ударе кулак на краю (тава вздрагивает, у костяшек — короткие чёрточки
+// удара), между двумя ударами одного стука приподнят на GUEST_LIFT; пока она ждёт между стуками (guestUrging) —
+// кулак лежит на краю. Метки стука — по-прежнему в самом бледном месте на роти (K.at). Взгляд — на роти:
+// у картинки 2 голова картинки 1 (глаза вниз, guestKnockImage). Цвета — кожа, обводка и браслет её картинок.
+const GUEST_REACH = 0.62, GUEST_LIFT = 0.16, GUEST_FIST_X = 0.3;
 function guestArmPose(G, S, K){
-  const R = guestPicRect(G, S, 2), u = G.u;
+  const R = guestPicRect(G, S, 2), u = G.u, H = R.h*0.42;
   const root = { x:R.x + R.w*GUEST_HAND.x, y:Math.min(R.y + R.h*GUEST_HAND.y, S.zone.y1 - 3*u) };
-  const L0 = Math.max(1e-6, Math.hypot(K.at.x - root.x, K.at.y - root.y)), dx = (K.at.x - root.x)/L0, dy = (K.at.y - root.y)/L0;
-  const reach = Math.min(L0, R.h*GUEST_REACH*(1 + (K.hit ? GUEST_JAB : 0)));
-  return { root, dx, dy, reach, head:R.h*GUEST_REACH, tip:{ x:root.x + dx*reach, y:root.y + dy*reach } };
+  const edge = { x:root.x + (G.pan.x - root.x)*GUEST_FIST_X, y:G.counter.y1 - 0.16*H };     // костяшки — у ближнего края стойки
+  const L0 = Math.max(1e-6, Math.hypot(edge.x - root.x, edge.y - root.y)), dx = (edge.x - root.x)/L0, dy = (edge.y - root.y)/L0;
+  const full = Math.min(L0, R.h*GUEST_REACH), up = gKnock > 0 && !K.hit;                     // между ударами одного стука — приподнят
+  const reach = full*(up ? 1 - GUEST_LIFT : 1);
+  return { root, dx, dy, reach, head:H, edge, full, tip:{ x:root.x + dx*reach, y:root.y + dy*reach } };
 }
 function guestArm(g, sx, sy, G){
   if(!guestKnocking()) return;
   const u = G.u, S = guestSlot(G), K = guestKnockAt(G, S), A = guestArmPose(G, S, K), H = A.head;
-  const SKIN = "#cf925c", LINE = "#4a2a1a", SILVER = "#aaa198";
-  const { root, dx, dy, tip } = A, nx = -dy, ny = dx, k = H/100;           // размеры — доли длины руки
-  const fin = 26*k, wr = { x:tip.x - dx*(fin + 12*k), y:tip.y - dy*(fin + 12*k) };
+  const SKIN = "#cf925c", LINE = "#4a2a1a", SILVER = "#aaa198", SHADE = "#a86f42";
+  const { root, dx, dy, tip } = A, nx = -dy, ny = dx, k = H/100;           // размеры — доли длины её головы
+  const fr = 20*k, fc = { x:tip.x - dx*fr, y:tip.y - dy*fr }, wr = { x:fc.x - dx*fr*0.9, y:fc.y - dy*fr*0.9 };
   const P = (p, s, w) => [(p.x + nx*w*s)*sx, (p.y + ny*w*s)*sy];
-  const arm = (pad, color) => {                              // предплечье: от кулака к запястью сужается
+  const arm = (pad, color) => {                              // предплечье: от её кулака картинки к запястью
     g.fillStyle = color; g.beginPath();
-    g.moveTo(...P(root, 1, 15*k + pad)); g.lineTo(...P(wr, 1, 10*k + pad)); g.lineTo(...P(wr, -1, 10*k + pad)); g.lineTo(...P(root, -1, 15*k + pad));
+    g.moveTo(...P(root, 1, 18*k + pad)); g.lineTo(...P(wr, 1, 14*k + pad)); g.lineTo(...P(wr, -1, 14*k + pad)); g.lineTo(...P(root, -1, 18*k + pad));
     g.closePath(); g.fill();
-    g.beginPath(); g.ellipse(root.x*sx, root.y*sy, (15*k + pad)*sx, (13*k + pad)*sy, 0, 0, Math.PI*2); g.fill();
+    g.beginPath(); g.ellipse(root.x*sx, root.y*sy, (19*k + pad)*sx, (15*k + pad)*sy, 0, 0, Math.PI*2); g.fill();
   };
   const line = (p, q, w, color) => {
     g.strokeStyle = color; g.lineWidth = Math.max(1, w*sx); g.lineCap = "round";
     g.beginPath(); g.moveTo(p.x*sx, p.y*sy); g.lineTo(q.x*sx, q.y*sy); g.stroke();
   };
-  const hand = { x:wr.x + dx*7*k, y:wr.y + dy*7*k }, rot = Math.atan2(dy*sy, dx*sx);
-  const palm = (pad, color) => { g.fillStyle = color; g.beginPath(); g.ellipse(hand.x*sx, hand.y*sy, (13*k + pad)*sx, (11*k + pad)*sy, rot, 0, Math.PI*2); g.fill(); };
-  const base = { x:hand.x + dx*6*k, y:hand.y + dy*6*k }, o = Math.max(1.2*u, 2.4*k);
+  const rot = Math.atan2(dy*sy, dx*sx);
+  const fist = (pad, color) => { g.fillStyle = color; g.beginPath(); g.ellipse(fc.x*sx, fc.y*sy, (fr + pad)*sx, (fr*1.12 + pad)*sy, rot, 0, Math.PI*2); g.fill(); };
+  const o = Math.max(1.2*u, 2.4*k);
   g.save();
-  arm(o, LINE); palm(o, LINE); line(base, tip, 9*k + 2*o, LINE);           // обводка
-  arm(0, SKIN); palm(0, SKIN); line(base, tip, 9*k, SKIN);                 // кожа
+  arm(o, LINE); fist(o, LINE);                                              // обводка
+  arm(0, SKIN); fist(0, SKIN);                                              // кожа
+  // согнутые пальцы: три складки поперёк кулака у костяшек и большой палец сбоку
+  for(const t of [-0.45, 0, 0.45]){
+    const c = { x:fc.x + dx*fr*0.55 + nx*fr*t, y:fc.y + dy*fr*0.55 + ny*fr*t };
+    line({ x:c.x - dx*fr*0.45, y:c.y - dy*fr*0.45 }, c, 1.6*k + 0.6*u, SHADE);
+  }
+  line({ x:fc.x - dx*fr*0.2 - nx*fr*0.95, y:fc.y - dy*fr*0.2 - ny*fr*0.95 }, { x:fc.x + dx*fr*0.35 - nx*fr*0.55, y:fc.y + dy*fr*0.35 - ny*fr*0.55 }, 2*k + 0.6*u, SHADE);
   const b0 = { x:wr.x - dx*3*k, y:wr.y - dy*3*k };                          // браслет поперёк запястья
-  for(const t of [0, 4]){ const c = { x:b0.x - dx*t*k, y:b0.y - dy*t*k }; line({ x:c.x + nx*10.5*k, y:c.y + ny*10.5*k }, { x:c.x - nx*10.5*k, y:c.y - ny*10.5*k }, 3*k, SILVER); }
+  for(const t of [0, 4]){ const c = { x:b0.x - dx*t*k, y:b0.y - dy*t*k }; line({ x:c.x + nx*14.5*k, y:c.y + ny*14.5*k }, { x:c.x - nx*14.5*k, y:c.y - ny*14.5*k }, 3*k, SILVER); }
+  if(K.hit){                                                 // удар о край стойки: две короткие чёрточки по бокам костяшек
+    for(const s of [-1, 1]) line({ x:tip.x + nx*s*fr*1.25, y:tip.y + ny*s*fr*1.25 - 1*u }, { x:tip.x + nx*s*fr*1.9, y:tip.y + ny*s*fr*1.9 - 4*u }, 1.8*u, "#f0e0b0");
+  }
   if(K.marks){                                               // метки — в самом месте на роти
     for(const [mx, my, ex, ey] of [[-13, 2, -24, -3], [13, 2, 24, -3], [-7, 11, -13, 20], [7, 11, 13, 20]])
       line({ x:K.at.x + mx*u, y:K.at.y + my*u }, { x:K.at.x + ex*u, y:K.at.y + ey*u }, 2.5*u, "#f0e0b0");
@@ -543,7 +586,7 @@ function guestPlaceholder(g, sx, sy, S, dy, pic, turn = 0, gaze = { x:0, y:1 }){
   g.save(); g.translate(X(hx), Y(hy)); g.rotate(tilt); g.translate(-X(hx), -Y(hy));
   // Взгляд за роти должен читаться (ревью сборки 80: ход зрачка был 1–2 px): зрачок ходит на GAZE_EYE рамки,
   // и голова чуть идёт следом (GAZE_HEAD), как при повороте вслед роти на стойке.
-  const GAZE_EYE = 0.065, GAZE_HEAD = 0.03, follow = pic === 1 && !(gHead > 0);
+  const GAZE_EYE = 0.065, GAZE_HEAD = 0.03, follow = (pic === 1 || pic === 2) && !(gHead > 0);   // стучит — тоже смотрит на роти (сборка 95)
   g.translate(R(0.045*turn + (follow ? GAZE_HEAD*gaze.x : 0)), 0);   // «нет»: голова уходит в сторону, лицо — ещё дальше (face)
   const face = 0.085*turn;
   ell(hx, hy - 0.27, 0.075, 0.07, HAIR);                   // пучок
@@ -558,7 +601,7 @@ function guestPlaceholder(g, sx, sy, S, dy, pic, turn = 0, gaze = { x:0, y:1 }){
     stroke([[hx - 0.07, hy + 0.12], [hx, hy + 0.20], [hx + 0.07, hy + 0.12]], 0.02, DARK);                             // рот — дуга
     for(const [cx, cy] of [[-0.13, 0.13], [0.12, 0.11], [0.14, 0.18], [-0.11, 0.19], [0.03, 0.235], [-0.045, 0.24]]) ell(hx + cx, hy + cy, 0.014, 0.016, "#f0c674");   // крошки
   } else {
-    // 1 — глаза идут за роти (без роти — вниз, на таву); 2 — смотрит на тебя; 3 — прямо
+    // 1 и 2 — глаза идут за роти (без роти — вниз, на таву); 3 — прямо
     const r = pic === 2 ? 0.03 : 0.023;
     const ex = follow ? gaze.x*GAZE_EYE : 0, ey = follow ? (gaze.y*2 - 1)*GAZE_EYE : 0;
     for(const s of [-1, 1]) ell(hx + face + ex + s*0.075*(1 - 0.3*Math.abs(turn)), hy + 0.01 + ey, r, r*1.1, DARK);

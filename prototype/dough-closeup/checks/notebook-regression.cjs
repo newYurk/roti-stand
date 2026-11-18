@@ -161,7 +161,7 @@ const fryNow = h => h.J('{t:dish.panTime,cook:meanCook(),dry:meanDry(),crisp:dis
 // frames until cond (a stand expression) is true; returns the frames spent
 function until(h, cond, max = 60 * 400) { let n = 0; while (!h.run(cond) && n < max) { h.frames(1); n++; } assert.ok(h.run(cond), `waited ${n} frames for ${cond}`); return n; }
 function onPan(h) { stretched(h); toPan(h); }
-function arrive(h) { until(h, 'GST.here'); until(h, 'guestPic()===2'); until(h, 'guestPic()===1'); }
+function arrive(h) { until(h, 'GST.here'); until(h, 'guestPic()===2'); until(h, 'gKnock<=0'); }
 // Merge with the frying batch (build 79): an open sheet no longer browns, so a roti folded and served at once is
 // RAW and Som refuses it. As in guest-regression.cjs, the folded envelope fries on until its steel side is
 // «бледное» (model time, a few seconds); the answer for such a roti is a nod, as these checks expect.
