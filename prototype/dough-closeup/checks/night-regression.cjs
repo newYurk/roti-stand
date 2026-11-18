@@ -440,6 +440,42 @@ test('D7', 'the snapshot of a roti given to Som keeps her answer, and the mark u
   return { summary: `answer kept on the snapshot: ${snaps[0].answer}; nod: tilt + open eyes + level mouth, crunch: crumbs + closed eyes, old: neutral` };
 });
 
+// ── night with shelf.js (for the yesterday row, step 5): shelf.js loads last, after night.js ──
+const shelfScript = { file: path.join(path.dirname(H.sourcePath), 'shelf.js'), src: fs.readFileSync(path.join(path.dirname(H.sourcePath), 'shelf.js'), 'utf8') };
+function nightShelf(opts = {}) {
+  const h = night(opts);
+  vm.runInContext(shelfScript.src, h.context, { filename: shelfScript.file, timeout: 10000 });
+  return h;
+}
+
+test('D8', 'the night frame of the second evening shows yesterday as a separate row below today, the same size, dimmed and without marks', () => {
+  const snap = (to, k) => ({ to, img: null, crisp: 1, step: 1, ts: `2026-11-17T12:0${k}:00.000Z` });
+  const store = [['roti_evening', JSON.stringify({ v: 1, lamp: false, ballsLeft: 0, rotiDone: 3, lid: true, over: true, ball: false, n: 2,
+    guest: { v: 1, here: false, gone: true, knocked: true, answers: [], gifts: [], taken: 0, events: [] },
+    notebook: { v: 1, cur: true, peeked: true, evenings: [
+      { ts: '2026-11-16T12:00:00.000Z', n: 1, snaps: ['som', 'som', 'dog'].map((to, k) => snap(to, k)) },
+      { ts: '2026-11-17T12:00:00.000Z', n: 2, snaps: ['som', 'dog', 'counter'].map((to, k) => snap(to, k)) } ], events: [] },
+    night: { v: 1, dog: 0, shown: true, events: [] },
+    shelf: { v: 1, n: 2, bananas: 0, jam: 0, jar: false, empty: false, banBall: 0, jamBall: 0, som: { jar: false, early: false }, jarIn: null, begun: true, events: [] } })]];
+  for (const [w, hh] of [[390, 844], [375, 667]]) {
+    const h = nightShelf({ storage: store, w, hh }); h.frames(3);
+    const N = h.ns();
+    assert.equal(N.frame, true); assert.equal(N.cards.length, 3); assert.equal(N.past.length, 3, 'three yesterday cards');
+    assert.ok(N.past.every((p, i) => Math.abs(p.s - N.cards[i].s) < 1e-6), `yesterday is the same size (${N.past[0].s.toFixed(0)} = ${N.cards[0].s.toFixed(0)} px on ${w}×${hh})`);
+    assert.ok(N.past.every((p, i) => Math.abs(p.x - N.cards[i].x) < 1e-6), 'the same columns as today');
+    assert.ok(N.past[0].y > N.cards[0].markY, 'yesterday is a row below today');
+    const cy0 = h.J('(()=>{const G=eveGeo(),r=cv.getBoundingClientRect();return r.top+G.counter.y0*r.height/cv.height})()');
+    assert.ok(N.past[2].y + N.past[2].s <= cy0, 'above the counter');
+    // marks for today only; yesterday cards carry a dim overlay
+    const cloth = h.drawn('nightDraw(ctx,1,1,eveGeo());').filter(e => e.fill === '#8a4b3c').length;
+    assert.equal(cloth, 1, 'one Som mark — today\'s; yesterday has no marks');
+    const over = h.J('(()=>{const out=[],k=ctx.fillRect;ctx.fillRect=(x,y,w,h)=>{out.push({f:ctx.fillStyle,x,y,w,h})};try{nightDraw(ctx,1,1,eveGeo())}finally{ctx.fillRect=k}return out.filter(r=>r.f==="rgba(8,6,10,0.45)")})()');
+    assert.equal(over.length, 3, 'three dim overlays, one per yesterday card');
+    assert.deepEqual(h.errors, []);
+  }
+  return { summary: 'yesterday: a dimmed row below today, same size, no marks' };
+});
+
 const passed = results.filter(r => r.status === 'PASS').length;
 console.log(`\nnight: ${passed}/${results.length} passed`);
 try {

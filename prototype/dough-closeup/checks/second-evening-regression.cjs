@@ -545,18 +545,22 @@ test('S7', 'the night frame of evening 2 shows today with yesterday small beside
   for (const [w, hh] of [[390, 844], [375, 667]]) {
     const h = shelf({ storage: saveNight(['nod', 'crunch'], { n: 2, pages: 2, sh: { bananas: 2, jam: 3, jar: true } }), w, hh }); h.frames(3);
     const N = h.ns(); assert.equal(N.frame, true); assert.equal(N.cards.length, 3); assert.equal(N.past.length, 3, 'yesterday: three cards');
-    assert.ok(N.past.every(p => p.s < N.cards[0].s / 2.5), `yesterday is small (${N.past[0].s.toFixed(1)} against ${N.cards[0].s.toFixed(1)} px)`);
-    assert.ok(N.past.every(p => p.x + p.s <= N.cards[0].x - 4), 'beside today, to the left');
+    assert.ok(N.past.every(p => Math.abs(p.s - N.cards[0].s) < 1e-6), `yesterday is the same size (${N.past[0].s.toFixed(0)} against ${N.cards[0].s.toFixed(0)} px)`);
+    assert.ok(N.past.every((p, i) => Math.abs(p.x - N.cards[i].x) < 1e-6), 'in the same columns as today');
+    assert.ok(N.past[0].y > N.cards[0].markY, 'yesterday is a row below today');
     const F = h.J('(()=>{const G=eveGeo(),F=guestShelf(G),k=cv.getBoundingClientRect().width/cv.width;return {x1:(F.x0+F.w)*k,lamp:(G.lamp.x-G.lamp.s*1.15)*k,cy0:G.counter.y0*k}})()');
-    assert.ok(N.past[0].x >= F.x1 && N.cards[2].x + N.cards[2].s <= F.lamp, `${w}×${hh}: the row stands between the shelf and the lamp`);
+    assert.ok(N.past[0].x >= F.x1 && N.past[2].x + N.past[2].s <= F.lamp, `${w}×${hh}: the rows stand between the shelf and the lamp`);
     assert.ok(N.past[2].y + N.past[2].s <= F.cy0 && N.cards[0].markY <= F.cy0, 'above the counter');
-    // marks (who got it) are drawn for today only: 3 marks — two Som (5 ellipses each… counted by her cloth) and a dog
+    // marks (who got it) are drawn for today only: two Som (her cloth) and a dog; yesterday has no marks
     const cloth = h.drawn('nightDraw(ctx,1,1,eveGeo());').filter(e => e.fill === '#8a4b3c').length;
     assert.equal(cloth, 2, 'two Som marks — today\'s; yesterday has no marks');
+    // yesterday is dimmed: a dark overlay sits over each yesterday card
+    const pastCards = h.J('(()=>{const R=nightRow(eveGeo());return R.past.length})()');
+    assert.equal(pastCards, 3);
     assert.equal(h.ngt().at(-1), 'frame:load'); assert.deepEqual(h.J('gestures.filter(g=>g.kind==="night").at(-1).yesterday'), ['som', 'som', 'dog']);
     assert.equal(h.run('eveningLive("")'), '', 'no words');
-    if (w === 390) h.summary = `390×844: today ${N.cards[0].s.toFixed(0)} px, yesterday ${N.past[0].s.toFixed(1)} px`;
-    else h.summary = `375×667: today ${N.cards[0].s.toFixed(0)} px, yesterday ${N.past[0].s.toFixed(1)} px`;
+    if (w === 390) h.summary = `390×844: today ${N.cards[0].s.toFixed(0)} px, yesterday ${N.past[0].s.toFixed(0)} px`;
+    else h.summary = `375×667: today ${N.cards[0].s.toFixed(0)} px, yesterday ${N.past[0].s.toFixed(0)} px`;
     results.sizes = (results.sizes || []).concat(h.summary);
     assert.deepEqual(h.errors, []);
   }
