@@ -353,7 +353,7 @@ test('F3', 'the flick on the finished envelope: 700 px/s turns it (850 on an ope
   return { summary: out.join(' · ') };
 });
 
-test('F4', 'margarine: a stroke from the block over bare steel leaves a puddle that spreads and is gone in seconds; the block shrinks; a stroke from the block is never a fold; three strokes along the edge of the envelope — crunch; a stroke far from the roti gives almost nothing', () => {
+test('F4', 'margarine: a stroke from the block over bare steel leaves a flat trace along the finger and a puddle that spreads and is gone in seconds; the block shrinks, and at its smallest a fresh one is laid; a stroke from the block is never a fold; three strokes along the edge of the envelope — crunch; a stroke far from the roti gives almost nothing', () => {
   const out = [];
   // bare steel: the ball is still on the table / the table is free
   for (const free of [false, true]) {
@@ -363,6 +363,11 @@ test('F4', 'margarine: a stroke from the block over bare steel leaves a puddle t
     const P = h.spots().pan, R = h.spots().panR, b0 = h.run('butterLeft');
     smear(h, [{ x: P.x + R * 0.1, y: P.y - R * 0.1 }, { x: P.x - R * 0.5, y: P.y + R * 0.05 }]);
     assert.equal(h.run('!!fatMap'), true, 'a puddle on bare steel'); assert.equal(h.run('!!dish'), false);
+    // build 92: the smear lies where the finger went — a flat trace along the stroke, not round drops
+    const tr = h.J(`(()=>{const p=fatStreak.filter(q=>!q.gap);const C=p.map(q=>__harness.toClient(q.x,q.y));return {n:p.length,x0:Math.min(...C.map(c=>c.x)),x1:Math.max(...C.map(c=>c.x))}})()`);
+    assert.ok(tr.n >= 5 && tr.x1 - tr.x0 > R * 0.45, `the trace follows the finger (${tr.n} points, ${(tr.x1 - tr.x0).toFixed(0)} px wide)`);
+    h.run('__fs=0;{const d=drawFatStreak;drawFatStreak=function(){__fs++;return d.apply(this,arguments)}}'); h.run('draw()');
+    assert.ok(h.run('__fs') > 0, 'and it is drawn');
     const w0 = wet(h, 0.02), peak0 = h.run('Math.max(...fatMap)');
     h.frames(45); const w1 = wet(h, 0.02);
     assert.ok(w1 > w0, `it spreads: ${w0} → ${w1} cells in 0.75 s`);
@@ -370,6 +375,7 @@ test('F4', 'margarine: a stroke from the block over bare steel leaves a puddle t
     let n = 0; while (h.run('!!fatMap') && n < 60 * 20) { h.frames(1); n++; }
     const gone = (n + 45) / 60;
     assert.ok(gone >= 2 && gone <= 12, `gone in 2–12 s (${gone.toFixed(1)} s)`);
+    assert.equal(h.run('fatStreak.length'), 0, 'the trace is gone with the puddle');
     assert.ok(h.run('butterLeft') < b0, 'the block got smaller');
     assert.equal(h.run('loopErrs'), 0);
     out.push(`${free ? 'free table' : 'ball on the table'}: ${w0}→${w1} cells, gone in ${gone.toFixed(1)} s, block ${h.run('butterLeft').toFixed(2)}`);
@@ -433,9 +439,18 @@ test('F4', 'margarine: a stroke from the block over bare steel leaves a puddle t
   const P = q.spots().pan, R = q.spots().panR, B = q.J('(()=>{const b=butterSpot();return __harness.toClient(b.x,b.y)})()');
   smear(q, [{ x: B.x - R * 0.25, y: B.y + R * 0.02 }]); q.frames(300);
   assert.ok(q.run('dishCrisp') < 1, `a dab at the rim, far from the roti: crisp ${q.run('dishCrisp').toFixed(2)}`);
-  for (let i = 0; i < 400 && q.run('butterLeft') > q.run('BUTTER_MIN'); i++) smear(q, [{ x: B.x - R * 0.25, y: B.y + R * 0.02 }]);
-  assert.equal(q.run('butterLeft'), q.run('BUTTER_MIN'), 'the block stops at its smallest');
+  // build 92: the block is endless — melted to its smallest, the finger lifts and a fresh block lies there (no line)
+  let low = q.run('butterLeft'), last = low, renewed = false, dabs = 0;
+  for (let i = 0; i < 400 && !renewed; i++) {
+    smear(q, [{ x: B.x - R * 0.25, y: B.y + R * 0.02 }]); dabs++;
+    const b = q.run('butterLeft'); if (b > last) renewed = true; else low = Math.min(low, b); last = b;
+  }
+  assert.ok(renewed, 'the block is endless: at its smallest a fresh one is laid');
+  assert.ok(low >= q.run('BUTTER_MIN') - 1e-9 && low < q.run('BUTTER_MIN') + 0.1, `it melted down to its smallest first (${low.toFixed(3)})`);
+  assert.equal(last, 1, 'the fresh block is whole');
+  smear(q, [{ x: B.x - R * 0.25, y: B.y + R * 0.02 }]); assert.ok(q.run('butterLeft') < 1);
   q.run('eveNewEvening("check")'); q.frames(2); assert.equal(q.run('butterLeft'), 1, 'a new evening — a new block');
+  out.push(`a fresh block after ${dabs} dabs at the rim (down to ${low.toFixed(2)})`);
   assert.equal(h.run('loopErrs'), 0); assert.deepEqual(h.errors, []);
   out.push(`strokes along the edge: +${crisp.join(' +')} = ${prev.toFixed(2)}; block ${h.run('butterLeft').toFixed(2)}`);
   return { summary: out.join(' · ') };
