@@ -4646,7 +4646,10 @@ function meanDry(){
   return n ? s/n : 0;
 }
 
-let SLAP_GROW = 0.24;            // сторона маха длиннее, но растёт весь лист (19.10.2026: было 0.12)
+let SLAP_GROW = 0.145;           // сторона маха длиннее, но растёт весь лист. Сборка 81: 0,24 давал
+                                  // готовность за 5–7 шлепков (плейтест 77, п. 9: «решают всё за пять
+                                  // касаний»); 0,145 — сектор доходит до пунктира на 8–10-м шлепке,
+                                  // готовность одними шлепками на 12–14-м, углы — тяга (Node, сборка 81)
 let lastSlapDir = null, sameSlapN = 0;
 let TEAR_I = 3.4;                // с этой силы шлепок опасен…
 let TEAR_THIN = 0.10;            // …если лист уже истончился ниже этого
@@ -4666,15 +4669,26 @@ function applyTearFeel(){
 
 // Рваная дырка на дальней стороне по направлению маха: рвём связи небольшого
 // пятна с неровным краем. Дырка остаётся навсегда — это узор, не наказание.
+// Сборка 81 (плейтест 77, п. 9): рвёт только шлепок, пришедшийся ПО УЖЕ ТОНКОМУ МЕСТУ —
+// тонкий узел ищется в конусе удара ±50° (дальняя сторона по маху, не центр листа),
+// и дырка мала: пятно в полторы ячейки вместо 2,4 (было 19 рваных ячеек за 5 шлепков).
+// Тонкого места в конусе нет — шлепок не рвёт, каким бы сильным ни был.
 function punchHole(direction){
   const c = centerOfSheet(), sr = sheetRadius();
-  const pxT = c.x + direction.x * sr * 0.8, pyT = c.y + direction.y * sr * 0.8;
-  let best = 0, bd = 1e18;
+  const th = Math.atan2(direction.y, direction.x);
+  let best = -1, bt = 1;
   for(let i=0;i<N;i++){
-    const d = (px[i]-pxT)**2 + (py[i]-pyT)**2;
-    if(d < bd){ bd = d; best = i; }
+    if(conDeg && conDeg[i] <= 0) continue;
+    const dx = px[i]-c.x, dy = py[i]-c.y, r = Math.hypot(dx, dy);
+    if(r < sr*0.25 || r > sr*1.15) continue;        // не центр и не улетевший осколок
+    let dth = Math.atan2(dy, dx) - th;
+    while(dth > Math.PI) dth -= 2*Math.PI;
+    while(dth < -Math.PI) dth += 2*Math.PI;
+    if(Math.abs(dth) > Math.PI/3.6) continue;       // конус удара ±50°
+    if(thick[i] < bt){ bt = thick[i]; best = i; }
   }
-  const rad = (Math.max(R0, sheetRadius())*2/(GRID-1)) * 2.4;   // пятно в шагах ТЕКУЩЕЙ сетки
+  if(best < 0 || bt >= TEAR_THIN) return false;     // тонкого места под ударом нет
+  const rad = (Math.max(R0, sheetRadius())*2/(GRID-1)) * 1.5;   // маленькое пятно в шагах ТЕКУЩЕЙ сетки
   let torn = 0;
   for(let k2=0;k2<cons.length;k2++){
     const c2 = cons[k2]; if(c2.broken) continue;
@@ -4683,6 +4697,7 @@ function punchHole(direction){
     if(d < rad * (0.65 + Math.random()*0.5)){ if(breakCon(c2)) torn++; }  // неровный край
   }
   if(torn) onTear();
+  return torn > 0;
 }
 function impactAction(){
   action.state = "IMPACT";
@@ -4702,14 +4717,11 @@ function impactAction(){
     lastSlapDir = { x:action.direction.x, y:action.direction.y };
   }
   // Дырка рождается из перестарательности: сильный шлепок по уже тонкому листу
-  // рвёт дальнюю сторону. Глобальный порог толщины стили не разводит — средний и
-  // жёсткий стили приходят к одинаковой толщине (замер: 0.108 против 0.083),
-  // поэтому судим по паре «сила удара × текущая тонкость» (audit: «слабый,
-  // хороший, опасный результат»).
-  if(action.impulse >= TEAR_I){
-    let tmin = 1; for(let i=0;i<N;i++) if(thick[i]<tmin) tmin = thick[i];
-    if(tmin < TEAR_THIN && slapShareMean() >= SLAP_TEAR_SHARE) punchHole(action.direction);
-  }
+  // рвёт дальнюю сторону. Сборка 81: тонкость судится МЕСТОМ — конусом удара в punchHole,
+  // а не минимумом по всему листу: «шлепок по уже тонкому месту», дырка маленькая и у края.
+  // Порог по силе (TEAR_I) и доля роста (SLAP_TEAR_SHARE) прежние: шлепок, который лист
+  // уже не растит, не рвёт; средний шлепок (2,3 < 3,4) не рвёт никогда.
+  if(action.impulse >= TEAR_I && slapShareMean() >= SLAP_TEAR_SHARE) punchHole(action.direction);
   audioSlap(action.impulse);
   plasticT = 0.15;
   action.timer = 0.30;             // успокоение = релаксация в новые длины покоя
