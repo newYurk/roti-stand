@@ -11,7 +11,7 @@
 // до 400%+ и лист «рвётся» в середине от любого движения. Замер это обнаружил сразу.
 // Число узлов сохранено (1 060 после обрезки по кругу; прежняя оценка «~1150» была на глаз,
 // пересчитано 07.09.2026), однородность рёбер восстановлена.
-const BUILD = "2026-11-18 · видимый жест: лист растёт заметно, рез край в край, угол поддевается · 88";
+const BUILD = "2026-11-18 · доводка: ровная корка без заплаток, мягкая тень уголка, резы одной ширины · 90";
 const GRID = 38;                   // 38x38, в круг попадает 1 060 узлов (посчитано, не оценка)
 let SUBSTEPS = 8;                  // T2: 8–10 подшагов, 1 итерация
 let DAMP = 0.986;
@@ -1438,6 +1438,64 @@ function crustLook(f){
   crustCache.set(f,L); return L;
 }
 function dishCrustColor(f,side){ return side===undefined ? crustLook(f).c : crustFace(f,side).ground; }
+// Сборка 90: фон корки на таве — по вершинам, как на столе (tableFaceData). Цвет вершины — среднее фона граней
+// того же слоя в этой точке; иначе грань, прожаренная меньше соседей, светилась квадратной заплаткой.
+// Номера вершин считаются раз на массив граней, суммы — каждый кадр из уже закэшированных crustLook.
+const crustTopo = new WeakMap();
+function crustVertexIds(faces){
+  let T=crustTopo.get(faces); if(T) return T;
+  const ids=new Map(), off=new Int32Array(faces.length+1);
+  for(let i=0;i<faces.length;i++) off[i+1]=off[i]+faces[i].points.length;
+  const id=new Int32Array(off[faces.length]);
+  faces.forEach((f,i)=>f.points.forEach((p,k)=>{
+    const key=Math.round(p.x*2e4)+","+Math.round(p.y*2e4)+(f.turned ? "t" : "f");
+    let v=ids.get(key); if(v===undefined){ v=ids.size; ids.set(key,v); } id[off[i]+k]=v; }));
+  T={off,id,n:ids.size}; crustTopo.set(faces,T); return T;
+}
+function crustVertexColors(faces){
+  const T=crustVertexIds(faces), acc=new Float32Array(T.n*4);
+  for(let i=0;i<faces.length;i++){
+    const f=faces[i]; if(f.kind!=="dough") continue;
+    const c=crustLook(f).c;
+    for(let j=T.off[i];j<T.off[i+1];j++){ const v=T.id[j]*4; acc[v]+=c[0]; acc[v+1]+=c[1]; acc[v+2]+=c[2]; acc[v+3]++; }
+  }
+  for(let v=0;v<T.n;v++){ const w=acc[v*4+3]; if(w>1){ acc[v*4]/=w; acc[v*4+1]/=w; acc[v*4+2]/=w; } }
+  return {T,acc};
+}
+// Заливка треугольника с цветами вершин (градиент или строка цвета): линейный градиент вдоль направления, где растёт яркость
+// (r+g+b, линейная по треугольнику), со стопом в средней вершине. Цвет корки меняется вдоль одной
+// линии «светлее — темнее», так что градиент даёт в вершинах их точные цвета. s — экранные x, y трёх точек.
+// Градиент держится в кэше грани, пока её экранные точки и цвета вершин почти не сдвинулись: за кадр жарки
+// цвет меняется на сотые доли единицы, а новый градиент на 1 000+ граней стоил ~2 мс кадра.
+const crustGrad = new WeakMap();
+function crustGradientCached(g,f,s,c0,c1,c2){
+  let h=crustGrad.get(f);
+  if(h && h.g===g){
+    let ok=true;
+    for(let i=0;i<6 && ok;i++) if(Math.abs(h.s[i]-s[i])>0.05) ok=false;
+    const C=[c0,c1,c2];
+    for(let i=0;i<9 && ok;i++) if(Math.abs(h.c[i]-C[(i/3)|0][i%3])>0.75) ok=false;
+    if(ok) return h.gr;
+  }
+  if(!h){ h={s:new Float64Array(6),c:new Float32Array(9),gr:null,g:null}; crustGrad.set(f,h); }
+  h.s.set(s); h.c.set([...c0,...c1,...c2]); h.g=g; h.gr=crustGradient(g,s,c0,c1,c2);
+  return h.gr;
+}
+function crustGradient(g,s,c0,c1,c2){
+  const t0=c0[0]+c0[1]+c0[2], t1=c1[0]+c1[1]+c1[2], t2=c2[0]+c2[1]+c2[2];
+  const lo=Math.min(t0,t1,t2), hi=Math.max(t0,t1,t2);
+  // ровная заливка — средним вершин, не своим цветом грани: иначе недожаренная грань осталась бы заплаткой
+  const flat=()=>rgb([(c0[0]+c1[0]+c2[0])/3,(c0[1]+c1[1]+c2[1])/3,(c0[2]+c1[2]+c2[2])/3]);
+  if(hi-lo<3 || !g.createLinearGradient) return flat();   // разница меньше единицы на канал — хватит ровной заливки
+  const e1x=s[2]-s[0], e1y=s[3]-s[1], e2x=s[4]-s[0], e2y=s[5]-s[1], det=e1x*e2y-e2x*e1y;
+  if(Math.abs(det)<1e-6) return flat();
+  const d1=t1-t0, d2=t2-t0, gx=(d1*e2y-d2*e1y)/det, gy=(d2*e1x-d1*e2x)/det, gg=gx*gx+gy*gy;
+  if(!(gg>1e-12)) return flat();
+  const T=[t0,t1,t2], C=[c0,c1,c2], a=T.indexOf(lo), b=T.indexOf(hi), m=3-a-b, k=(hi-lo)/gg;
+  const gr=g.createLinearGradient(s[a*2],s[a*2+1],s[a*2]+gx*k,s[a*2+1]+gy*k);
+  gr.addColorStop(0,rgb(C[a])); if(m!==a && m!==b) gr.addColorStop((T[m]-lo)/(hi-lo),rgb(C[m])); gr.addColorStop(1,rgb(C[b]));
+  return gr;
+}
 // Цвет в середине грани с пятном (для наборов: то, что текстура кладёт в этой точке).
 function dishCrustSample(f){ const P=crustFace(f), q=faceMaterialMid(f); return crustMix(P,q.x,q.y); }
 // Текстура пятен: поле в координатах материала на квадрате [U0, U0+N·S]², одна на сторону и зерно;
@@ -2746,18 +2804,26 @@ function dishPieceShift(faces){
   if(any){ out=new Map(); faces.forEach((f,i)=>out.set(f,dir.get(piece[i])||{x:0,y:0})); }
   cache.set(faces,out); return out;
 }
+// Сборка 90: щели одной ширины. Вглубь стола щель (пропил + два сдвига) на экране сжата наклоном в TILT раз, и
+// поперечные резы (щель по x, в ней ещё тень куска) читались втрое шире продольного: снимок 390×844 — 11 против
+// 3 px устройства. Сдвиг по x уменьшен так, чтобы пропил и два сдвига по x на экране равнялись тем же по y:
+// w + 2·kx·s = TILT·(w + 2·s). Порог G2 (рез поперёк y раздвигает на 2–3 CSS px) не тронут.
+function spreadKX(){
+  const w=dish && dish.cuts.length && dish.cuts[0].width || .018;
+  return Math.max(0,TILT-(1-TILT)*w/(2*PIECE_SPREAD));
+}
 // Живой сдвиг кусков: обычная щель, умноженная на разведение пальцами.
 function pieceShiftLive(faces){
   const base=dishPieceShift(faces);
-  if(!base || dishSpread===1) return base;
-  const c=pieceShiftLive.c;
-  if(c && c.faces===faces && c.k===dishSpread && c.base===base) return c.m;
-  // Вглубь стола движение сжато наклоном (TILT), поэтому поперечные резы раскрывались хуже
-  // продольных: доля сверх обычной щели по y делится на TILT, и щели расходятся поровну на экране.
-  const ky=1+(dishSpread-1)/TILT;
+  if(!base) return base;
+  const c=pieceShiftLive.c, kx=spreadKX();
+  if(c && c.faces===faces && c.k===dishSpread && c.base===base && c.kx===kx) return c.m;
+  // Вглубь стола движение сжато наклоном (TILT): доля сверх обычной щели по y делится на TILT, и щели
+  // расходятся поровну на экране. Обычная щель по x — с множителем spreadKX, доля сверх неё — прежняя.
+  const ky=1+(dishSpread-1)/TILT, kxs=kx+dishSpread-1;
   const m=new Map();
-  for(const [f,o] of base) m.set(f,{x:o.x*dishSpread,y:o.y*ky});
-  pieceShiftLive.c={faces,base,k:dishSpread,m}; return m;
+  for(const [f,o] of base) m.set(f,{x:o.x*kxs,y:o.y*ky});
+  pieceShiftLive.c={faces,base,k:dishSpread,kx,m}; return m;
 }
 function canSpread(){ return !!dish && dish.mode==="cut" && dish.cuts.length>0 && !dishFlight && !dishMove; }
 function spreadTo(k){ dishSpread=Math.max(1,Math.min(SPREAD_MAX,k)); }
@@ -3170,7 +3236,7 @@ function doughSet(f){
   const s=Math.min(1,Math.max(t.dry[0],t.dry[1])/SET_DRY);
   return SET_RAW+(1-SET_RAW)*s*s*(3-2*s);
 }
-function drawDishFaces(g,faces,screen,H,zk,shadow=true,shift=null){
+function drawDishFaces(g,faces,screen,H,zk,shadow=true,shift=null,noShadow=null){
   const turn=dishTwist && dish && faces===dish.faces ? dishTwist.angle : 0;   // свет стоит, пока блюдо крутят
   if(shift){ const base=screen; screen=(p,f)=>{ const o=f && shift.get(f); return base(o ? {x:p.x+o.x,y:p.y+o.y} : p); }; }
   // Тень конверта на стали и боковая сторона у его края. Отдельные заливки мелких
@@ -3185,15 +3251,28 @@ function drawDishFaces(g,faces,screen,H,zk,shadow=true,shift=null){
   const top=(i,off)=>{
     const f=faces[i], p=screen(f.points[0],f), y0=p.y-off(0); g.beginPath(); g.moveTo(p.x,y0); tri[0]=p.x; tri[1]=y0;
     for(let k=1;k<f.points.length;k++){ const q=screen(f.points[k],f), y=q.y-off(k); g.lineTo(q.x,y); if(k<3){ tri[k*2]=q.x; tri[k*2+1]=y; } }
-    g.closePath(); g.fill();
+    g.closePath();
+    if(VC && faces[i].kind==="dough" && faces[i].points.length===3){   // сборка 90: фон по вершинам
+      // свет тоже по вершинам (кроме поворота блюда): у кромки склон круче, и свет грани давал осколки
+      const o=VC.T.off[i], id=VC.T.id, A=VC.acc, ps=faces[i].points;
+      const c=m=>{ const v=id[o+m]*4, k=VL ? vlight(o+m,ps[m]) : ink; return [Math.min(255,A[v]*k),Math.min(255,A[v+1]*k),Math.min(255,A[v+2]*k)]; };
+      g.fillStyle=crustGradientCached(g,faces[i],tri,c(0),c(1),c(2));
+    }
+    g.fill();
   };
+  // Цвета вершин фона корки — только у листа с жаркой (на таве и в руке после неё)
+  const VC=dish && dish.thermal && faces.some(f=>f.kind==="dough") ? crustVertexColors(faces) : null;
+  let ink=1;                                     // множитель света текущей грани для цветов вершин
+  // свет вершин — раз на снимок высот (H живёт, пока не меняются грани)
+  const VL=VC && H && !turn ? (H.crustVL && H.crustVL.length===VC.T.id.length ? H.crustVL : (H.crustVL=new Float32Array(VC.T.id.length).fill(NaN))) : null;
+  const vlight=(j,p)=>{ let k=VL[j]; if(k!==k) k=VL[j]=Math.max(.88,H.lightPoint(p)); return k; };
   const faceScreen=f=>p=>screen(p,f);
   if(H){
     // На столе тень гуще и длиннее: куски читаются отдельными брусками (владелица 17.09: «плоско»).
     const onTable=dish && dish.mode!=="fold";
     g.fillStyle=onTable ? "rgba(12,7,3,.5)" : "rgba(18,10,4,.34)";
     for(let i=0;i<faces.length && shadow;i++){
-      if(faces[i].kind!=="dough" || H.zb[i]>.3) continue;
+      if(faces[i].kind!=="dough" || H.zb[i]>.3 || (noShadow && noShadow(faces[i]))) continue;
       const hs=H.vert(i), drop=zk*RELIEF_K*Math.max(...hs)*(onTable ? .45 : .25);
       if(drop<.3) continue;
       const ps=faces[i].points, p=screen(ps[0],faces[i]); g.beginPath(); g.moveTo(p.x+drop,p.y);
@@ -3222,7 +3301,8 @@ function drawDishFaces(g,faces,screen,H,zk,shadow=true,shift=null){
     // Открытая начинка без светотени купола: это плоская россыпь ломтиков, а не горка.
     const flat=H && f.kind==="filling" && H.exposed(k);
     const lit=H && !flat ? (turn && H.lightAtAngle ? H.lightAtAngle(k,turn) : H.lightAt(k)) : 1;
-    g.fillStyle=rgb(tone(f, f.kind==="filling" ? 1 : Math.max(.88, lit)));
+    ink=f.kind==="filling" ? 1 : Math.max(.88, lit);
+    g.fillStyle=rgb(tone(f, ink));
     g.globalAlpha=f.kind==="filling" ? 1
       : H ? Math.min(.95,.72+doughMM(f.tone)*.3)*doughSet(f)
       : Math.max(.48,Math.min(.92,.48+doughMM(f.tone)*.3));
@@ -3421,7 +3501,7 @@ function cornerTopColor(q){ const f=cornerFaceAt(q,true); return f ? dishCrustCo
 // уходит по дуге радиуса r = reach/θ на угол s/r — у петли лист почти лежит, кончик поднят на θ и
 // смотрит низом. Рисуется полосами поперёк завитка (снизу к кончику), верх и низ — своими цветами,
 // свет по наклону. Под углом на таве — мягкая тень (shadowBlur), сталь в следе шапки темнее.
-const CORNER_CURL_STRIPS = 12;
+const CORNER_CURL_STRIPS = 12, CORNER_SHADOW_A = 0.38;   // сила тени под завитком у петли
 function drawCornerLift(g,screen,lifted,cap,e,sx,sy){
   const {P,hinge,m,reach,mid}=cap, th=e*CORNER_LIFT_DEG*Math.PI/180; if(th<1e-3) return;
   const r=reach/th;
@@ -3431,9 +3511,20 @@ function drawCornerLift(g,screen,lifted,cap,e,sx,sy){
   const dense=Q=>{ const out=[]; Q.forEach((a,i)=>{ const b=Q[(i+1)%Q.length], k=Math.max(1,Math.ceil(Math.hypot(b.x-a.x,b.y-a.y)/(reach/16)));
     for(let j=0;j<k;j++) out.push({x:a.x+(b.x-a.x)*j/k,y:a.y+(b.y-a.y)*j/k}); }); return out; };
   const path=Q=>{ g.beginPath(); Q.forEach((q,i)=>i ? g.lineTo(q.x,q.y) : g.moveTo(q.x,q.y)); g.closePath(); };
-  // тень на таве: след шапки и мягкий ореол вокруг
-  g.save(); g.shadowColor=`rgba(0,0,0,${(.5*e).toFixed(3)})`; g.shadowBlur=Math.max(2,9*sx*e);
-  g.fillStyle=`rgba(8,4,2,${(.32*e).toFixed(3)})`; path(P.map(screen)); g.fill(); g.restore();
+  // Тень на таве (сборка 90): только размытая и полупрозрачная, гуще у петли (под завитком) и тает к кончику
+  // угла. Прежде след шапки заливался тёмным поверх ореола — почти чёрный с жёстким краем по кромке роти.
+  // Сама фигура уносится за холст, на таву ложится только её тень (shadowOffset — в пикселях устройства).
+  if(g.getTransform && g.createLinearGradient){   // в Node (наборы) холста нет — без тени
+  const S=P.map(screen), a0=screen({x:m.x*hinge,y:m.y*hinge}), a1=screen({x:m.x*(hinge+reach),y:m.y*(hinge+reach)});
+  const tip=P.reduce((b,p)=>p.x*m.x+p.y*m.y>b.x*m.x+b.y*m.y ? p : b,P[0]), at=screen(tip);
+  // конец градиента — проекция кончика угла на ось m в экране
+  const ux=a1.x-a0.x, uy=a1.y-a0.y, uu=ux*ux+uy*uy||1, k=((at.x-a0.x)*ux+(at.y-a0.y)*uy)/uu;
+  const OFF=1e4, M=g.getTransform(), gr=g.createLinearGradient(a0.x+OFF,a0.y,a0.x+OFF+ux*k,a0.y+uy*k);
+  gr.addColorStop(0,"rgba(0,0,0,1)"); gr.addColorStop(.55,"rgba(0,0,0,.35)"); gr.addColorStop(1,"rgba(0,0,0,0)");
+  g.save(); g.shadowColor=`rgba(10,5,2,${(CORNER_SHADOW_A*e).toFixed(3)})`; g.shadowBlur=Math.max(2,6*sx*e);
+  g.shadowOffsetX=-OFF*M.a; g.shadowOffsetY=-OFF*M.b; g.fillStyle=gr;
+  path(S.map(q=>({x:q.x+OFF,y:q.y}))); g.fill(); g.restore();
+  }
   const top=cornerTopColor(mid), under=cornerUnderColor(mid);
   for(let i=0;i<CORNER_CURL_STRIPS;i++){
     const s0=hinge+reach*i/CORNER_CURL_STRIPS, s1=hinge+reach*(i+1)/CORNER_CURL_STRIPS;
@@ -4004,7 +4095,8 @@ function drawDish(g,sx,sy){
       g.save(); g.beginPath(); g.rect(-1e4,-1e4,3e4,3e4);
       cap.P.forEach((p,i)=>{ const q=screen(p); i ? g.lineTo(q.x,q.y) : g.moveTo(q.x,q.y); }); g.closePath(); g.clip("evenodd");
     }
-    drawDishFaces(g,faces,screen,H,zk,true,pieceShiftLive(faces));
+    // Сборка 90: у граней шапки нет и тени на таве — она ложилась правее выреза тёмной полосой с жёстким краем
+    drawDishFaces(g,faces,screen,H,zk,true,pieceShiftLive(faces),cap ? f=>{ let x=0,y=0; for(const p of f.points){ x+=p.x; y+=p.y; } return pointInFace(cap.P,x/f.points.length,y/f.points.length); } : null);
     if(!moving && !slide && faces===dish.faces) drawMargarineGloss(g,screen,H,zk,sx);
     if(lift && !cap) drawLiftedEdge(g,screen,lift,sx,sy);
     // Rebuild expensive boundary intersections only after a committed geometry
