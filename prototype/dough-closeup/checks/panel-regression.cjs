@@ -89,7 +89,7 @@ test('recognised / attempts: dash with no attempts; sheet fill: dash on step 1, 
 });
 test('restart: meters (fps, worst, delay, tosses) go back to «no data»; build string present', () => {
   const h = fresh(); frames(h, 1, 150); frames(h, 40, 16.7); h.run('restartRun()'); frames(h, 2, 16.7);
-  assert.match(stats(h), /— fps/); assert.match(stats(h), /худший кадр —/); assert.match(stats(h), /сборка: .*101/);
+  assert.match(stats(h), /— fps/); assert.match(stats(h), /худший кадр —/); assert.match(stats(h), /сборка: .* · \d+\n/);   // номер сборки любой: тест не правится на каждой
 });
 test('survives frame switch and evening mode: panel keeps updating', () => {
   const h = fresh(); const before = stats(h);
