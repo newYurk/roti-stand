@@ -538,19 +538,25 @@ test('G8', 'layout at 390×844 and 375×667: her picture is above the counter, b
   return { summary: out.join(' · ') };
 });
 
-test('G9', 'build 80 — the knock is seen at the tava: she leans, the arm reaches over the counter and the marks flash there (build 89: at the edge of the roti nearest to her while it is not flipped, not at the far rim); it repeats after 8 s of waiting over a FOLDED roti (never over an open sheet) until the roti is flipped or taken off; her eyes follow the roti and the folding finger; a roti carried past her onto the counter turns her head', () => {
+test('G9', 'build 80 — the knock is seen at the tava: she leans, points with a short arm from her side (build 89 r2) and the marks flash there (build 89: at the edge of the roti nearest to her while it is not flipped, not at the far rim); it repeats after 8 s of waiting over a FOLDED roti (never over an open sheet) until the roti is flipped or taken off; her eyes follow the roti and the folding finger; a roti carried past her onto the counter turns her head', () => {
   const h = guest(); light(h); onPan(h); until(h, 'GST.here');
   // the main knock: arm at the rim of the tava, marks only around the two hits, she leans
   until(h, 'guestPic()===2');
-  const S = h.spots(); let hits = 0, marks = 0, frames = 0, markNoHit = 0, rim = null, lean = 0;
+  const S = h.spots(); let hits = 0, marks = 0, frames = 0, markNoHit = 0, rim = null, lean = 0, reachHit = 0, reachRest = 0;
   while (h.pic() === 2) {
     const G = h.gs(); assert.ok(G.arm, 'the arm is out while she knocks'); rim = G.arm.at; lean = G.lean;
     if (G.arm.hit) { hits++; assert.ok(G.knock > 0, 'the tava jumps on the hit'); assert.ok(G.arm.marks, 'marks on every hit'); }
     if (G.arm.marks) marks++; if (G.arm.marks && !G.arm.hit) markNoHit++;
+    // build 89 round 2: she points from her side — a short arm (about her head), aimed at the marks, the finger jabs on the hit
+    const A = G.arm, toAt = Math.hypot(A.at.x - A.root.x, A.at.y - A.root.y), aim = ((A.tip.x - A.root.x) * (A.at.x - A.root.x) + (A.tip.y - A.root.y) * (A.at.y - A.root.y)) / (A.reach * toAt);
+    assert.ok(A.reach <= A.head * 1.15 && A.reach < toAt * 0.6, `a short arm from her side (${A.reach} px, head ${A.head}, to the spot ${toAt.toFixed(0)})`);
+    assert.ok(aim > 0.999 && A.root.y <= S.counterBottom, `the finger points at the spot from her side (aim ${aim.toFixed(4)})`);
+    if (A.hit) reachHit = Math.max(reachHit, A.reach); else reachRest = Math.max(reachRest, A.reach);
     h.frames(1); frames++;
   }
   assert.ok(rim.y > S.counterBottom + 4 && rim.y < S.pan.y && Math.abs(rim.x - S.pan.x) <= S.panR, `the marks are on the tava, below the counter, on her side (${rim.x.toFixed(0)},${rim.y.toFixed(0)}; counter bottom ${S.counterBottom.toFixed(0)}, tava ${S.pan.x.toFixed(0)},${S.pan.y.toFixed(0)})`);
   assert.ok(hits >= 12 && marks > hits && markNoHit >= 12, `marks outlast the hits (${hits} hit frames, ${marks} mark frames)`);
+  assert.ok(reachHit > reachRest * 1.08, `the finger jabs on the hit (${reachRest} → ${reachHit} px)`);
   assert.ok(lean > 5, `she leans to the tava while knocking (${lean} px)`); assert.equal(h.gs().arm, null, 'no arm between knocks'); assert.equal(h.gs().lean, 0);
   h.tick(2, 1 / 60, true); assert.equal(h.run('loopErrs'), 0);
   // Changed in the review of build 80: an OPEN sheet cannot be flipped, so she does not repeat the knock over it
@@ -598,7 +604,7 @@ test('G9', 'build 80 — the knock is seen at the tava: she leans, the arm reach
   // given to her: no «watch»
   const c = guest(); light(c); onPan(c); arrive(c); finish(c); serve(c, c.gs().som);
   assert.ok(!c.gev().includes('watch')); assert.deepEqual(h.errors.concat(b.errors, c.errors), []);
-  return { summary: `knock: ${hits} hit frames, marks ${marks} frames at ${rim.x.toFixed(0)},${rim.y.toFixed(0)} (counter bottom ${S.counterBottom.toFixed(0)}); lean ${lean} px; open sheet 25 s: no repeat; after the fold repeats at ${at.map(x => x.toFixed(1)).join(' s, ')} s; gaze tava ${g0.x},${g0.y}; watch dir ${W.watchDir}, head ${W.head}` };
+  return { summary: `knock: ${hits} hit frames, marks ${marks} frames at ${rim.x.toFixed(0)},${rim.y.toFixed(0)} (counter bottom ${S.counterBottom.toFixed(0)}); arm ${reachRest}→${reachHit} px from her side; lean ${lean} px; open sheet 25 s: no repeat; after the fold repeats at ${at.map(x => x.toFixed(1)).join(' s, ')} s; gaze tava ${g0.x},${g0.y}; watch dir ${W.watchDir}, head ${W.head}` };
 });
 
 // Build 89 (docs/som-points-batch-spec.md): she knocks at the PALEST place of the roti's edge, not at the rim, and

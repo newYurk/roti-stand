@@ -18,7 +18,8 @@
    она поворачивает голову вслед (guestWatch). Рука и взгляд нарисованы кодом поверх любой картинки.
    Сборка 89 (спека docs/som-points-batch-spec.md): стук — не у борта, а у САМОГО БЛЕДНОГО места края роти
    (guestPaleEdge: по контуру конверта, цвет видимой стороны верхнего слоя; не перевёрнут — край, ближний к
-   ней), и рука видна при любой картинке: предплечье от стойки, браслет, палец стучит в это место. Роти с
+   ней), и рука видна при любой картинке; раунд 2: рука короткая, с её стороны (guestArmPose) — палец
+   направлен в это место и тычет на ударах, метки — в самом месте на роти. Роти с
    сырой видимой стороной сняли на стол — короткое «нет» (два качания за GUEST_NO_S) и взгляд на таву
    (guestSeesRemoval, событие «no»), раз на каждый такой съём.
 
@@ -383,6 +384,7 @@ function guestSpots(){
     shelf:c(F.x0 + F.w/2, F.y), shelfTop:r.top + (F.y - 23*G.u)*ky, gifts:GST.gifts.slice(), knock:panKnock*ky, head:+guestHeadTurn().toFixed(3),
     gaze:(g => ({ x:+g.x.toFixed(3), y:+g.y.toFixed(3) }))(guestGaze(G, S)), lean:+(guestLean()*S.h*ky).toFixed(2), watch:+guestWatchK().toFixed(3), watchDir:gWatchDir,
     arm:guestKnocking() ? (K => ({ rim:c(K.rim.x, K.rim.y), at:c(K.at.x, K.at.y), hit:K.hit, marks:K.marks,
+      ...(A => ({ root:c(A.root.x, A.root.y), tip:c(A.tip.x, A.tip.y), reach:+(A.reach*ky).toFixed(1), head:+(A.head*ky).toFixed(1) }))(guestArmPose(G, S, K)),
       pale:K.pale ? { cook:+K.pale.cook.toFixed(3), low:+K.pale.low.toFixed(3), edge:K.pale.samples.map(q => ({ ...c(q.x, q.y), cook:+q.cook.toFixed(3), src:q.src, side:q.side })) } : null }))(guestKnockAt(G, S)) : null,
     again:+gAgain.toFixed(2), noLook:+gNoLook.toFixed(2) };
 }
@@ -438,43 +440,48 @@ function guestPicRect(G, S, pic){
   const im = gImgs[pic - 1], k = Math.min(S.w/im.naturalWidth, S.h/im.naturalHeight), w = im.naturalWidth*k, h = im.naturalHeight*k;
   return { x:S.x0 + (S.w - w)/2, y:S.y0 + S.h - h + dy, w, h, dy };
 }
-// Рука через стойку к самому бледному месту края роти (сборка 89; сборка 80 — к борту тавы). Рисуется поверх
-// стойки, тавы и роти, пока идёт стук, при любой картинке: предплечье выходит из её стучащего кулака
-// (GUEST_HAND на картинке 2) и тянется через стойку, у кисти серебряный браслет (он у неё на картинках),
-// указательный палец — в бледное место; на каждом ударе палец опускается и касается роти, тава вздрагивает,
-// от кончика расходятся четыре короткие светлые чёрточки. Цвета — кожа и обводка её картинок.
-// (Сборка 81 убрала плоскую руку при PNG: от стойки до борта она читалась палкой. Теперь у неё обводка,
-// сужение к кисти, кисть и палец — и спека требует руку видимой.)
+// Рука (сборка 89, раунд 2). Раунд 1 тянул руку от стойки через всю стойку и стол до тавы — так далеко человек
+// не достаёт, читалось палкой. Теперь она показывает со своей стороны: наклонилась (наклон сборки 80), из
+// стучащего кулака (GUEST_HAND на картинке 2, у края стойки) выходит короткое предплечье длиной примерно с её
+// голову (GUEST_REACH высоты картинки), указательный палец направлен в самое бледное место края роти. На каждом
+// ударе палец коротко тычет вперёд (GUEST_JAB длины руки), тава вздрагивает, метки стука вспыхивают В САМОМ
+// МЕСТЕ на роти (K.at), не у пальца. Цвета — кожа, обводка и браслет её картинок.
+const GUEST_REACH = 0.42, GUEST_JAB = 0.14;
+function guestArmPose(G, S, K){
+  const R = guestPicRect(G, S, 2), u = G.u;
+  const root = { x:R.x + R.w*GUEST_HAND.x, y:Math.min(R.y + R.h*GUEST_HAND.y, S.zone.y1 - 3*u) };
+  const L0 = Math.max(1e-6, Math.hypot(K.at.x - root.x, K.at.y - root.y)), dx = (K.at.x - root.x)/L0, dy = (K.at.y - root.y)/L0;
+  const reach = Math.min(L0, R.h*GUEST_REACH*(1 + (K.hit ? GUEST_JAB : 0)));
+  return { root, dx, dy, reach, head:R.h*GUEST_REACH, tip:{ x:root.x + dx*reach, y:root.y + dy*reach } };
+}
 function guestArm(g, sx, sy, G){
   if(!guestKnocking()) return;
-  const u = G.u, S = guestSlot(G), K = guestKnockAt(G, S), R = guestPicRect(G, S, 2);
+  const u = G.u, S = guestSlot(G), K = guestKnockAt(G, S), A = guestArmPose(G, S, K), H = A.head;
   const SKIN = "#cf925c", LINE = "#4a2a1a", SILVER = "#aaa198";
-  const root = { x:R.x + R.w*GUEST_HAND.x, y:Math.min(R.y + R.h*GUEST_HAND.y, S.zone.y1 - 3*u) };
-  const tip = { x:K.at.x, y:K.at.y - (K.hit ? 0.5 : 5)*u };      // палец над краем; удар — касается
-  const L = Math.max(1e-6, Math.hypot(tip.x - root.x, tip.y - root.y)), dx = (tip.x - root.x)/L, dy = (tip.y - root.y)/L;
-  const nx = -dy, ny = dx, fin = Math.min(14*u, L*0.3), wr = { x:tip.x - dx*(fin + 9*u), y:tip.y - dy*(fin + 9*u) };
-  const P = (p, k, w) => [(p.x + nx*w*k)*sx, (p.y + ny*w*k)*sy];
-  const arm = (pad, color) => {                              // предплечье: полуширина от 11 u у кулака к 7 u у запястья
+  const { root, dx, dy, tip } = A, nx = -dy, ny = dx, k = H/100;           // размеры — доли длины руки
+  const fin = 26*k, wr = { x:tip.x - dx*(fin + 12*k), y:tip.y - dy*(fin + 12*k) };
+  const P = (p, s, w) => [(p.x + nx*w*s)*sx, (p.y + ny*w*s)*sy];
+  const arm = (pad, color) => {                              // предплечье: от кулака к запястью сужается
     g.fillStyle = color; g.beginPath();
-    g.moveTo(...P(root, 1, 11*u + pad)); g.lineTo(...P(wr, 1, 7*u + pad)); g.lineTo(...P(wr, -1, 7*u + pad)); g.lineTo(...P(root, -1, 11*u + pad));
+    g.moveTo(...P(root, 1, 15*k + pad)); g.lineTo(...P(wr, 1, 10*k + pad)); g.lineTo(...P(wr, -1, 10*k + pad)); g.lineTo(...P(root, -1, 15*k + pad));
     g.closePath(); g.fill();
-    g.beginPath(); g.ellipse(root.x*sx, root.y*sy, (11*u + pad)*sx, (10*u + pad)*sy, 0, 0, Math.PI*2); g.fill();
+    g.beginPath(); g.ellipse(root.x*sx, root.y*sy, (15*k + pad)*sx, (13*k + pad)*sy, 0, 0, Math.PI*2); g.fill();
   };
   const line = (p, q, w, color) => {
-    g.strokeStyle = color; g.lineWidth = Math.max(1, w*u*sx); g.lineCap = "round";
+    g.strokeStyle = color; g.lineWidth = Math.max(1, w*sx); g.lineCap = "round";
     g.beginPath(); g.moveTo(p.x*sx, p.y*sy); g.lineTo(q.x*sx, q.y*sy); g.stroke();
   };
-  const hand = { x:wr.x + dx*6*u, y:wr.y + dy*6*u }, rot = Math.atan2(dy*sy, dx*sx);
-  const palm = (pad, color) => { g.fillStyle = color; g.beginPath(); g.ellipse(hand.x*sx, hand.y*sy, (10*u + pad)*sx, (8.5*u + pad)*sy, rot, 0, Math.PI*2); g.fill(); };
-  const base = { x:hand.x + dx*5*u, y:hand.y + dy*5*u };
+  const hand = { x:wr.x + dx*7*k, y:wr.y + dy*7*k }, rot = Math.atan2(dy*sy, dx*sx);
+  const palm = (pad, color) => { g.fillStyle = color; g.beginPath(); g.ellipse(hand.x*sx, hand.y*sy, (13*k + pad)*sx, (11*k + pad)*sy, rot, 0, Math.PI*2); g.fill(); };
+  const base = { x:hand.x + dx*6*k, y:hand.y + dy*6*k }, o = Math.max(1.2*u, 2.4*k);
   g.save();
-  arm(1.8*u, LINE); palm(1.8*u, LINE); line(base, tip, 6 + 3.6, LINE);      // обводка
-  arm(0, SKIN); palm(0, SKIN); line(base, tip, 6, SKIN);                    // кожа
-  const b0 = { x:wr.x - dx*2*u, y:wr.y - dy*2*u };                          // браслет поперёк запястья
-  for(const k of [0, 2.8]){ const c = { x:b0.x - dx*k*u, y:b0.y - dy*k*u }; line({ x:c.x + nx*7.5*u, y:c.y + ny*7.5*u }, { x:c.x - nx*7.5*u, y:c.y - ny*7.5*u }, 2.2, SILVER); }
-  if(K.marks){
+  arm(o, LINE); palm(o, LINE); line(base, tip, 9*k + 2*o, LINE);           // обводка
+  arm(0, SKIN); palm(0, SKIN); line(base, tip, 9*k, SKIN);                 // кожа
+  const b0 = { x:wr.x - dx*3*k, y:wr.y - dy*3*k };                          // браслет поперёк запястья
+  for(const t of [0, 4]){ const c = { x:b0.x - dx*t*k, y:b0.y - dy*t*k }; line({ x:c.x + nx*10.5*k, y:c.y + ny*10.5*k }, { x:c.x - nx*10.5*k, y:c.y - ny*10.5*k }, 3*k, SILVER); }
+  if(K.marks){                                               // метки — в самом месте на роти
     for(const [mx, my, ex, ey] of [[-13, 2, -24, -3], [13, 2, 24, -3], [-7, 11, -13, 20], [7, 11, 13, 20]])
-      line({ x:K.at.x + mx*u, y:K.at.y + my*u }, { x:K.at.x + ex*u, y:K.at.y + ey*u }, 2.5, "#f0e0b0");
+      line({ x:K.at.x + mx*u, y:K.at.y + my*u }, { x:K.at.x + ex*u, y:K.at.y + ey*u }, 2.5*u, "#f0e0b0");
   }
   g.restore();
 }
