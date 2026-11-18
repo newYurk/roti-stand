@@ -415,6 +415,9 @@ function eveningDraw(g, sx, sy, layer){
     ell(lid, G.lidR*0.94, G.lidR*TILT*0.94, "#5d564b");
     ell({ x:lid.x, y:lid.y - G.lidR*TILT*0.06 }, G.lidR*0.13, G.lidR*TILT*0.13, "#2a2622");
   }
+  // вечер окончен: ком теста на столе — касание начинает следующий вечер. Сборка 94: ком лежит под сумерками
+  // вместе со столом (ревью 18.11, п. 6) — яркий шарик при пустой миске читался недоделанным действием.
+  if(EVE.over) ell(G.lump, G.lump.r, G.lump.r*0.8, "#f0e0b0");
   // лампа не горит — тележка в сумерках: один плоский тёмный слой, без градиента
   if(!EVE.lamp) box(0, G.sky.y1, G.W, G.H - G.sky.y1, "rgba(8,6,10,0.55)");
   // лампа над тележкой
@@ -429,8 +432,6 @@ function eveningDraw(g, sx, sy, layer){
   g.closePath(); g.fill();
   ell({ x:L.x, y:L.y + s*0.42 }, s*0.5, s*0.5, EVE.lamp ? "#f0c674" : "#4b4338");
   g.restore();
-  // вечер окончен: ком теста на столе — касание начинает следующий вечер
-  if(EVE.over) ell(G.lump, G.lump.r, G.lump.r*0.8, "#f0e0b0");
   if(typeof nightDraw === "function") nightDraw(g, sx, sy, G);         // ночной кадр: снимки вечера над стойкой
   if(typeof notebookDraw === "function") notebookDraw(g, sx, sy, G);   // открытая тетрадь — поверх всей сцены
 }
