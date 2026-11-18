@@ -18,7 +18,9 @@
    заново не стирает прошлые вечера. Экран не гаснет, пока лампа горит (eveWakeSync, внизу файла).
    Пёс и ночной кадр (night.js, шаг 4 v0) грузятся последними; их зовут под typeof: nightDogHit, nightServe, nightLive,
    nightTook, nightUpdate, nightDrawUnder, nightDrawOver, nightDraw, nightReset, nightState, nightExport.
-   С ним строка «вечер окончен» пустая: конец вечера показывает ночной кадр. */
+   С ним строка «вечер окончен» пустая: конец вечера показывает ночной кадр.
+   Полка и номер вечера (shelf.js, шаг 5 v0) — после ночи; их зовут под typeof: shelfNewEvening, shelfDown, shelfUp,
+   shelfUpdate, shelfLive, shelfState, shelfExport. Сохранение несёт n (номер вечера) и shelf. */
 
 const EVE_KEY = "roti_evening", EVE_VERSION = 1, EVE_BALLS = 3;
 const EVE_WAKE_IDLE_MS = 5*60*1000; // экран держится включённым столько после последнего касания или события вечера
@@ -35,6 +37,7 @@ let eveDrag = null;                 // крышка в руке: {id, x, y, dx, 
 let eveIdleAt = 0, eveStage = "", eveRestartArmed = 0;
 let eveGuestRaw = null;             // сохранённый гость, пока guest.js ещё не загрузился (он читает это при запуске)
 let eveNbRaw = null;                // сохранённая тетрадь, пока notebook.js ещё не загрузился
+let eveShelfRaw = null;             // сохранённая полка и номер вечера, пока shelf.js ещё не загрузился
 let eveNightRaw = null;             // сохранённые пёс и ночной кадр, пока night.js ещё не загрузился
 let eveServePt = null;              // где отпущен роти (client px): гость смотрит, над ним ли
 const eveRoot = document.documentElement || document.body;
@@ -54,6 +57,7 @@ function eveLoad(){
     if(s.guest && typeof s.guest === "object") eveGuestRaw = s.guest;
     if(s.notebook && typeof s.notebook === "object") eveNbRaw = s.notebook;
     if(s.night && typeof s.night === "object") eveNightRaw = s.night;
+    if(s.shelf && typeof s.shelf === "object") eveShelfRaw = s.shelf;
   }catch(e){}
 }
 function eveStageNow(){
@@ -66,7 +70,8 @@ function eveSave(){
   const guest = typeof guestState === "function" ? guestState() : eveGuestRaw || undefined;
   const notebook = typeof notebookState === "function" ? notebookState() : eveNbRaw || undefined;
   const night = typeof nightState === "function" ? nightState() : eveNightRaw || undefined;
-  try{ localStorage.setItem(EVE_KEY, JSON.stringify({ ...EVE, stage:eveStage, events:eveEvents, guest, notebook, night, ts:new Date().toISOString() })); }catch(e){}
+  const shelf = typeof shelfState === "function" ? shelfState() : eveShelfRaw || undefined;   // полка и номер вечера (shelf.js)
+  try{ localStorage.setItem(EVE_KEY, JSON.stringify({ ...EVE, n:shelf ? shelf.n : 1, stage:eveStage, events:eveEvents, guest, notebook, night, shelf, ts:new Date().toISOString() })); }catch(e){}
   eveWakeSync();
 }
 function eveLog(event, extra){
@@ -80,7 +85,8 @@ function eveLog(event, extra){
 }
 function eveningExport(){ return { state:{ ...EVE, stage:eveStageNow() }, events:eveEvents, guest:typeof guestExport === "function" ? guestExport() : undefined,
   notebook:typeof notebookExport === "function" ? notebookExport() : undefined,
-  night:typeof nightExport === "function" ? nightExport() : undefined }; }
+  night:typeof nightExport === "function" ? nightExport() : undefined,
+  shelf:typeof shelfExport === "function" ? shelfExport() : undefined }; }
 
 // ─────────────────────────── стенд под рамкой
 // Свежий комок на столе (шаг 1). Журнал пробы не трогаем — это не «заново» стенда.
@@ -155,6 +161,7 @@ function eveLidOff(){
 function eveNewEvening(from){
   const wasOver = EVE.over;
   if(typeof notebookNewEvening === "function") notebookNewEvening(from, wasOver);
+  if(typeof shelfNewEvening === "function") shelfNewEvening(from, wasOver);   // до сброса гостьи: полке нужны вчерашние ответы
   EVE = eveFresh();
   eveGuestRaw = null; eveNightRaw = null;
   if(typeof guestReset === "function") guestReset();
@@ -222,6 +229,7 @@ function eveningDown(id, cx, cy, t){
   if(typeof notebookDown === "function" && notebookDown(id, cx, cy)) return true;   // тетрадь: открыта — забирает всё; закрыта — своё место рядом с радио
   const G = eveGeo(), p = evePt(cx, cy);
   if(Math.hypot(p.x - G.radio.x, p.y - G.radio.y) <= G.radio.hit){ eveRadio(true); return true; }
+  if(typeof shelfDown === "function" && shelfDown(id, cx, cy)) return true;         // банка на полке (shelf.js)
   if(EVE.over){
     if(eveInEllipse(p, G.lump, G.lump.r*1.5, G.lump.r*1.5)) eveNewEvening("lump");
     return true;
@@ -251,6 +259,7 @@ function eveningMove(id, cx, cy, t){
 }
 function eveningUp(id, cx, cy, t, cancel){
   if(typeof notebookUp === "function" && notebookUp(id, cx, cy, cancel)) return true;
+  if(typeof shelfUp === "function" && shelfUp(id, cx, cy, cancel)) return true;
   if(!eveDrag || eveDrag.id !== id) return false;
   if(Number.isFinite(cx) && Number.isFinite(cy)){ const p = evePt(cx, cy); eveDrag.x = p.x + eveDrag.dx; eveDrag.y = p.y + eveDrag.dy; }
   const G = eveGeo(), on = eveOverPan(G, eveDrag), wasOn = EVE.lid;
@@ -312,6 +321,7 @@ function eveningLive(cur){
   const idle = performance.now() - eveIdleAt > EVE_IDLE_HINT_MS;
   if(!EVE.ball) return !idle ? "" : EVE.ballsLeft > 0 ? "следующий шарик — в миске" : "накрой таву крышкой";
   const m = typeof cur === "string" ? cur : "";
+  if(typeof shelfLive === "function"){ const s = shelfLive(m); if(s) return s; }   // варенье в руке; бананов нет
   if(typeof guestLive === "function"){ const s = guestLive(m); if(s) return s; }
   if(typeof nightLive === "function"){ const s = nightLive(m); if(s) return s; }   // роти берёт и пёс: без «на стойку»
   for(const [from, to] of EVE_WORDS) if(m.startsWith(from)) return to;
@@ -326,6 +336,7 @@ function eveningUpdate(dt){
   if(typeof guestUpdate === "function") guestUpdate(dt);
   if(typeof notebookUpdate === "function") notebookUpdate(dt);
   if(typeof nightUpdate === "function") nightUpdate(dt);
+  if(typeof shelfUpdate === "function") shelfUpdate(dt);
   if(eveWake && !eveWakeWanted()) eveWakeSync();           // телефон оставлен на 5 минут — экран отпускается
 }
 function eveningDraw(g, sx, sy, layer){

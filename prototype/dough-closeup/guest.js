@@ -105,6 +105,7 @@ function guestServe(client){
   const ballNo = guestBallNo();
   GST.answers.push({ ballNo, crisp, step, answer });
   GST.gifts.push(GUEST_GIFT[answer]);                      // подарок ложится на полку сразу: перезагрузка его не теряет
+  if(typeof shelfGift === "function") shelfGift(GUEST_GIFT[answer]);   // полка шага 5: пополняет, а не добавляет
   GST.taken++; GST.knocked = true;                         // роти у неё: главный стук больше не нужен
   gWait = 0; gKnock = 0; panKnock = 0; gMain = false; gAnswer = GUEST_ANSWER_S;
   guestLog("serve", { crisp, crispWord:crispWord(crisp), step, bottom:cookWord(dishSideMean("cook", "contactWeights")),
@@ -133,9 +134,11 @@ function guestUpdate(dt){
   const frying = guestFrying();
   if(!GST.here){
     // приходит по жарке, не раньше; только на первых двух шариках (третий — не ей)
-    if(!GST.gone && frying && ballNo <= 2 && ((dish.panTime || 0) >= GUEST_ARRIVE_S || meanCook() >= GUEST_ARRIVE_COOK)){
-      GST.here = true; GST.knocked = false; gWait = GUEST_KNOCK_WAIT; gStep = guestCookStep();
-      guestLog("arrive", guestFryNow());
+    // shelf.js (шаг 5): после вчерашнего кивка она приходит раньше и стучит сразу; state — в журнал
+    const early = typeof shelfSomArrive === "function";
+    if(!GST.gone && frying && ballNo <= 2 && ((dish.panTime || 0) >= (early ? shelfSomArrive(GUEST_ARRIVE_S) : GUEST_ARRIVE_S) || meanCook() >= GUEST_ARRIVE_COOK)){
+      GST.here = true; GST.knocked = false; gWait = early ? shelfKnockWait(GUEST_KNOCK_WAIT) : GUEST_KNOCK_WAIT; gStep = guestCookStep();
+      guestLog("arrive", early && shelfSomState() ? { ...guestFryNow(), state:shelfSomState() } : guestFryNow());
     }
     return;
   }
@@ -228,8 +231,9 @@ function guestSpots(){
 function guestDraw(g, sx, sy, G){
   if(eveDev) return;
   const u = G.u;
-  // полка с подарками: появляется вместе с первой вещью
-  if(GST.gifts.length){
+  // полка с подарками: появляется вместе с первой вещью. С shelf.js (шаг 5) полку рисует он: она переживает вечер
+  if(typeof shelfDraw === "function") shelfDraw(g, sx, sy, G);
+  else if(GST.gifts.length){
     const F = guestShelf(G);
     g.fillStyle = "#8b7f6e"; g.fillRect(F.x0*sx, F.y*sy, F.w*sx, Math.max(1, 3*u*sy));
     GST.gifts.forEach((gift, i) => guestGift(g, sx, sy, gift, F.x0 + F.cell*(i + 0.55), F.y, u));
@@ -245,7 +249,16 @@ function guestFigure(g, sx, sy, G){
     const im = gImgs[pic - 1], k = Math.min(S.w/im.naturalWidth, S.h/im.naturalHeight), w = im.naturalWidth*k, h = im.naturalHeight*k;
     g.drawImage(im, (S.x0 + (S.w - w)/2)*sx, (S.y0 + S.h - h + dy)*sy, w*sx, h*sy);
   } else guestPlaceholder(g, sx, sy, S, dy, pic);
+  if(pic === 1 && typeof shelfSomJar === "function" && shelfSomJar()) guestJar(g, sx, sy, S, dy);
   g.restore();
+}
+// Шаг 5: вчера оставила варенье — сегодня та же картинка 1 с пустой банкой в руке (плоский рисунок поверх
+// заглушки или PNG, слева у плеча). Когда банка встаёт на полку — решает shelf.js.
+function guestJar(g, sx, sy, S, dy){
+  const x = (S.x0 + 0.27*S.w)*sx, y = (S.y0 + dy + 0.93*S.h)*sy, w = 0.15*S.w*sx, h = 0.21*S.h*sy;
+  g.fillStyle = "#8b7f6e"; g.fillRect(x - w/2, y - h, w, h);                    // пустое стекло
+  g.fillStyle = "#d9d2c0"; g.fillRect(x - w*0.56, y - h*1.22, w*1.12, h*0.26);  // крышка
+  g.fillStyle = "#c08a5a"; g.beginPath(); g.ellipse(x + w*0.42, y - h*0.38, Math.max(.5, w*0.34), Math.max(.5, h*0.22), 0, 0, Math.PI*2); g.fill();   // пальцы
 }
 // Нарезанный роти в руке (его несут наверх) закрывает её целиком — пока он в руке, она рисуется поверх
 // него: видно, кому несёшь. evening.js зовёт это после теста, перед крышкой и лампой.

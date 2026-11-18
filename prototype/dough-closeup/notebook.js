@@ -12,7 +12,7 @@
    только выезд листа. Сама тетрадь открывается один раз за вечер, после первого ответа Сом, на 1,2 с. */
 
 const NB_V = 1;
-const NB_EVENINGS = 7, NB_PER_EVENING = 3;             // хранится 7 вечеров по три роти — до 21 снимка
+const NB_EVENINGS = 7, NB_PER_EVENING = 3;             // хранится 7 оконченных вечеров по три роти и идущий — до 24 снимков
 const NB_SHOT_PX = 240, NB_SHOT_BYTES = 30*1024;       // снимок: сторона в пикселях и предел веса JPEG
 const NB_SHOT_Q = [0.72, 0.58, 0.44, 0.30];            // качество JPEG по убыванию, пока не уложится в предел
 const NB_SLIDE_S = 0.18, NB_PEEK_S = 1.2, NB_SWIPE = 40;   // выезд листа, показ «сама», свайп (CSS px)
@@ -34,7 +34,7 @@ function notebookState(){ return { ...NB, events:nbEvents }; }
 // В выгрузку журнала картинки не кладутся: только кто съел и сколько весит снимок.
 function notebookExport(){
   return { state:{ cur:NB.cur, peeked:NB.peeked, open:nbMode, page:nbPage,
-    evenings:NB.evenings.map(e => ({ ts:e.ts, snaps:e.snaps.map(s => ({ to:s.to, crisp:s.crisp, step:s.step, kb:nbKb(s.img), ts:s.ts })) })) }, events:nbEvents };
+    evenings:NB.evenings.map(e => ({ ts:e.ts, n:e.n, snaps:e.snaps.map(s => ({ to:s.to, crisp:s.crisp, step:s.step, kb:nbKb(s.img), ts:s.ts })) })) }, events:nbEvents };
 }
 function nbBytes(url){ return typeof url === "string" ? Math.floor((url.length - url.indexOf(",") - 1)*3/4) : 0; }
 function nbKb(url){ return +(nbBytes(url)/1024).toFixed(1); }
@@ -42,9 +42,12 @@ function nbLoad(){
   const s = typeof eveNbRaw !== "undefined" ? eveNbRaw : null;
   if(!s || s.v !== NB_V || !Array.isArray(s.evenings)) return;
   const snap = x => x && (x.to === "som" || x.to === "counter" || x.to === "dog")
-    ? { to:x.to, img:typeof x.img === "string" && x.img.startsWith("data:image/") ? x.img : null, crisp:+x.crisp || 0, step:Math.round(+x.step) || 0, ts:x.ts } : null;
-  const evenings = s.evenings.map(e => ({ ts:e && e.ts, snaps:(e && Array.isArray(e.snaps) ? e.snaps : []).map(snap).filter(Boolean).slice(0, NB_PER_EVENING) }))
-    .filter(e => e.snaps.length).slice(-NB_EVENINGS);
+    ? { to:x.to, img:typeof x.img === "string" && x.img.startsWith("data:image/") ? x.img : null, crisp:+x.crisp || 0, step:Math.round(+x.step) || 0, ts:x.ts,
+      ...(x.answer === "nod" || x.answer === "crunch" ? { answer:x.answer } : {}) } : null;
+  // n — номер вечера (shelf.js, шаг 5): по нему ночной кадр находит «вчера». Пока идёт вечер, страниц на одну
+  // больше: семь оконченных и сегодняшняя.
+  const evenings = s.evenings.map(e => ({ ts:e && e.ts, ...(e && +e.n > 0 ? { n:Math.round(+e.n) } : {}), snaps:(e && Array.isArray(e.snaps) ? e.snaps : []).map(snap).filter(Boolean).slice(0, NB_PER_EVENING) }))
+    .filter(e => e.snaps.length).slice(-(NB_EVENINGS + (s.cur ? 1 : 0)));
   NB = { v:NB_V, cur:!!s.cur && evenings.length > 0, peeked:!!s.peeked, evenings };
   if(Array.isArray(s.events)) nbEvents = s.events.slice(-60);
 }
@@ -92,6 +95,7 @@ function nbShot(){
   g.fillStyle = "#3a2c1e"; g.fillRect(0, 0, NB_SHOT_PX, NB_SHOT_PX);
   const screen = p => ({ x:NB_SHOT_PX/2 + (p.x - cx)*k, y:NB_SHOT_PX*0.52 + (p.y - cy)*k });
   nbFriedSide(() => drawDishFaces(g, dish.faces, screen, stackHeights(dish.faces), zk, true, pieceShiftLive(dish.faces)));
+  if(typeof drizzlePaint === "function") drizzlePaint(g, screen, k);   // полоса варенья (шаг 5) видна и на снимке
   if(typeof c.toDataURL !== "function") return null;
   for(const q of NB_SHOT_Q){
     const url = c.toDataURL("image/jpeg", q);
@@ -102,26 +106,39 @@ function nbShot(){
 function notebookSnap(to){
   let img = null;
   try{ img = nbShot(); }catch(e){ img = null; }          // снимок не должен сорвать подачу
-  if(!NB.cur){ NB.evenings.push({ ts:new Date().toISOString(), snaps:[] }); NB.cur = true; }
-  while(NB.evenings.length > NB_EVENINGS) NB.evenings.shift();
+  // Старые страницы здесь не выбрасываются: «начать вечер заново» снимет сегодняшнюю страницу, и выброшенная
+  // пропала бы зря. Лишнее уходит в notebookNewEvening, когда вечер окончен.
+  if(!NB.cur){ NB.evenings.push({ ts:new Date().toISOString(), ...(typeof shelfN === "function" ? { n:shelfN() } : {}), snaps:[] }); NB.cur = true; }
   const ev = NB.evenings[NB.evenings.length - 1];
   const stepOf = typeof guestStepOf === "function" ? guestStepOf : () => 0;
-  let step = 0;
+  let step = 0, answer;
   try{ step = Math.max(stepOf(dishSideMean("cook", "contactWeights")), stepOf(dishSideMean("cook", "topWeights"))); }catch(e){}
-  if(to === "som" && typeof GST !== "undefined" && GST.answers.length) step = Math.max(step, GST.answers[GST.answers.length - 1].step || 0);
+  if(to === "som" && typeof GST !== "undefined" && GST.answers.length){ const a = GST.answers[GST.answers.length - 1]; step = Math.max(step, a.step || 0); answer = a.answer; }
   to = to === "som" || to === "dog" ? to : "counter";       // «dog» — шаг 4 (night.js): роти ушёл псу
-  ev.snaps.push({ to, img, crisp:+(+dishCrisp || 0).toFixed(1), step, ts:new Date().toISOString() });
+  const snap = { to, img, crisp:+(+dishCrisp || 0).toFixed(1), step, ts:new Date().toISOString() };
+  if(to === "som" && (answer === "nod" || answer === "crunch")) snap.answer = answer;   // лицо ответа (сборка 80)
+  ev.snaps.push(snap);
   while(ev.snaps.length > NB_PER_EVENING) ev.snaps.shift();
   nbQuiet = NB_QUIET_S;
   nbLog("snap", { to, kb:nbKb(img), n:ev.snaps.length });
 }
 // Снимки этого вечера (для ночного кадра, шаг 4).
 function notebookEvening(){ return NB.cur ? NB.evenings[NB.evenings.length - 1].snaps : []; }
+// Снимки прошлого вечера (для ночного кадра второго вечера, шаг 5).
+// Вчера — последняя страница с меньшим номером вечера: вечер, оконченный и начатый заново из радио,
+// оставляет вторую страницу с тем же номером, и она не «вчера». У страниц без номера (сборка 78) — по порядку.
+function notebookYesterday(){
+  if(!NB.cur) return [];
+  const E = NB.evenings, cur = E[E.length - 1];
+  for(let i = E.length - 2; i >= 0; i--) if(!(cur.n > 0) || !(E[i].n > 0) || E[i].n < cur.n) return E[i].snaps;
+  return [];
+}
 // evening.js зовёт это из eveNewEvening. «Начать вечер заново» посреди вечера — тот же вечер с начала:
 // его снимки стираются. Оконченный вечер остаётся страницей; следующий начнётся с новой.
 function notebookNewEvening(from, wasOver){
   if(NB.cur && !wasOver && from === "radio") NB.evenings.pop();
   NB.cur = false; NB.peeked = false;
+  while(NB.evenings.length > NB_EVENINGS) NB.evenings.shift();   // хранится семь оконченных вечеров
   nbMode = 0; nbAnim = 0; nbPeek = 0; nbDrag = null; nbPage = nbPages().length - 1; nbQuiet = NB_QUIET_S;
 }
 
@@ -253,17 +270,39 @@ function nbPic(url){
   return im.complete && im.naturalWidth > 0 ? im : null;
 }
 // Метка «кто съел»: маленькая Сом (как её заглушка у стойки), морда пса (шаг 4) или стойка с роти.
-function nbMark(g, sx, sy, to, x, y, u){
+// Для роти, отданного Сом, под снимком — лицо её ответа (answer "nod"/"crunch"): кивок (ровный рот,
+// голова чуть наклонена) или хруст (глаза закрыты, крошки). Без ответа (старое сохранение) — прежняя метка.
+function nbMark(g, sx, sy, to, x, y, u, answer){
   const ell = (cx, cy, rx, ry, fill) => { g.fillStyle = fill; g.beginPath(); g.ellipse(cx*sx, cy*sy, rx*sx, ry*sy, 0, 0, Math.PI*2); g.fill(); };
   if(to === "som"){
-    ell(x, y + 14*u, 13*u, 7*u, "#8a4b3c");
-    ell(x, y - 12*u, 4*u, 3.6*u, "#2a2622");
-    ell(x, y - 2*u, 10*u, 11*u, "#2a2622");
-    ell(x, y + 1*u, 8*u, 9*u, "#c08a5a");
+    const face = answer === "nod" || answer === "crunch" ? answer : null;
+    const stroke = (pts, w, color) => {
+      g.strokeStyle = color; g.lineWidth = Math.max(1, w*u*sx); g.lineCap = "round"; g.beginPath();
+      g.moveTo(pts[0][0]*sx, pts[0][1]*sy);
+      if(pts.length === 3) g.quadraticCurveTo(pts[1][0]*sx, pts[1][1]*sy, pts[2][0]*sx, pts[2][1]*sy);
+      else g.lineTo(pts[1][0]*sx, pts[1][1]*sy);
+      g.stroke();
+    };
+    ell(x, y + 14*u, 13*u, 7*u, "#8a4b3c");                 // плечи
+    ell(x, y - 12*u, 4*u, 3.6*u, "#2a2622");                // пучок
+    const hy = y - 2*u, tilt = face === "nod" ? 0.16 : 0;   // в кивке голова чуть наклонена
+    g.save();
+    if(tilt){ g.translate(x*sx, hy*sy); g.rotate(tilt); g.translate(-x*sx, -hy*sy); }
+    ell(x, hy, 10*u, 11*u, "#2a2622");                      // волосы
+    ell(x, hy + 3*u, 8*u, 9*u, "#c08a5a");                  // лицо
     for(const s of [-1, 1]){
       g.strokeStyle = "#e0a23a"; g.lineWidth = Math.max(1, 1.4*u*sx); g.beginPath();
-      g.ellipse((x + s*9.5*u)*sx, (y + 6*u)*sy, 2.2*u*sx, 2.6*u*sy, 0, 0, Math.PI*2); g.stroke();
+      g.ellipse((x + s*9.5*u)*sx, (hy + 8*u)*sy, 2.2*u*sx, 2.6*u*sy, 0, 0, Math.PI*2); g.stroke();
     }
+    if(face === "crunch"){                                   // глаза закрыты (дуги), рот дугой, крошки
+      for(const s of [-1, 1]) stroke([[x + s*1.6*u, hy + 4*u], [x + s*3.4*u, hy + 5.5*u], [x + s*5*u, hy + 4*u]], 0.9, "#1d150e");
+      stroke([[x - 3*u, hy + 8*u], [x, hy + 10.5*u], [x + 3*u, hy + 8*u]], 0.9, "#1d150e");
+      for(const [cx, cy] of [[-3, 8.5], [2, 8], [3, 11], [-2.5, 11.5], [0.5, 13], [-1, 13]]) ell(x + cx*u, hy + cy*u, 0.65*u, 0.75*u, "#f0c674");
+    } else if(face === "nod"){                               // глаза открыты, рот — ровная черта
+      for(const s of [-1, 1]) ell(x + s*2.4*u, hy + 5*u, 1.15*u, 1.25*u, "#1d150e");
+      stroke([[x - 3*u, hy + 8.5*u], [x + 3*u, hy + 8.5*u]], 0.9, "#1d150e");
+    }
+    g.restore();
     return;
   }
   if(to === "dog"){                                        // те же цвета, что у пса под тележкой (night.js)
@@ -340,7 +379,7 @@ function notebookDraw(g, sx, sy, G){
       box(C.x + q, C.y + q, C.s - 2*q, C.s - 2*q, "#3a2c1e");
       g.fillStyle = "#c9a15a"; g.beginPath(); g.ellipse((C.x + C.s/2)*sx, (C.y + C.s/2)*sy, C.s*0.30*sx, C.s*0.28*sy, 0, 0, Math.PI*2); g.fill();
     }
-    nbMark(g, sx, sy, s.to, C.mx, C.my, u);
+    nbMark(g, sx, sy, s.to, C.mx, C.my, u, s.answer);
   });
   // стрелки «листать» — только туда, где есть вечер
   g.fillStyle = NB_INK;

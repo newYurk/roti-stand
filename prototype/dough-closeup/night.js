@@ -12,6 +12,8 @@
    nightDrawOver, nightDraw, nightLive, nightReset, nightState, nightExport. Без этого файла вечер идёт как в шаге 3.
    Правила владелицы 17.11: плоские фигуры в палитре стенда, без свечения, частиц и анимаций — позы пса
    сменяются, а не двигаются (взмах хвоста — две нарисованные чёрточки); звука нет; слов нет.
+   ВТОРОЙ ВЕЧЕР И ДАЛЬШЕ (шаг 5 v0, shelf.js): вчерашние три снимка — отдельной строкой под сегодняшними,
+   тех же размеров, приглушённые, без меток; ни оценок, ни стрелок.
    Пёс — заглушка: по решению 17.09 собак две (мама и дочка), окрас и имена не утверждены. */
 
 const NIGHT_V = 1;
@@ -94,7 +96,8 @@ function nightUpdate(dt){
   if(nEat > 0) nEat = Math.max(0, nEat - dt);
   if(EVE.over && !NGT.shown){                              // ночной кадр показан: строка в журнал, один раз за вечер
     NGT.shown = true;
-    nightLog("frame", { how:nShownHow, to:nightSnaps().map(s => s.to), gifts:typeof GST !== "undefined" ? GST.gifts.slice() : [] });
+    nightLog("frame", { how:nShownHow, to:nightSnaps().map(s => s.to), gifts:typeof GST !== "undefined" ? GST.gifts.slice() : [],
+      ...(typeof shelfN === "function" ? { n:shelfN(), yesterday:nightPast().map(s => s.to) } : {}) });
   }
   if(!nightCarried()){ nLook = false; return; }
   if(nLook || !nightDogWants()) return;
@@ -105,15 +108,21 @@ function nightUpdate(dt){
 // ─────────────────────────── ночной кадр
 function nightFrameOn(){ return !eveDev && EVE.over; }
 function nightSnaps(){ return typeof notebookEvening === "function" ? notebookEvening() : []; }
+// Вчерашние снимки — со второго вечера (shelf.js считает вечера, notebook.js хранит страницы).
+function nightPast(){ return typeof shelfN === "function" && shelfN() >= 2 && typeof notebookYesterday === "function" ? notebookYesterday().slice(0, EVE_BALLS) : []; }
 // Ряд карточек над стойкой: между полкой с тетрадью слева и лампой справа, от строки сверху до стойки.
 function nightRow(G){
   const u = G.u, n = EVE_BALLS, gap = 8*u, markH = 30*u;
   const F = typeof guestShelf === "function" ? guestShelf(G) : { x0:G.counter.x0, w:0 };
   const xa = Math.max(F.x0 + F.w, G.radio.x0 + G.radio.w + 38*u) + 10*u, xb = G.lamp.x - G.lamp.s*1.15 - 10*u;
   const ya = 30*u, yb = G.counter.y0 - 4*u;
-  const side = Math.max(24*u, Math.min((xb - xa - gap*(n - 1))/n, yb - ya - markH, 84*u));
-  const w = side*n + gap*(n - 1), x0 = (xa + xb)/2 - w/2, y0 = ya + Math.max(0, (yb - ya - side - markH)/2);
-  return { side, markH, cells:[0, 1, 2].map(i => ({ x:x0 + i*(side + gap), y:y0, s:side, mx:x0 + i*(side + gap) + side/2, my:y0 + side + markH*0.55 })) };
+  // вчерашние снимки (шаг 5): столбик из трёх мелких слева, высотой с сегодняшнюю карточку
+  const past = nightPast().length > 0, rowGap = past ? 6*u : 0;
+  const side = Math.max(24*u, Math.min((xb - xa - gap*(n - 1))/n, (yb - ya - markH - rowGap)/(past ? 2 : 1), 84*u));
+  const w = side*n + gap*(n - 1), x0 = (xa + xb)/2 - w/2;
+  const y0 = ya + Math.max(0, (yb - ya - (past ? side*2 + markH + rowGap : side + markH))/2);
+  return { side, markH, cells:[0, 1, 2].map(i => ({ x:x0 + i*(side + gap), y:y0, s:side, mx:x0 + i*(side + gap) + side/2, my:y0 + side + markH*0.55 })),
+    past:past ? [0, 1, 2].map(i => ({ x:x0 + i*(side + gap), y:y0 + side + markH + rowGap, s:side })) : [] };
 }
 // Где что, в CSS px окна — для проверок касаниями.
 function nightSpots(){
@@ -123,7 +132,8 @@ function nightSpots(){
     dog:c((D.x0 + D.x1)/2, (D.y0 + D.y1)/2), dogBox:{ ...c(D.x0, D.y0), w:D.w*k, h:D.h*ky },
     zone:{ x1:r.left + D.zone.x1*k, y0:r.top + D.zone.y0*ky },
     frame:nightFrameOn(), gifts:typeof GST !== "undefined" ? GST.gifts.slice() : [],
-    cards:nightFrameOn() ? nightSnaps().map((s, i) => ({ to:s.to, ...c(R.cells[i].x, R.cells[i].y), s:R.cells[i].s*k, markY:r.top + R.cells[i].my*ky })) : [] };
+    cards:nightFrameOn() ? nightSnaps().map((s, i) => ({ to:s.to, ...c(R.cells[i].x, R.cells[i].y), s:R.cells[i].s*k, markY:r.top + R.cells[i].my*ky })) : [],
+    past:nightFrameOn() ? nightPast().map((s, i) => ({ to:s.to, ...c(R.past[i].x, R.past[i].y), s:R.past[i].s*k })) : [] };
 }
 
 // ─────────────────────────── кадр
@@ -190,7 +200,17 @@ function nightDraw(g, sx, sy, G){
       g.fillStyle = "#3a2c1e"; g.fillRect((C.x + q)*sx, (C.y + q)*sy, (C.s - 2*q)*sx, (C.s - 2*q)*sy);
       g.fillStyle = "#c9a15a"; g.beginPath(); g.ellipse((C.x + C.s/2)*sx, (C.y + C.s/2)*sy, C.s*0.30*sx, C.s*0.28*sy, 0, 0, Math.PI*2); g.fill();
     }
-    nbMark(g, sx, sy, s.to, C.mx, C.my, u*0.72);
+    nbMark(g, sx, sy, s.to, C.mx, C.my, u*0.72, s.answer);
+  });
+  nightPast().forEach((s, i) => {                          // вчера: те же снимки строкой ниже, приглушённые, без меток
+    const C = R.past[i], im = typeof nbPic === "function" ? nbPic(s.img) : null;
+    g.fillStyle = "#b9a988"; g.fillRect(C.x*sx, C.y*sy, C.s*sx, C.s*sy);
+    if(im) g.drawImage(im, (C.x + q)*sx, (C.y + q)*sy, (C.s - 2*q)*sx, (C.s - 2*q)*sy);
+    else {
+      g.fillStyle = "#3a2c1e"; g.fillRect((C.x + q)*sx, (C.y + q)*sy, (C.s - 2*q)*sx, (C.s - 2*q)*sy);
+      g.fillStyle = "#c9a15a"; g.beginPath(); g.ellipse((C.x + C.s/2)*sx, (C.y + C.s/2)*sy, C.s*0.30*sx, C.s*0.28*sy, 0, 0, Math.PI*2); g.fill();
+    }
+    g.fillStyle = "rgba(8,6,10,0.45)"; g.fillRect(C.x*sx, C.y*sy, C.s*sx, C.s*sy);   // приглушено
   });
 }
 
