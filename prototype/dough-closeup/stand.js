@@ -4457,7 +4457,7 @@ function dflBegin(L,M,g){
 // в остальных щупах сверяется остаток: больше DFL_AFF_PX пикселя экрана, или масштаб позы ушёл дальше DFL_AFF_SCALE,
 // или вид сплющился по одной оси дальше DFL_AFF_ANISO — слой перерисовывается в текущей позе.
 // При ходе пальцем по кругу остаток — сотые доли пикселя, перерисовок нет.
-const DFL_AFF_PX = 0.3, DFL_AFF_SCALE = 0.02, DFL_AFF_ANISO = 0.01, DFL_AFF_PAD = 0.12;
+const DFL_AFF_PX = 0.3, DFL_AFF_SCALE = 0.02, DFL_AFF_ANISO = 0.01, DFL_AFF_PAD = 0.12, DFL_AFF_SETTLE = 10;
 function dflProbe(M,pts){
   const o=new Float64Array(pts.length);
   for(let i=0;i<pts.length;i+=2){ const x=pts[i], y=pts[i+1]; o[i]=M.a*x+M.c*y+M.e; o[i+1]=M.b*x+M.d*y+M.f; }
@@ -4505,10 +4505,15 @@ function drawDishLayered(slot,g,K0,R0,hot,paint,steps,aff){
     // поза с прошлого кадра ушла дальше, чем переносит аффинное отображение (перелёт с масштабом, рывок) — прямо,
     // как в 97: перерисовка слоя каждый кадр стоила бы дороже прямого рисунка
     const pp=S.pp, ps=S.ps; S.pp=now; S.ps=pr.scale;
-    if(!pp || pp.length!==now.length || Math.abs(pr.scale/ps-1)>DFL_AFF_SCALE || !dflAffine(pp,now) || !dflInside(now)){ S.B=null; paint(g); return; }
-    if(geo && L.ref && Math.abs(pr.scale/L.scale-1)<=DFL_AFF_SCALE) T=dflAffine(L.ref,now);
-    // поза встала (кадр в кадр та же), а слой снят в другой — один раз перерисовать точно, без пересэмплирования
-    if(T && dflSame(pp,now) && !dflSame(L.ref,now)) T=null;
+    if(!pp || pp.length!==now.length || Math.abs(pr.scale/ps-1)>DFL_AFF_SCALE || !dflAffine(pp,now)){ S.B=null; paint(g); return; }
+    // блюдо у края холста: переносить слой нельзя (части блюда в нём нет) — только слой той же позы, как в 97
+    const inside=dflInside(now);
+    if(!inside && !dflSame(pp,now)){ S.B=null; paint(g); return; }
+    if(geo && L.ref && (inside ? Math.abs(pr.scale/L.scale-1)<=DFL_AFF_SCALE : dflSame(L.ref,now))) T=inside ? dflAffine(L.ref,now) : [1,0,0,1,0,0];
+    // поза встала (DFL_AFF_SETTLE кадров подряд та же; касания приходят не каждый кадр), а слой снят в другой —
+    // один раз перерисовать точно, без пересэмплирования
+    S.st=dflSame(pp,now) ? (S.st||0)+1 : 0;
+    if(T && S.st===DFL_AFF_SETTLE && !dflSame(L.ref,now)) T=null;
     if(geo && !T && S.B) S.B=null;                              // поза ушла — дорисовка недоделанного слоя не нужна
   }
   if(!geo || pr && !T || hot && !steps && !dflThermalClose(L.th)){
