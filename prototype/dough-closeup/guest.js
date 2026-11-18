@@ -16,6 +16,12 @@
    не у её руки; пока роти на таве не перевёрнут и до её «хруста» не дошёл, стук повторяется каждые
    GUEST_AGAIN_S секунд; глаза идут за роти (сгиб, переворот, перенос); роти унесли мимо неё на стойку —
    она поворачивает голову вслед (guestWatch). Рука и взгляд нарисованы кодом поверх любой картинки.
+   Сборка 89 (спека docs/som-points-batch-spec.md): стук — не у борта, а у САМОГО БЛЕДНОГО места края роти
+   (guestPaleEdge: по контуру конверта, цвет видимой стороны верхнего слоя; не перевёрнут — край, ближний к
+   ней), и рука видна при любой картинке; раунд 2: рука короткая, с её стороны (guestArmPose) — палец
+   направлен в это место и тычет на ударах, метки — в самом месте на роти. Роти с
+   сырой видимой стороной сняли на стол — короткое «нет» (два качания за GUEST_NO_S) и взгляд на таву
+   (guestSeesRemoval, событие «no»), раз на каждый такой съём.
 
    КАРТИНКИ. Четыре неподвижных кадра «по плечи» в одной рамке: guest/som-1.png … som-4.png
    (1 ждёт, 2 стучит, 3 кивок, 4 хруст; прозрачный фон, ширина около 600 px). Пока хотя бы одного файла
@@ -35,6 +41,9 @@ const GUEST_MARK_S = 0.14;                             // метки у борт
 const GUEST_LEAN = 0.07;                               // наклон к таве на время стука, доля высоты рамки
 const GUEST_FLIP_UP = 0.04;                            // переворот: голова на миг поднимается за взлетевшим роти, доля высоты рамки
 const GUEST_WATCH_S = 2.2;                             // сколько она смотрит вслед роти, унесённому на стойку
+const GUEST_NO_S = 0.6, GUEST_NO_LOOK_S = 1.0;          // «нет» на сырое на столе: два качания, затем столько смотрит на таву
+const GUEST_PALE_N = 48, GUEST_PALE_IN = 0.1, GUEST_PALE_TIE = 0.01;   // точки по краю; насколько внутрь брать цвет; равные — ближе к ней
+const GUEST_HAND = { x:0.73, y:0.93 };                 // где на картинке 2 её стучащий кулак (доли рамки картинки) — оттуда идёт рука
 const GUEST_GIFT = { nod:"bananas", crunch:"jam" };
 const GUEST_FILES = [1, 2, 3, 4].map(i => `guest/som-${i}.png`);
 
@@ -46,6 +55,8 @@ let guestEvents = [];                // журнал гостя: хранитс�
 // только в выгрузку guestExport; ответ с партии «жарка» даёт guestVerdict по обеим сторонам), «села».
 let gWait = 0, gKnock = 0, gKnockAge = 0, gAnswer = 0, gStep = 0, gBest = 0, gBall = 0, gSat = false, gMain = false, gHead = 0, gFlips = 0;
 let gAgain = 0, gWatch = 0, gWatchDir = 0, gWatchAt = null;   // до повтора стука; взгляд вслед: остаток, сторона (−1, 0 — вниз, 1), куда
+let gHeadT = GUEST_SHAKE_HEAD_S, gNoLook = 0, gMode = null;  // длина идущего качания головой; «нет»: остаток взгляда на таву; режим блюда в прошлом кадре
+let gPale = null;                                       // кэш самой бледной точки края (guestPaleEdge)
 
 // ─────────────────────────── картинки
 // Сначала спрашивается только первый файл: пока картинок нет, это один отказ сервера, а не четыре.
@@ -95,7 +106,7 @@ function guestFryNow(){
 function guestReset(){
   GST = guestFresh(); guestEvents = [];
   gWait = gKnock = gKnockAge = gAnswer = gStep = gBest = gBall = gHead = gFlips = gAgain = gWatch = gWatchDir = 0; gSat = gMain = false; panKnock = 0;
-  gWatchAt = null;
+  gWatchAt = null; gHeadT = GUEST_SHAKE_HEAD_S; gNoLook = 0; gMode = null; gPale = null;
 }
 
 // ─────────────────────────── ход гостя
@@ -107,7 +118,7 @@ function guestWantsFlip(){
   return guestVerdict(S.bottom, S.top, S.crisp) !== "crunch";
 }
 function guestKnock(seconds, event){
-  gKnock = seconds; gKnockAge = 0; gMain = event === "knock"; gAgain = 0;
+  gKnock = seconds; gKnockAge = 0; gMain = event === "knock"; gAgain = 0; gPale = null;   // место стука — заново (guestPaleEdge)
   guestLog(event, guestFryNow());
 }
 function guestLeave(why){
@@ -133,7 +144,7 @@ function guestRefuses(client){
   if(!guestTakes(client)) return false;
   const S = guestSides();
   if(guestVerdict(S.bottom, S.top, S.crisp) !== "raw") return false;
-  gHead = GUEST_SHAKE_HEAD_S; gKnock = 0; panKnock = 0;
+  gHead = gHeadT = GUEST_SHAKE_HEAD_S; gKnock = 0; panKnock = 0;
   guestLog("refuse", { crisp:S.crisp, bottom:cookWord(S.bottom), top:cookWord(S.top), panSeconds:Math.round(dish.panTime || 0) });
   return true;
 }
@@ -155,9 +166,22 @@ function guestServe(client){
   guestLog("answer", { crisp, step, answer, verdict, gift:GUEST_GIFT[answer] });
   return "som";
 }
+// Сборка 89: роти сняли с тавы на стол (режим блюда fold → cut), а видимая сторона ещё «сырое» — она коротко
+// качает головой и смотрит на таву: «верни». Раз на каждый съём (вернули и сняли снова — снова «нет»).
+// Видимая сторона — открытая сверху (topWeights): на столе роти лежит так же, как лежал на таве.
+function guestSeesRemoval(){
+  if(!GST.here || gAnswer > 0) return;
+  const top = dishSideMean("cook", "topWeights");
+  if(guestStepOf(top) > 0) return;
+  gHead = gHeadT = GUEST_NO_S; gNoLook = GUEST_NO_S + GUEST_NO_LOOK_S; gKnock = 0; panKnock = 0;
+  guestLog("no", { top:cookWord(top), bottom:cookWord(dishSideMean("cook", "contactWeights")), flips:dish.flips || 0, panSeconds:Math.round(dish.panTime || 0) });
+}
 function guestUpdate(dt){
   guestMark();
   if(eveDev){ panKnock = 0; return; }
+  { const mode = dish ? dish.mode : null, was = gMode; gMode = mode;
+    if(was === "fold" && mode === "cut" && !EVE.over && EVE.lamp) guestSeesRemoval(); }
+  if(gNoLook > 0) gNoLook = Math.max(0, gNoLook - dt);
   if(EVE.over || !EVE.lamp){ if(GST.here) guestLeave("evening-over"); panKnock = 0; return; }
   if(EVE.lid){ panKnock = 0; return; }                     // тава под крышкой: стук не идёт (картинка 1), счёт стоит и пойдёт с того же места
   if(typeof notebookOpen === "function" && notebookOpen()){ panKnock = 0; return; }   // тетрадь открыта (notebook.js): та же пауза
@@ -264,7 +288,7 @@ function guestRotiAt(){
 // ближе середины тавы; ближе (взлетел при перевороте, несут к ней) — вектор короче, зрачки идут к середине
 // глаза: видно, что она провожает его взглядом вверх. Без роти — вниз, на таву.
 function guestGaze(G, S){
-  const at = guestRotiAt(); if(!at) return { x:0, y:1 };
+  const at = gNoLook > 0 ? G.pan : guestRotiAt(); if(!at) return { x:0, y:1 };   // «нет» на сырое: смотрит на таву, куда его вернуть
   const fx = S.x0 + S.w/2, fy = S.y0 + S.h*0.45 + (guestLow() ? S.sit : 0), dx = at.x - fx, dy = at.y - fy;
   const l = Math.max(Math.hypot(dx, dy), Math.hypot(G.pan.x - fx, G.pan.y - fy), 1e-6);
   return { x:dx/l, y:dy/l };
@@ -275,13 +299,44 @@ function guestFlipUp(){
   const u = (performance.now() - dishFlight.t0)/1000/dishFlight.T;
   return u > 0 && u < 1 ? Math.sin(Math.PI*u) : 0;
 }
-// Куда она стучит: точка на дальнем борту тавы под её рукой; onPan — рука сейчас бьёт (тава вздрагивает),
-// marks — метки стука видны (удар и GUEST_MARK_S после него).
+// Самое бледное место у края роти на таве (сборка 89), пиксели холста: GUEST_PALE_N точек по контуру конверта
+// (dish.hull), в каждой — цвет видимой стороны верхнего слоя теста чуть внутри от края (GUEST_PALE_IN пути к
+// центру). Перевёрнут — точка с наименьшим цветом (равные в пределах GUEST_PALE_TIE — ближняя к ней); не
+// перевёрнут — край, ближний к ней (спека). null — роти на таве нет. Место выбирается в начале каждого стука
+// (guestKnock сбрасывает кэш) и держится весь стук — палец не перескакивает; новое — только если роти сложили,
+// перевернули или поменялся размер холста.
+function guestPaleEdge(G, S){
+  if(!dish || dish.mode !== "fold" || !dish.thermal || !dish.hull || dish.hull.length < 3) return null;
+  const flips = dish.flips || 0, P = gPale;
+  if(P && P.faces === dish.faces && P.hull === dish.hull && P.flips === flips && P.G === G.W + "x" + G.H) return P;
+  const H = dish.hull, n = H.length, c = dishCentroid(), pose = dishPose(), dough = dish.faces.filter(f => f.kind === "dough");
+  const L = H.map((a, i) => Math.hypot(H[(i + 1)%n].x - a.x, H[(i + 1)%n].y - a.y)), per = L.reduce((s, l) => s + l, 0);
+  const her = { x:S.x0 + S.w*GUEST_HAND.x, y:S.zone.y1 }, samples = [];
+  for(let k = 0; k < GUEST_PALE_N && per > 0; k++){
+    let d = (k + 0.5)/GUEST_PALE_N*per, i = 0;
+    while(i < n - 1 && d > L[i]){ d -= L[i]; i++; }
+    const a = H[i], b = H[(i + 1)%n], s = L[i] ? Math.min(1, d/L[i]) : 0, p = { x:a.x + (b.x - a.x)*s, y:a.y + (b.y - a.y)*s };
+    const qx = p.x + (c.x - p.x)*GUEST_PALE_IN, qy = p.y + (c.y - p.y)*GUEST_PALE_IN;
+    let f = null; for(let j = dough.length - 1; j >= 0 && !f; j--) if(pointInFace(dough[j].points, qx, qy)) f = dough[j];
+    const th = f && dish.thermal[f.source]; if(!th) continue;
+    const X = pose.x + p.x*pose.scale, Y = pose.y + p.y*pose.scale, x = prX(X, Y), y = prY(X, Y);
+    samples.push({ x, y, cook:th.cook[f.turned ? 0 : 1], near:Math.hypot(x - her.x, y - her.y), src:f.source, side:f.turned ? 0 : 1 });
+  }
+  if(!samples.length) return null;
+  const low = Math.min(...samples.map(q => q.cook));
+  const pool = flips ? samples.filter(q => q.cook - low <= GUEST_PALE_TIE) : samples;
+  const best = pool.reduce((m, q) => q.near < m.near ? q : m);
+  return gPale = { x:best.x, y:best.y, cook:best.cook, low, samples, faces:dish.faces, hull:dish.hull, flips, G:G.W + "x" + G.H };
+}
+// Куда она стучит: самое бледное место края роти (guestPaleEdge), без роти — дальний борт тавы под её рукой
+// (rim — он же, для сравнения в проверках); hit — палец сейчас бьёт (тава вздрагивает), marks — метки стука
+// видны (удар и GUEST_MARK_S после него).
 function guestKnockAt(G, S){
-  const hx = S.x0 + S.w*0.80, k = Math.max(-0.8, Math.min(0.8, (hx - G.pan.x)/PAN_R*0.55));   // рука идёт от плеча наискось к середине борта
+  const hx = S.x0 + S.w*0.80, k = Math.max(-0.8, Math.min(0.8, (hx - G.pan.x)/PAN_R*0.55));   // от плеча наискось к середине борта
   const hit = GUEST_SHAKE.some(([a, b]) => gKnockAge >= a && gKnockAge < b);
   const marks = GUEST_SHAKE.some(([a, b]) => gKnockAge >= a && gKnockAge < b + GUEST_MARK_S);
-  return { hand:{ x:hx, y:S.zone.y1 - 6*G.u }, rim:{ x:G.pan.x + k*PAN_R*1.02, y:G.pan.y - PAN_R*TILT*1.02*Math.sqrt(1 - k*k) }, hit, marks };
+  const rim = { x:G.pan.x + k*PAN_R*1.02, y:G.pan.y - PAN_R*TILT*1.02*Math.sqrt(1 - k*k) }, pale = guestPaleEdge(G, S);
+  return { hand:{ x:hx, y:S.zone.y1 - 6*G.u }, rim, at:pale ? { x:pale.x, y:pale.y } : rim, pale, hit, marks };
 }
 // Наклон, доля высоты рамки: стучит — наклонилась к таве; смотрит вслед роти прямо под собой — тоже (поза).
 function guestLean(){ return (guestPic() === 2 ? GUEST_LEAN : 0) + (gWatchDir === 0 ? GUEST_LEAN*guestWatchK() : 0); }
@@ -328,7 +383,10 @@ function guestSpots(){
     zone:{ x0:r.left + S.zone.x0*k, x1:r.left + S.zone.x1*k, y1:r.top + S.zone.y1*ky },
     shelf:c(F.x0 + F.w/2, F.y), shelfTop:r.top + (F.y - 23*G.u)*ky, gifts:GST.gifts.slice(), knock:panKnock*ky, head:+guestHeadTurn().toFixed(3),
     gaze:(g => ({ x:+g.x.toFixed(3), y:+g.y.toFixed(3) }))(guestGaze(G, S)), lean:+(guestLean()*S.h*ky).toFixed(2), watch:+guestWatchK().toFixed(3), watchDir:gWatchDir,
-    arm:guestKnocking() ? (K => ({ rim:c(K.rim.x, K.rim.y), hit:K.hit, marks:K.marks }))(guestKnockAt(G, S)) : null, again:+gAgain.toFixed(2) };
+    arm:guestKnocking() ? (K => ({ rim:c(K.rim.x, K.rim.y), at:c(K.at.x, K.at.y), hit:K.hit, marks:K.marks,
+      ...(A => ({ root:c(A.root.x, A.root.y), tip:c(A.tip.x, A.tip.y), reach:+(A.reach*ky).toFixed(1), head:+(A.head*ky).toFixed(1) }))(guestArmPose(G, S, K)),
+      pale:K.pale ? { cook:+K.pale.cook.toFixed(3), low:+K.pale.low.toFixed(3), edge:K.pale.samples.map(q => ({ ...c(q.x, q.y), cook:+q.cook.toFixed(3), src:q.src, side:q.side })) } : null }))(guestKnockAt(G, S)) : null,
+    again:+gAgain.toFixed(2), noLook:+gNoLook.toFixed(2) };
 }
 
 // ─────────────────────────── кадр (evening.js зовёт после неба и до стойки)
@@ -347,40 +405,83 @@ function guestDraw(g, sx, sy, G){
 // Сама гостья: всё, что ниже верхнего края стойки, обрезано — за стойкой её не видно (и «села», и PNG).
 function guestFigure(g, sx, sy, G){
   const pic = guestPic(); if(!pic) return;
-  const S = guestSlot(G), dy = (guestLow() ? S.sit : 0) + (guestLean() - (pic === 1 ? GUEST_FLIP_UP*guestFlipUp() : 0))*S.h;
+  const S = guestSlot(G), dy = guestPicRect(G, S, pic).dy;
   g.save(); g.beginPath(); g.rect(0, 0, G.W*sx, S.zone.y1*sy); g.clip();
   if(guestPictures()){
     const im = gImgs[pic - 1], k = Math.min(S.w/im.naturalWidth, S.h/im.naturalHeight), w = im.naturalWidth*k, h = im.naturalHeight*k;
-    const turn = guestHeadTurn();                          // «нет»: картинка 1 чуть сжимается и уходит в сторону, как поворот головы
-    const w2 = w*(1 - 0.07*Math.abs(turn));
-    g.drawImage(im, (S.x0 + (S.w - w2)/2 + turn*0.05*S.w)*sx, (S.y0 + S.h - h + dy)*sy, w2*sx, h*sy);
+    const turn = guestHeadTurn(), x0 = S.x0 + (S.w - w)/2, y0 = S.y0 + S.h - h + dy;
+    if(gHead > 0) guestShakeImage(g, sx, sy, im, x0, y0, w, h, turn);   // «нет»: качается голова, плечи стоят
+    else {                                                 // вслед роти на стойке: картинка чуть сжимается и уходит в сторону
+      const w2 = w*(1 - 0.07*Math.abs(turn));
+      g.drawImage(im, (S.x0 + (S.w - w2)/2 + turn*0.05*S.w)*sx, y0*sy, w2*sx, h*sy);
+    }
   } else guestPlaceholder(g, sx, sy, S, dy, pic, guestHeadTurn(), guestGaze(G, S));
   if(pic === 1 && typeof shelfSomJar === "function" && shelfSomJar()) guestJar(g, sx, sy, S, dy);
   g.restore();
 }
-// Рука через стойку к борту тавы и метки стука У БОРТА (сборка 80). Рисуется поверх стойки и тавы, пока
-// идёт стук: рукав от стойки, предплечье, кулак на борту; на каждом ударе кулак опускается вместе с тавой,
-// а от него расходятся четыре короткие светлые чёрточки. Плоские фигуры в палитре стенда.
+// Качание головой на PNG (сборка 89; до неё сдвигалась вся картинка на 5 % — на 390×844 это 6 px, «нет» не
+// читалось): картинка режется по высоте на полосы, голова (выше GUEST_NECK[0]) уходит вбок на GUEST_SHAKE_X ширины
+// и сжимается, шея сдвигается плавно до нуля у ворота (GUEST_NECK[1]), плечи и руки стоят. Рисунок тот же.
+const GUEST_NECK = [0.56, 0.67], GUEST_SHAKE_X = 0.08, GUEST_SHAKE_SQ = 0.12, GUEST_NECK_STRIPS = 12;
+function guestShakeImage(g, sx, sy, im, x0, y0, w, h, turn){
+  const nw = im.naturalWidth, nh = im.naturalHeight, [a, b] = GUEST_NECK;
+  const band = (v0, v1, k) => {                            // строки картинки v0…v1 (доли высоты), k — доля поворота
+    const ww = w*(1 - GUEST_SHAKE_SQ*Math.abs(turn)*k), xx = x0 + (w - ww)/2 + turn*k*GUEST_SHAKE_X*w;
+    g.drawImage(im, 0, v0*nh, nw, (v1 - v0)*nh, xx*sx, (y0 + v0*h)*sy, ww*sx, (v1 - v0)*h*sy + 0.6);
+  };
+  band(b, 1, 0);
+  for(let i = 0; i < GUEST_NECK_STRIPS; i++){ const v0 = a + (b - a)*i/GUEST_NECK_STRIPS; band(v0, v0 + (b - a)/GUEST_NECK_STRIPS, 1 - (i + 0.5)/GUEST_NECK_STRIPS); }
+  band(0, a, 1);
+}
+// Рамка картинки гостьи в кадре (пиксели холста, со сдвигом «села»/наклон): где PNG или заглушка.
+function guestPicRect(G, S, pic){
+  const dy = (guestLow() ? S.sit : 0) + (guestLean() - (pic === 1 ? GUEST_FLIP_UP*guestFlipUp() : 0))*S.h;
+  if(!guestPictures()) return { x:S.x0, y:S.y0 + dy, w:S.w, h:S.h, dy };
+  const im = gImgs[pic - 1], k = Math.min(S.w/im.naturalWidth, S.h/im.naturalHeight), w = im.naturalWidth*k, h = im.naturalHeight*k;
+  return { x:S.x0 + (S.w - w)/2, y:S.y0 + S.h - h + dy, w, h, dy };
+}
+// Рука (сборка 89, раунд 2). Раунд 1 тянул руку от стойки через всю стойку и стол до тавы — так далеко человек
+// не достаёт, читалось палкой. Теперь она показывает со своей стороны: наклонилась (наклон сборки 80), из
+// стучащего кулака (GUEST_HAND на картинке 2, у края стойки) выходит короткое предплечье длиной примерно с её
+// голову (GUEST_REACH высоты картинки), указательный палец направлен в самое бледное место края роти. На каждом
+// ударе палец коротко тычет вперёд (GUEST_JAB длины руки), тава вздрагивает, метки стука вспыхивают В САМОМ
+// МЕСТЕ на роти (K.at), не у пальца. Цвета — кожа, обводка и браслет её картинок.
+const GUEST_REACH = 0.42, GUEST_JAB = 0.14;
+function guestArmPose(G, S, K){
+  const R = guestPicRect(G, S, 2), u = G.u;
+  const root = { x:R.x + R.w*GUEST_HAND.x, y:Math.min(R.y + R.h*GUEST_HAND.y, S.zone.y1 - 3*u) };
+  const L0 = Math.max(1e-6, Math.hypot(K.at.x - root.x, K.at.y - root.y)), dx = (K.at.x - root.x)/L0, dy = (K.at.y - root.y)/L0;
+  const reach = Math.min(L0, R.h*GUEST_REACH*(1 + (K.hit ? GUEST_JAB : 0)));
+  return { root, dx, dy, reach, head:R.h*GUEST_REACH, tip:{ x:root.x + dx*reach, y:root.y + dy*reach } };
+}
 function guestArm(g, sx, sy, G){
   if(!guestKnocking()) return;
-  const u = G.u, S = guestSlot(G), K = guestKnockAt(G, S), drop = K.hit ? 3*u : 0;
-  const a = K.hand, b = { x:K.rim.x, y:K.rim.y - 5*u + drop };
-  const seg = (p, q, w, color) => {
-    g.strokeStyle = color; g.lineWidth = Math.max(1, w*u*sx); g.lineCap = "round";
+  const u = G.u, S = guestSlot(G), K = guestKnockAt(G, S), A = guestArmPose(G, S, K), H = A.head;
+  const SKIN = "#cf925c", LINE = "#4a2a1a", SILVER = "#aaa198";
+  const { root, dx, dy, tip } = A, nx = -dy, ny = dx, k = H/100;           // размеры — доли длины руки
+  const fin = 26*k, wr = { x:tip.x - dx*(fin + 12*k), y:tip.y - dy*(fin + 12*k) };
+  const P = (p, s, w) => [(p.x + nx*w*s)*sx, (p.y + ny*w*s)*sy];
+  const arm = (pad, color) => {                              // предплечье: от кулака к запястью сужается
+    g.fillStyle = color; g.beginPath();
+    g.moveTo(...P(root, 1, 15*k + pad)); g.lineTo(...P(wr, 1, 10*k + pad)); g.lineTo(...P(wr, -1, 10*k + pad)); g.lineTo(...P(root, -1, 15*k + pad));
+    g.closePath(); g.fill();
+    g.beginPath(); g.ellipse(root.x*sx, root.y*sy, (15*k + pad)*sx, (13*k + pad)*sy, 0, 0, Math.PI*2); g.fill();
+  };
+  const line = (p, q, w, color) => {
+    g.strokeStyle = color; g.lineWidth = Math.max(1, w*sx); g.lineCap = "round";
     g.beginPath(); g.moveTo(p.x*sx, p.y*sy); g.lineTo(q.x*sx, q.y*sy); g.stroke();
   };
-  const mid = t => ({ x:a.x + (b.x - a.x)*t, y:a.y + (b.y - a.y)*t });
+  const hand = { x:wr.x + dx*7*k, y:wr.y + dy*7*k }, rot = Math.atan2(dy*sy, dx*sx);
+  const palm = (pad, color) => { g.fillStyle = color; g.beginPath(); g.ellipse(hand.x*sx, hand.y*sy, (13*k + pad)*sx, (11*k + pad)*sy, rot, 0, Math.PI*2); g.fill(); };
+  const base = { x:hand.x + dx*6*k, y:hand.y + dy*6*k }, o = Math.max(1.2*u, 2.4*k);
   g.save();
-  // С настоящими картинками (сборка 81) она стучит на картинке 2 сама, а плоская рука от стойки до тавы читалась
-  // палкой: остаются только метки удара у борта и вздрагивание тавы. Рука — только у плоской заглушки.
-  if(!guestPictures()){
-    seg(a, mid(0.45), 17, "#8a4b3c");                      // рукав
-    seg(mid(0.45), b, 11, "#c08a5a");                      // предплечье
-    g.fillStyle = "#c08a5a"; g.beginPath(); g.ellipse(b.x*sx, b.y*sy, 9*u*sx, 7.5*u*sy, 0, 0, Math.PI*2); g.fill();   // кулак
-  }
-  if(K.marks){
-    for(const [dx, dy, ex, ey] of [[-13, 2, -24, -3], [13, 2, 24, -3], [-7, 11, -13, 20], [7, 11, 13, 20]])
-      seg({ x:K.rim.x + dx*u, y:K.rim.y + dy*u }, { x:K.rim.x + ex*u, y:K.rim.y + ey*u }, 2.5, "#f0e0b0");
+  arm(o, LINE); palm(o, LINE); line(base, tip, 9*k + 2*o, LINE);           // обводка
+  arm(0, SKIN); palm(0, SKIN); line(base, tip, 9*k, SKIN);                 // кожа
+  const b0 = { x:wr.x - dx*3*k, y:wr.y - dy*3*k };                          // браслет поперёк запястья
+  for(const t of [0, 4]){ const c = { x:b0.x - dx*t*k, y:b0.y - dy*t*k }; line({ x:c.x + nx*10.5*k, y:c.y + ny*10.5*k }, { x:c.x - nx*10.5*k, y:c.y - ny*10.5*k }, 3*k, SILVER); }
+  if(K.marks){                                               // метки — в самом месте на роти
+    for(const [mx, my, ex, ey] of [[-13, 2, -24, -3], [13, 2, 24, -3], [-7, 11, -13, 20], [7, 11, 13, 20]])
+      line({ x:K.at.x + mx*u, y:K.at.y + my*u }, { x:K.at.x + ex*u, y:K.at.y + ey*u }, 2.5*u, "#f0e0b0");
   }
   g.restore();
 }
@@ -420,7 +521,7 @@ function guestGift(g, sx, sy, gift, x, y, u){
 // Поворот головы «нет»: −1…1, два качания за GUEST_SHAKE_HEAD_S, затухает. 0 — голова прямо.
 function guestHeadTurn(){
   if(!(gHead > 0)) return gWatchDir*guestWatchK();          // вслед роти на стойке: голова повёрнута и стоит
-  const u = 1 - gHead/GUEST_SHAKE_HEAD_S;
+  const u = 1 - gHead/gHeadT;                               // отказ у стойки — 1,1 с, «нет» на сырое на столе — 0,6 с
   return Math.sin(u*Math.PI*4)*(1 - 0.5*u);
 }
 function guestPlaceholder(g, sx, sy, S, dy, pic, turn = 0, gaze = { x:0, y:1 }){
