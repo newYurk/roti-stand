@@ -211,7 +211,12 @@ function night(opts) {
   h.drawn = code => h.J(`(()=>{const keep=ctx.ellipse,out=[];ctx.ellipse=(x,y,rx,ry)=>out.push({fill:ctx.fillStyle,stroke:ctx.strokeStyle,x,y,rx,ry});
     try{${code}}finally{ctx.ellipse=keep}return out})()`);
   // roti-coloured ellipses inside the counter
-  h.onCounter = () => { const C = h.J('eveGeo().counter'); return h.drawn('eveningDraw(ctx,1,1,0);').filter(e => e.fill === '#c9a15a' && e.x >= C.x0 && e.x <= C.x1 && e.y >= C.y0 && e.y <= C.y1).length; };
+  // build 91: the counter roti is a square (fillRect), no longer an ellipse — both are recorded, by their centre
+  h.counterRoti = () => { const C = h.J('eveGeo().counter');
+    return h.J(`(()=>{const ke=ctx.ellipse,kr=ctx.fillRect,out=[];ctx.ellipse=(x,y,rx,ry)=>out.push({kind:'ellipse',fill:ctx.fillStyle,x,y,w:2*rx,h:2*ry});
+      ctx.fillRect=(x,y,w,hh)=>out.push({kind:'rect',fill:ctx.fillStyle,x:x+w/2,y:y+hh/2,w,h:hh});
+      try{eveningDraw(ctx,1,1,0)}finally{ctx.ellipse=ke;ctx.fillRect=kr}return out})()`).filter(e => e.fill === '#c9a15a' && e.x >= C.x0 && e.x <= C.x1 && e.y >= C.y0 && e.y <= C.y1); };
+  h.onCounter = () => h.counterRoti().length;
   return h;
 }
 const reloadD = (h, opts = {}) => night({ storage: [...h.storage], ...opts });

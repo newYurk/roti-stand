@@ -680,6 +680,41 @@ test('G10', 'build 89 — the knock marks lie at the palest point of the roti ed
   return { summary: out.join('; ') + '; raw → no, carry back refused, served → nod/bananas; cooked → none' };
 });
 
+// Build 91 (docs/review-2026-11-18-b89.md, p. 1): the line does not argue with her. While she knocks there is no
+// «поджарилось — неси на стол»; a roti with a raw visible side taken to the table while she is here gets her «no»
+// and no «режь от края до края»; a cooked one taken to the table still gets the line.
+// Script shortcuts, named: the colours of the sides (cookSides) and one knock over a crunchy roti (guestKnock —
+// the same entry as her «again»), because she does not knock over a roti that is already crunchy on its own.
+test('G11', 'build 91 — no «поджарилось — неси на стол» while she knocks (it comes back after the knock); no «режь от края до края» on a raw roti taken to the table while she is here; a cooked one taken to the table still gets it', () => {
+  const h = guest(); light(h); onPan(h); arrive(h); envelope(h); until(h, PALE);
+  cookSides(h, 0.6, 0.6); sec(h, 0.5);
+  // quiet = no knock for 10 frames in a row (a hint knock follows the jump of the steps)
+  for (let q = 0, n = 0; q < 10 && n < 60 * 20; n++) { q = h.run('guestKnocking()') ? 0 : q + 1; h.frames(1); }
+  const before = h.run('dish.message');
+  assert.match(before, /поджарилось/, `crunchy, she is quiet: the line is there («${before}»)`);
+  h.run('guestKnock(GUEST_KNOCK_S,"again")'); h.frames(1);
+  const during = []; let n = 0;
+  while (h.run('guestKnocking()') && n < 200) { during.push(h.run('dish.message') + '|' + h.run('document.getElementById("live").textContent')); h.frames(1); n++; }
+  assert.ok(n >= 60, `the knock lasted ${n} frames`);
+  assert.ok(during.every(m => !/неси|поджарилось/.test(m)), `no «неси» while she knocks (${[...new Set(during)].join(' / ')})`);
+  h.frames(2); const after = h.run('dish.message');
+  assert.match(after, /поджарилось/, `after the knock the line is back («${after}»)`);
+  // raw visible side to the table while she is here: her «no», no «режь»
+  const m = guest(); light(m); onPan(m); arrive(m); envelope(m); until(m, PALE);
+  cookSides(m, 0.5, 0.02); const n0 = m.gev().length; toTable(m);
+  const raw = []; for (let i = 0; i < 4 * 60; i++) { raw.push(m.run('dishLine()')); m.frames(1); }
+  assert.deepEqual(m.gev().slice(n0), ['no'], 'raw on the table: her «no»');
+  assert.ok(raw.every(x => !/режь/.test(x)), `no «режь» over 4 s on the raw roti (${[...new Set(raw)].join(' / ')})`);
+  // a carry over the serve zone of the uncut raw roti: no «режь» either
+  serve(m, m.gs().som); sec(m, 0.5); assert.ok(!/режь/.test(m.run('dishLine()')), `after a try to serve it: «${m.run('dishLine()')}»`);
+  // cooked to the table: the line is as before
+  const c = guest(); light(c); onPan(c); arrive(c); envelope(c); until(c, PALE);
+  cookSides(c, 0.5, 0.5); toTable(c); sec(c, 0.5);
+  assert.equal(c.run('dishLine()'), 'режь от края до края', 'cooked on the table: «режь от края до края»');
+  assert.deepEqual(h.errors.concat(m.errors, c.errors), []);
+  return { summary: `crunchy: «${before}» → knock ${n} frames: ${[...new Set(during.map(x => x.split('|')[0] || '—'))].join('/')} → «${after}»; raw on the table: ${[...new Set(raw.map(x => x || '—'))].join('/')}; cooked: «${c.run('dishLine()')}»` };
+});
+
 const passed = results.filter(r => r.status === 'PASS').length;
 console.log(`\nguest: ${passed}/${results.length} passed`);
 try {

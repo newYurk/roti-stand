@@ -293,7 +293,8 @@ test('G5', 'touching the edge of the roti on the tava without a flick lifts that
   // round 2: only the corner nearest the finger — a small triangle (legs ≈ ¼ side), not a strip of the side
   const geo = h.J(`(()=>{const c=cornerLiftCap(),H=dish.hull,a=cornerLift.a;let near=Infinity;for(const p of H)near=Math.min(near,Math.hypot(p.x-a.x,p.y-a.y));
     return {frac:polyArea(c.P)/polyArea(H),vd:Math.hypot(c.V.x-a.x,c.V.y-a.y)/c.side,reach:c.reach/c.side,hullPts:H.length,vx:(c.V.x-(Math.min(...H.map(p=>p.x))+Math.max(...H.map(p=>p.x)))/2)/c.side,vy:(c.V.y-(Math.min(...H.map(p=>p.y))+Math.max(...H.map(p=>p.y)))/2)/c.side}})()`);
-  assert.ok(geo.frac > 0.01 && geo.frac < 0.06, `the cap is a small corner: ${r3(geo.frac)} of the roti area`);
+  // build 91: held, the corner grows to a quarter of the side from the corner (legs 0.354 side) — still a corner
+  assert.ok(geo.frac > 0.01 && geo.frac < 0.08, `the cap is a corner: ${r3(geo.frac)} of the roti area`);
   assert.ok(geo.vd < 0.35 && geo.vy > 0.3 && geo.vx > 0.3, `the lifted corner is the one near the finger: ${r3(geo.vd)} side away`);
   assert.ok(geo.reach < 0.3, `the cap reaches ${r3(geo.reach)} side from the hinge (a strip of the side would be wider)`);
   assert.ok(lum(under) < lum(top) - 10, `the underside is browner than the top: ${lum(under).toFixed(0)} vs ${lum(top).toFixed(0)}`);
@@ -304,6 +305,34 @@ test('G5', 'touching the edge of the roti on the tava without a flick lifts that
   flick(h); assert.equal(h.run('dish.flips'), flips0 + 1, 'a flick from the edge flips');
   assert.deepEqual(h.errors, []);
   return { summary: `tap: up to ${r3(up)} for ${frames} frames; hold 0.7 s: ${r3(held)}, cap ${cap} points, ${r3(geo.frac)} of the area, corner ${r3(geo.vd)} side from the finger, reach ${r3(geo.reach)} side, underside lum ${lum(under).toFixed(0)} vs top ${lum(top).toFixed(0)}; down after release; flips ${flips0} → ${h.run('dish.flips')} by a flick` };
+});
+
+// ── G7: build 91 — the corner grows while held; its underside is the real fry step of the steel side ──
+// Script shortcut, named: the colour of the steel side is set by script for each step (dry = 1); the lift is a real touch.
+test('G7', 'build 91 — held, the corner grows to a quarter of the side from the corner (reach 0.10 s after the touch < reach at 0.7 s ≈ 0.25 side); the underside colour follows the steel side: pale (рано) → golden (пора) → brown (поздно), each darker, golden is yellow-orange', () => {
+  const h = evening(); light(h); stretched(h); toPan(h); envelope(h);
+  const e2 = h.J(`(()=>{const b=dishBounds();return __harness.dishToClient({x:b.right-0.02,y:b.top+(b.bottom-b.top)*.75})})()`);
+  const rows = [];
+  for (const [step, c] of [[1, 0.15], [2, 0.4], [3, 0.8]]) {
+    h.run(`for(let i=0;i<dish.thermal.length;i++){const t=dish.thermal[i];if(!t)continue;t.dry[0]=t.dry[1]=1;for(let s=0;s<2;s++) if(dish.contactWeights[i][s]) t.cook[s]=${c}; else t.cook[s]=0.02;}`);
+    h.touch('start', 't1', e2.x, e2.y); h.frames(7); h.tick(1, 1 / 60, true);
+    const early = h.J('(()=>{const c=cornerLiftCap();return c.reach/c.side})()');
+    h.frames(36); h.tick(1, 1 / 60, true);
+    const late = h.J('(()=>{const c=cornerLiftCap();return c.reach/c.side})()');
+    const under = h.J('cornerUnderColor()'), top = h.J('cornerTopColor(cornerLiftCap().mid)'), st = h.run('cornerUnderStep()');
+    h.touch('end', 't1', e2.x, e2.y); h.frames(30); h.tick(1, 1 / 60, true);
+    assert.equal(h.run('!!cornerLift'), false, 'released: it lies down');
+    assert.equal(st, step, `the steel side is at step ${step} (${st})`);
+    assert.ok(early < late - 0.04, `it grows while held: reach ${r3(early)} → ${r3(late)} side`);
+    assert.ok(late > 0.2 && late < 0.3, `held 0.7 s: reach ${r3(late)} side ≈ a quarter`);
+    rows.push({ step, early, late, under, top });
+  }
+  const L = rows.map(r => lum(r.under));
+  assert.ok(L[0] > L[1] + 20 && L[1] > L[2] + 30, `pale → golden → brown, each darker: ${L.map(x => x.toFixed(0)).join(' → ')}`);
+  const g = rows[1].under; assert.ok(g[0] - g[2] > 100 && g[1] > g[2] + 50, `golden is yellow-orange: ${g.join(',')}`);
+  assert.ok(Math.abs(lum(rows[0].under) - lum(rows[0].top)) < 40, `pale under a raw top: close to the top (${lum(rows[0].under).toFixed(0)} vs ${lum(rows[0].top).toFixed(0)})`);
+  assert.equal(h.run('loopErrs'), 0); assert.deepEqual(h.errors, []);
+  return { summary: rows.map(r => `step ${r.step}: reach ${r3(r.early)} → ${r3(r.late)} side, under ${r.under.join(',')} (lum ${lum(r.under).toFixed(0)}), top lum ${lum(r.top).toFixed(0)}`).join(' · ') };
 });
 
 // ── G6: a torn sheet carried to the tava becomes a roti (round 2) ─────────────────────────────

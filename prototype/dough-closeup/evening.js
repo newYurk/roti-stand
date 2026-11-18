@@ -356,6 +356,17 @@ function eveningUpdate(dt){
   if(typeof shelfUpdate === "function") shelfUpdate(dt);
   if(eveWake && !eveWakeWanted()) eveWakeSync();           // телефон оставлен на 5 минут — экран отпускается
 }
+// Нарезанный роти на лотке стойки: квадрат полушириной hw и полувысотой hh (наклон стола), резы — по третям.
+function eveCounterRoti(g, sx, sy, x, y, hw, hh, u){
+  g.fillStyle = "#8a6232"; g.fillRect((x - hw)*sx, (y - hh + Math.max(.5, u))*sy, 2*hw*sx, 2*hh*sy);   // кромка снизу
+  g.fillStyle = "#c9a15a"; g.fillRect((x - hw)*sx, (y - hh)*sy, 2*hw*sx, 2*hh*sy);
+  g.strokeStyle = "rgba(92,60,28,.7)"; g.lineWidth = Math.max(1, 0.8*u*sx); g.beginPath();
+  for(const k of [-1/3, 1/3]){
+    g.moveTo((x + k*2*hw)*sx, (y - hh)*sy); g.lineTo((x + k*2*hw)*sx, (y + hh)*sy);
+    g.moveTo((x - hw)*sx, (y + k*2*hh)*sy); g.lineTo((x + hw)*sx, (y + k*2*hh)*sy);
+  }
+  g.stroke();
+}
 function eveningDraw(g, sx, sy, layer){
   if(eveDev) return;
   const G = eveGeo(), u = G.u;
@@ -373,7 +384,13 @@ function eveningDraw(g, sx, sy, layer){
     const cm = { x:(C.x0 + C.x1)/2, y:(C.y0 + C.y1)/2 }, ry = Math.min(11*u, (C.y1 - C.y0)*0.32);
     const onCounter = EVE.rotiDone - (typeof guestTook === "function" ? guestTook() : 0) - (typeof nightTook === "function" ? nightTook() : 0);   // отданные гостю и псу на стойке не лежат
     // сборка 85: роти уходит на стойку в бумажном лотке — лоток под ним
-    for(let i=0;i<onCounter;i++){ box(cm.x + (i - 1)*66*u - 30*u, cm.y - ry*1.25, 60*u, ry*2.5, "#e8dcc2"); ell({ x:cm.x + (i - 1)*66*u, y:cm.y }, 25*u, ry, "#c9a15a"); }
+    // сборка 91 (ревью 18.11, п. 4): роти на лотке квадратный, как весь вечер (был круглой лепёшкой), и нарезан
+    // 2+2, как его подали: квадрат в наклоне стола, тонкие линии резов, тонкая тёмная кромка снизу
+    for(let i=0;i<onCounter;i++){
+      const x = cm.x + (i - 1)*66*u;
+      box(x - 30*u, cm.y - ry*1.25, 60*u, ry*2.5, "#e8dcc2");
+      eveCounterRoti(g, sx, sy, x, cm.y, 21*u, Math.min(ry*0.95, 21*u*TILT*1.6), u);
+    }
     // радио
     const R = G.radio;
     box(R.x0 + R.w*0.78, R.y0 - 9*u, Math.max(1, 1.5*u), 9*u, "#8b7f6e");
