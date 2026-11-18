@@ -1174,8 +1174,9 @@ function fryHint(){
   if(b>=4) return "край чёрный — горит";
   if(v==="crunch") return tip("table","поджарилось — неси на стол","поджарилось");
   if(v==="burnt") return "";                               // верх уже чёрный: это видно и без слов
-  if(b>=2 && t<2) return tip("flip","край румяный — мах от края","край румяный — переверни");   // одна короткая строка: на 375 px длиннее не влезает
-  return "";   // обе стороны ещё сырые — делать руками нечего, строка молчит (способ назван в «край румяный — мах от края»)
+  // Сборка 88 (видимый жест): «край румяный — мах от края» снята — касание края на таве приподнимает
+  // угол (cornerLift), и румяный низ виден на самом роти. Строка молчит, пока не горит и не готово.
+  return "";
 }
 // Среднее по сторонам с весами: contactWeights — то, что лежит на стали (звук и «низ»),
 // topWeights — то, что открыто сверху и видно игроку («верх»).
@@ -1224,7 +1225,9 @@ function dishLook(){
       if(l>1e-9) inr=Math.min(inr,Math.abs((c.x-a.x)*dy-(c.y-a.y)*dx)/l); }
   }
   const rim=dish.folds>0 && Number.isFinite(inr) && bot>top+0.04;
-  const E=dish.env, seam=rim && E && envDoneCount()>=2 ? E : null;
+  // Сборка 88 (видимый жест): шов конверта больше не темнеет полоской — два шва крестом на корке
+  // принимали за разрезы (разбор 17.11, п. 3). Кайма у края осталась.
+  const seam=null;
   return dishLookCache={faces:dish.faces,t,hull:dish.hull,top,bot,rim,seam,
     rimW:inr*(RIM_FROM+(RIM_TO-RIM_FROM)*Math.min(1,bot/RIM_FULL))};
 }
@@ -1662,7 +1665,7 @@ function foldDish(anchor,end,yank,side=-1){
   const n=envDoneCount();
   // dishNote, а не dish.message: строка стадии жарки затирала подпись в том же кадре (живая проверка сборки 72).
   dishNote(side<0 ? tip("fold","ещё край — к середине")
-    : n===4 ? "конверт готов"
+    : n===4 ? ""                                   // сборка 88: «конверт готов» снята — конверт виден
     : n===2 && dish.env.done[0]===dish.env.done[1] ? tip("fold","теперь две другие стороны")
     : tip("fold",`завёрнуто ${n} из 4`));
   if(side>=0 && n===4){ audioReady(); learn("fold"); }
@@ -1732,12 +1735,14 @@ function returnToPan(){
 // Рез — только от края до края (сборка 80, плейтест 17.11 п. 17: штрих на 30 % ширины давал «нарезано»).
 // Прямая штриха режет оболочку роти по хорде; штрих засчитан, если его концы не дальше CUT_END_TOL хорды
 // от её концов внутрь (палец редко начинает точно с кромки), и тогда рез идёт по всей хорде с запасом.
+// Сборка 88 (видимый жест): допуск 0,15 → 0,10 — штрих, остановившийся на 15 % не доходя края, больше не рез
+// (его линия гаснет, cutFade); 8 % — ширина пальца на роти 150 px — ещё рез.
 // «Нарезано» — когда резов не меньше трёх и они двух направлений (2+2, принимается и 1+2): направление
 // считается от первого реза, «поперёк» — дальше CUT_FAMILY_DEG от него. К сетке резы не привязаны.
 // Срезанный уголок — не рез (ревью сборки 80: три штриха по углам на 20 % стороны давали «нарезано» у целого
 // роти). Хорда реза — не короче CUT_MIN_SPAN габарита роти ВДОЛЬ этого реза: поперёк и по диагонали через
 // середину — весь габарит, уголок в 20 % стороны — пятая часть.
-const CUT_END_TOL = 0.15, CUT_OVER = 0.03, CUT_FAMILY_COS = Math.cos(35*Math.PI/180), CUT_MIN_SPAN = 0.6;
+const CUT_END_TOL = 0.10, CUT_OVER = 0.03, CUT_FAMILY_COS = Math.cos(35*Math.PI/180), CUT_MIN_SPAN = 0.6;
 function cutAcross(a,b){
   const dx=b.x-a.x, dy=b.y-a.y, len=Math.hypot(dx,dy); if(len<.08) return null;
   const ux=dx/len, uy=dy/len, H=dish.hull || dishHull(); let t0=Infinity, t1=-Infinity;
@@ -1776,6 +1781,9 @@ function dishLine(){
   }
   return dish.message;
 }
+// Сборка 88 (видимый жест): линия ножа и её угасание, если рез не прошёл от края до края.
+const CUT_LINE = "rgba(52,30,14,.85)", CUT_FADE_S = 0.3;
+let cutFade = null;                // {a,b,o,t0}: последний не засчитанный штрих, гаснет
 function cutDish(a,b){
   const full=cutAcross(a,b); if(!full) return false;
   a=full.a; b=full.b;
@@ -2054,7 +2062,7 @@ function syncDishUI(){
   const served=!!dish && dish.mode==="served";
   for(const id of ["flipDish","cutMode","undoDish"]){ const b=document.getElementById(id); if(b) b.hidden=served; }
   if(dish) hintEl.textContent=dish.mode==="fold"
-    ? (envelopeDone() ? "конверт готов · мах от края — переворот · за середину — унести на стол · держи — прижим"
+    ? (envelopeDone() ? "за середину — унести на стол · держи — прижим"
        : dish.folds ? "от стороны к середине — складка · мах наружу или вбок — переворот · за середину — унести на стол · держи — прижим · "+TWIST_HINT
        : (dish.filling && dish.filling.length
          ? (fillingUnderSheet() ? "начинка под листом · мах наружу — перевернуть обратно · от стороны к середине — складка"
@@ -2093,7 +2101,9 @@ function beginDishGesture(id,p,client,time){
     // Середина часто приходится на щель первого реза (u пуст) — она тоже середина.
     // Ревью сборки 80: середина — ВСЕГДА перенос, при любом числе резов (рез из середины невозможен: он от
     // края до края). Иначе снятый слишком рано роти с одним резом было не вернуть на таву, не дорезав.
-    if(eveningOn() && cutMiddle(u ? u.p : start)){
+    // Сборка 88 (видимый жест): ненарезанный роти со стола не поднимается — касание середины у него
+    // обычный штрих ножа (он не от края, рез не засчитается, линия погаснет). Отката на таву нет.
+    if(eveningOn() && cutEnough() && cutMiddle(u ? u.p : start)){
       dishGesture={id,start,end:start,client:at,samples,zone:"serve",t0,moved:false,carry:false}; return;
     }
     dishGesture={id,start:{x:start.x-o.x,y:start.y-o.y},end:{x:start.x-o.x,y:start.y-o.y},client:at,samples,cutShift:o};
@@ -2144,6 +2154,11 @@ function beginDishGesture(id,p,client,time){
   dishGesture={id,start,end:start,anchor,inward,inwards,edge,preview:null,client:at,samples,moved:false,
     zone:"edge",t0,onMat,press:null,latched:false,foldSide:openSideAt(start),
     stroke:{start:null,path:0,lastMoveT:t0,lastT:t0,pos:{x:at.x,y:at.y}}};
+  // Сборка 88: касание края на таве приподнимает этот угол — снизу виден его румянец (cornerLift).
+  if(phase==="PAN" && !dishTwist){
+    const nl=Math.hypot(c.x-anchor.x,c.y-anchor.y);
+    if(nl>1e-6) cornerLift={a:anchor,n:{x:(c.x-anchor.x)/nl,y:(c.y-anchor.y)/nl},R:nl,t0:performance.now(),up:null};
+  }
   audioScrape();                              // ответ инструмента: лопатка коснулась стали у края
 }
 // Четвёртый сгиб читался как перенос (плейтест 17.11, п. 16): палец вставал на 8 px глубже полосы кромки,
@@ -2243,6 +2258,8 @@ function trackStroke(g,client,t){
 }
 function moveDishGesture(p,client,time){
   const g=dishGesture; g.end=dishLocal(p);
+  // Повела (складка, мах) — жест ведёт сам лист, поддетый угол уходит сразу.
+  if(cornerLift && g.zone==="edge" && client && Math.hypot(client.x-g.client.x,client.y-g.client.y)>=TOUCH_SLOP_CSS) cornerLift=null;
   if(g.cutShift){ g.end={x:g.end.x-g.cutShift.x,y:g.end.y-g.cutShift.y}; }
   const t=Number.isFinite(time) ? time : performance.now();
   if(client){
@@ -2426,6 +2443,7 @@ function pressExtra(g,tUp){
 }
 function endDishGesture(time){
   const g=dishGesture; dishGesture=null;
+  if(cornerLift && cornerLift.up===null) cornerLift.up=performance.now();   // отпустила — угол ложится
   const tUp=Number.isFinite(time) ? time : performance.now();
   releasePress(g);
   if(g.forced && dish.folds && slideEndsOnTable(g.samples[g.samples.length-1])) foldToCarry(g,tUp);   // сгиб кончился над столом — это был перенос
@@ -2452,9 +2470,6 @@ function endDishGesture(time){
     const over=g.carry && typeof eveningCounterHit==="function" && eveningCounterHit(last);
     // Над тавой — снова жарится, при любом числе резов и вовсе без них. Над стойкой недорезанный не подаётся.
     const lp=toLocal(last.x,last.y), enough=cutEnough();
-    if(over && !enough){
-      logPanGesture("serve-uncut",f,{zone:"serve",carry:true}); dishNote(dish.cuts.length ? "сначала дорежь" : "сначала разрежь"); return;
-    }
     // Гостья сырой роти не берёт (guest.js, сборка 78): он остаётся на столе, вечер его не считает.
     if(over && typeof guestRefuses==="function" && guestRefuses(last)){
       logPanGesture("serve-refused",f,{zone:"serve",carry:true}); dishNote("сырое — верни на таву"); return;
@@ -2463,7 +2478,7 @@ function endDishGesture(time){
     // сырой роти шёл только на стойку и считался в «три роти»). Только в середину тавы: недонесённый до
     // стойки роти у борта остаётся на столе, как раньше.
     if(g.carry && !over && Math.hypot(lp.x-panC.x,lp.y-panC.y)<=PAN_R*PAN_BACK_R && returnToPan()){
-      logPanGesture("pan-back",f,{zone:"serve",carry:true}); dishNote("снова на таве"); return;
+      logPanGesture("pan-back",f,{zone:"serve",carry:true}); return;   // сборка 88: без строки — роти сам на таве
     }
     if(over && serveDish()){ learn("serve"); logPanGesture("serve-carry",f,{zone:"serve",carry:true}); eveningServed(); }
     else if(g.carry){ logPanGesture("serve-back",f,{zone:"serve",carry:true}); dishNote(enough ? "неси дальше" : "режь от края до края"); }
@@ -2483,7 +2498,8 @@ function endDishGesture(time){
       const dx=end.x-g.start.x, dy=end.y-g.start.y, l=Math.hypot(dx,dy);
       if(l>1e-6) end={x:end.x+dx/l*PIECE_SPREAD*2.5,y:end.y+dy/l*PIECE_SPREAD*2.5};
     }
-    if(!cutDish(g.start,end) && g.moved && !cutEnough()) dishNote("режь от края до края");   // уже нарезано — лишний штрих слов не меняет
+    // Сборка 88: не засчитанный штрих не пишет строку — его линия гаснет за CUT_FADE_S (тесто не разошлось).
+    if(!cutDish(g.start,end) && g.moved) cutFade={a:g.start,b:end,o:g.cutShift||{x:0,y:0},t0:performance.now()};
     return;
   }
   const last=g.samples[g.samples.length-1], f=flickOf(g,tUp), extra=pressExtra(g,tUp);
@@ -2618,7 +2634,8 @@ function dishSectionGeometry(faces, cuts=dish.cuts){
 // Материал, резы и торцы считаются по настоящей геометрии (ревью 17.09: прежнее деление по
 // бесконечной прямой реза рвало целый кусок при резе «Т»). Сдвиг — поперёк каждого реза, который
 // кусок действительно отделил (dishPieceShift).
-const PIECE_SPREAD = 0.022;   // владелица 17.09: 0,045 — «очень широкая щель»
+const PIECE_SPREAD = 0.013;   // владелица 17.09: 0,045 — «очень широкая щель»; сборка 88 (спека «видимый жест»):
+                              // 0,022 раздвигал куски на 4,4 CSS px (390×844), нужно 2–3 — 0,013 даёт ≈ 2,6
 function dishPieces(faces){
   const cache=dishPieces.cache||(dishPieces.cache=new WeakMap());
   if(cache.has(faces)) return cache.get(faces);
@@ -3345,6 +3362,94 @@ function edgeFrame(d){
   const len=Math.hypot(d.edge.dx,d.edge.dy)||1;
   return {tx:d.edge.dx/len, ty:d.edge.dy/len, nx:d.inward.x, ny:d.inward.y, a:d.anchor};
 }
+// ─── Поддетый угол (сборка 88, видимый жест: разбор 17.11, п. 4) ───
+// Касание края роти на таве без маха поднимает ближайший к пальцу угол конверта: небольшой треугольник
+// сворачивается завитком (кончик — на CORNER_LIFT_DEG) и показывает низ — сторону на стали с её
+// румянцем; под ним на таве мягкая тень. Держит палец — угол поднят; отпустила — ложится; короткое касание длится CORNER_LIFT_S.
+// Только картинка: материал, тепло и контакт не меняются, переворота нет.
+const CORNER_LIFT_S = 0.4, CORNER_LIFT_UP = 0.1, CORNER_LIFT_DOWN = 0.15, CORNER_LIFT_DEG = 160;
+let cornerLift = null;             // {a,n,R,t0,up}: точка кромки, внутренняя нормаль к середине, отпускание
+function cornerLiftAmount(now=performance.now()){
+  const L=cornerLift; if(!L) return 0;
+  const t=(now-L.t0)/1000, rise=Math.min(1,t/CORNER_LIFT_UP);
+  const downAt=Math.max(L.up===null ? Infinity : (L.up-L.t0)/1000, CORNER_LIFT_S-CORNER_LIFT_DOWN);
+  if(t<downAt) return rise*rise*(3-2*rise);
+  const k=1-(t-downAt)/CORNER_LIFT_DOWN;
+  if(k<=0){ cornerLift=null; return 0; }
+  return Math.min(rise,k)*Math.min(rise,k)*(3-2*Math.min(rise,k));
+}
+// Шапка угла в координатах блюда (раунд 2: была полоса стороны — «крышка коробки»). Теперь — только угол
+// конверта, ближайший к пальцу: треугольник, катеты — CORNER_LIFT_LEG стороны вдоль каждой кромки от угла
+// (сторона ≈ √площади оболочки), петля — прямая через концы катетов. Угол — вершина оболочки, где кромка
+// поворачивает больше CORNER_LIFT_TURN на отрезке ±0,1 стороны (скруглённый угол тоже угол).
+const CORNER_LIFT_LEG = 0.25, CORNER_LIFT_TURN = 30*Math.PI/180;
+function cornerLiftCap(){
+  const L=cornerLift, H=dish.hull; if(!L || !H || H.length<3) return null;
+  const n=H.length, side=Math.sqrt(polyArea(H)), leg=CORNER_LIFT_LEG*side;
+  // точка кромки на расстоянии len от вершины k, идя по оболочке в сторону dir
+  const walk=(k,dir,len)=>{ let left=len, i=k;
+    for(let m=0;m<n;m++){ const a=H[i], j=(i+dir+n)%n, b=H[j], l=Math.hypot(b.x-a.x,b.y-a.y);
+      if(l>=left && l>1e-12) return {x:a.x+(b.x-a.x)*left/l,y:a.y+(b.y-a.y)*left/l}; left-=l; i=j; }
+    return H[k]; };
+  const turn=k=>{ const a=walk(k,-1,.1*side), b=H[k], c=walk(k,1,.1*side);
+    const u=Math.atan2(b.y-a.y,b.x-a.x), v=Math.atan2(c.y-b.y,c.x-b.x); return Math.abs(Math.atan2(Math.sin(v-u),Math.cos(v-u))); };
+  let k=-1, best=Infinity;
+  for(let pass=0;pass<2 && k<0;pass++) for(let i=0;i<n;i++){
+    const d=Math.hypot(H[i].x-L.a.x,H[i].y-L.a.y); if(d<best && (pass || turn(i)>CORNER_LIFT_TURN)){ best=d; k=i; } }
+  const V=H[k], B1=walk(k,1,leg), B2=walk(k,-1,leg);
+  let m={x:-(B2.y-B1.y),y:B2.x-B1.x}; const ml=Math.hypot(m.x,m.y); if(ml<1e-9) return null;
+  m={x:m.x/ml,y:m.y/ml}; if((V.x-B1.x)*m.x+(V.y-B1.y)*m.y<0) m={x:-m.x,y:-m.y};   // m — от петли к углу
+  const hinge=B1.x*m.x+B1.y*m.y, P=clipPoly(H,m.x,m.y,hinge); if(!P.length) return null;
+  const reach=Math.max(...P.map(p=>p.x*m.x+p.y*m.y-hinge)); if(reach<1e-6) return null;
+  const mid={x:P.reduce((s,p)=>s+p.x,0)/P.length,y:P.reduce((s,p)=>s+p.y,0)/P.length};
+  return {P,hinge,m,reach,V,mid,leg,side};
+}
+// Цвета угла в точке q (середина шапки): верх — верхняя грань теста, низ — самая нижняя грань
+// (порядок граней — снизу вверх), её сторона на стали с румянцем.
+function cornerFaceAt(q,top){
+  const fs=dish.faces.filter(f=>f.kind==="dough" && pointInFace(f.points,q.x,q.y));
+  let f=top ? fs.at(-1) : fs[0];
+  if(!f){ let best=Infinity; for(const g of dish.faces) if(g.kind==="dough"){ const p=g.points[0], d=Math.hypot(p.x-q.x,p.y-q.y); if(d<best){ best=d; f=g; } } }
+  return f;
+}
+function cornerUnderColor(q){
+  if(!q){ const c=cornerLiftCap(); q=c ? c.mid : cornerLift.a; }
+  const f=cornerFaceAt(q,false); return f ? dishCrustColor(f,f.turned ? 1 : 0) : [221,199,152];
+}
+function cornerTopColor(q){ const f=cornerFaceAt(q,true); return f ? dishCrustColor(f) : [227,213,178]; }
+// Угол не поворачивается плоской доской на петле, а сворачивается завитком: точка на расстоянии s от петли
+// уходит по дуге радиуса r = reach/θ на угол s/r — у петли лист почти лежит, кончик поднят на θ и
+// смотрит низом. Рисуется полосами поперёк завитка (снизу к кончику), верх и низ — своими цветами,
+// свет по наклону. Под углом на таве — мягкая тень (shadowBlur), сталь в следе шапки темнее.
+const CORNER_CURL_STRIPS = 12;
+function drawCornerLift(g,screen,lifted,cap,e,sx,sy){
+  const {P,hinge,m,reach,mid}=cap, th=e*CORNER_LIFT_DEG*Math.PI/180; if(th<1e-3) return;
+  const r=reach/th;
+  const bend=p=>{ const s=Math.max(0,p.x*m.x+p.y*m.y-hinge), f=s/r, d=s-r*Math.sin(f);
+    return lifted({x:p.x-m.x*d,y:p.y-m.y*d},r*(1-Math.cos(f))); };
+  // рёбра шапки — мелко, чтобы изгиб читался
+  const dense=Q=>{ const out=[]; Q.forEach((a,i)=>{ const b=Q[(i+1)%Q.length], k=Math.max(1,Math.ceil(Math.hypot(b.x-a.x,b.y-a.y)/(reach/16)));
+    for(let j=0;j<k;j++) out.push({x:a.x+(b.x-a.x)*j/k,y:a.y+(b.y-a.y)*j/k}); }); return out; };
+  const path=Q=>{ g.beginPath(); Q.forEach((q,i)=>i ? g.lineTo(q.x,q.y) : g.moveTo(q.x,q.y)); g.closePath(); };
+  // тень на таве: след шапки и мягкий ореол вокруг
+  g.save(); g.shadowColor=`rgba(0,0,0,${(.5*e).toFixed(3)})`; g.shadowBlur=Math.max(2,9*sx*e);
+  g.fillStyle=`rgba(8,4,2,${(.32*e).toFixed(3)})`; path(P.map(screen)); g.fill(); g.restore();
+  const top=cornerTopColor(mid), under=cornerUnderColor(mid);
+  for(let i=0;i<CORNER_CURL_STRIPS;i++){
+    const s0=hinge+reach*i/CORNER_CURL_STRIPS, s1=hinge+reach*(i+1)/CORNER_CURL_STRIPS;
+    let Q=clipPoly(P,m.x,m.y,s0); if(Q.length) Q=clipPoly(Q,-m.x,-m.y,-s1); if(!Q.length) continue;
+    const f=(i+.5)/CORNER_CURL_STRIPS*th, c=Math.cos(f);
+    const col=c>=0 ? top.map(v=>v*(.72+.28*c)) : under.map(v=>v*(.80+.20*-c));
+    path(dense(Q).map(bend)); g.fillStyle=rgb(col); g.fill();
+    g.strokeStyle=rgb(col); g.lineWidth=Math.max(.6,.6*sx); g.stroke();   // шов между полосами не виден
+  }
+  // кромка завитка — тонкая тёмная линия по краю листа (без петли)
+  const D=dense(P); g.strokeStyle=rgb(under.map(v=>v*.62)); g.lineWidth=Math.max(1,1*sx); g.beginPath();
+  let on=false;
+  D.forEach((p,i)=>{ const q=D[(i+1)%D.length], onHinge=Math.abs(p.x*m.x+p.y*m.y-hinge)<1e-6 && Math.abs(q.x*m.x+q.y*m.y-hinge)<1e-6;
+    if(onHinge){ on=false; return; } const a=bend(p), b=bend(q); if(!on){ g.moveTo(a.x,a.y); on=true; } g.lineTo(b.x,b.y); });
+  g.stroke();
+}
 function drawSpatula(g,screen,d,sx,sy){
   const {tx,ty,nx,ny,a}=edgeFrame(d), w=.13, back=.10, fwd=.24;
   const P=[[-w,-back],[w,-back],[w*.8,fwd],[-w*.8,fwd]].map(([u,v])=>screen({x:a.x+tx*u+nx*v,y:a.y+ty*u+ny*v}));
@@ -3390,6 +3495,7 @@ const SLAB_MM = 5, SLAB_GAIN = 1.4;
 // ломтиками это верх листа, а не ломтика, — иначе сглаживание поднимало вокруг ломтиков «шатёр»
 // (проверка 17.09). Ломтик сверху добавляет свой профиль ×FILL_VIS×1,4.
 const slabTop = (H,p) => Math.min(SLAB_MM, Math.max(0, H.atBase ? H.atBase(p) : H.at(p))*SLAB_GAIN);
+const TABLE_FLAP_LINES = false;        // сборка 88: тень и губа у кромок клапанов на столе (кресты на корке) — выключены
 const CUT_RIM = 0.014;                 // ширина полоски начинки у разреза, доли роти (≈4 CSS px)
 const SHADOW_DX = .45, SHADOW_DY = .12; // тень на столе: сдвиг на единицу высоты
 const TABLE_K = 8;                     // сколько слоёв помнит пиксель (при переполнении выпадает нижний слой теста над низом, не начинка)
@@ -3658,9 +3764,11 @@ function renderDishTable(faces,screen,H,zk,W,Hc,s,opts={}){
       if(ncD<Math.min(unit*1.2,rimW*.45)) m*=.75;   // в пиксельных видах затемнение съедало всю полоску (оливковый цвет)
       stat.rim++;
     }
-    if(f.kind==="dough" && s>=.9){
+    if(f.kind==="dough" && s>=.9 && TABLE_FLAP_LINES){
       // клапан выше соседа: у его кромки мягкая тень вниз-вправо, на самой кромке — светлая губа
       // (только вид C: в пиксельных видах пиксель крупнее кромки — там это шум)
+      // Сборка 88 (видимый жест): выключено — кромки клапанов конверта рисовали на корке крест и дуги
+      // от углов, их принимали за разрезы (разбор 17.11, п. 3). Разрезом на корке остаётся только рез.
       if(i>=seam && j>=seam){ const nb=c-seam*bw-seam; if(tf[nb]>=0 && pd[nb]>pd[c]) m*=.87; }
       if(i+seam<bw && j+seam<bh){ const nb=c+seam*bw+seam; if(tf[nb]>=0 && pd[nb]<pd[c] && faces[tf[nb]].kind==="dough") m*=1.05; }
     }
@@ -3889,12 +3997,24 @@ function drawDish(g,sx,sy){
   if(dish.mode!=="fold" && dish.tray) drawTray(g,screen,sx);   // лоток под роти, едет вместе с ним
   if(dish.mode!=="fold" && !moving && !slide && faces===dish.faces) drawDishTable(g,screen,faces,H,zk,sx,sy);   // в руке (на стойку) — плоский вид: рельеф не пересчитывается каждый кадр
   else {
+    // Поддетый угол (сборка 88): лист рисуется без шапки угла, шапка — поверх, повёрнутая на петле.
+    const ce=dish.mode==="fold" && !moving && !slide && !T && faces===dish.faces ? cornerLiftAmount() : 0;
+    const cap=ce>.01 ? cornerLiftCap() : null;
+    if(cap){
+      g.save(); g.beginPath(); g.rect(-1e4,-1e4,3e4,3e4);
+      cap.P.forEach((p,i)=>{ const q=screen(p); i ? g.lineTo(q.x,q.y) : g.moveTo(q.x,q.y); }); g.closePath(); g.clip("evenodd");
+    }
     drawDishFaces(g,faces,screen,H,zk,true,pieceShiftLive(faces));
     if(!moving && !slide && faces===dish.faces) drawMargarineGloss(g,screen,H,zk,sx);
-    if(lift) drawLiftedEdge(g,screen,lift,sx,sy);
+    if(lift && !cap) drawLiftedEdge(g,screen,lift,sx,sy);
     // Rebuild expensive boundary intersections only after a committed geometry
     // change. During a drag the existing flat preview remains immediate.
     if(!moving&&(dish.folds||dish.cuts.length)&&!(dishGesture&&dishGesture.preview)) drawDishSections(g,screen,faces,sx,sy,zk,H);
+    if(cap){
+      g.restore();
+      const lifted=(p,h)=>{ const x=pose.x+p.x*pose.scale, y=pose.y+(p.y-h)*pose.scale; return {x:prX(x,y)*sx,y:prY(x,y)*sy}; };
+      drawCornerLift(g,screen,lifted,cap,ce,sx,sy);
+    }
   }
   if(dish.mode==="fold" && !moving && !slide) drawFoldGuide(g,screen,sx);
   if(dish.mode==="fold" && !(dishGesture && dishGesture.preview)) drawDomes(g,screen,H,zk);
@@ -3903,11 +4023,24 @@ function drawDish(g,sx,sy){
     const d=dishGesture, o=d.cutShift||{x:0,y:0}, up=dish.mode==="cut" ? tableLiftCanvas()*sy : 0;
     const sh=q=>{ const a=screen({x:q.x+o.x,y:q.y+o.y}); return {x:a.x,y:a.y-up}; };
     const a=sh((d.plan&&d.plan.anchor)||d.anchor||d.start),b=sh((d.plan&&d.plan.target)||d.target||d.end);
-    g.strokeStyle=dish.mode==="fold" ? "#eab562" : "#f5ead6";g.lineWidth=Math.max(1,2*sx);
+    // Сборка 88: за ножом — тонкая тёмная линия по тесту (раньше светлая, на светлом тесте не читалась).
+    if(dish.mode==="cut"){ g.strokeStyle=CUT_LINE; g.lineWidth=Math.max(1,1.2*sx); }
+    else { g.strokeStyle="#eab562"; g.lineWidth=Math.max(1,2*sx); }
     g.beginPath();g.moveTo(a.x,a.y);g.lineTo(b.x,b.y);g.stroke();
     // Короткое лезвие остаётся под пальцем во время реза.
     if(dish.mode==="cut"){g.fillStyle="#d1d2c9";g.fillRect(b.x-2,b.y-5,4,9);}
   }
+  // Не засчитанный штрих: линия гаснет за CUT_FADE_S, тесто не разошлось.
+  if(cutFade && dish.mode==="cut" && !slide && !moving){
+    const u=(performance.now()-cutFade.t0)/1000/CUT_FADE_S;
+    if(u>=1) cutFade=null;
+    else {
+      const o=cutFade.o, up=tableLiftCanvas()*sy, sh=q=>{ const a=screen({x:q.x+o.x,y:q.y+o.y}); return {x:a.x,y:a.y-up}; };
+      const a=sh(cutFade.a), b=sh(cutFade.b);
+      g.save(); g.globalAlpha=1-u; g.strokeStyle=CUT_LINE; g.lineWidth=Math.max(1,1.2*sx);
+      g.beginPath(); g.moveTo(a.x,a.y); g.lineTo(b.x,b.y); g.stroke(); g.restore();
+    }
+  } else if(cutFade && dish.mode!=="cut") cutFade=null;
 }
 
 // ─────────────────────────── построение листа
@@ -4157,11 +4290,13 @@ function buildHoleChains(){
         if(!nxt.length) break;
         prev = cur; cur = nxt[0];
       }
-      if(first === adj.get(start)[0]) chain.push(...seg); else chain.unshift(...seg);
+      // вторая ветка от старта встаёт перед ним в обратном порядке (сборка 88: без reverse цепочка
+      // рвалась на стыке, ячейка стыка была undefined, и рваный лист на таве ронял каждый кадр в rimDraw)
+      if(first === adj.get(start)[0]) chain.push(...seg); else chain.unshift(...seg.reverse());
     }
     if(chain.length >= 5){
       const cells = new Set();
-      for(let i=0;i+1<chain.length;i++){ const q = quadAt.get(key(chain[i], chain[i+1])); if(q !== null) cells.add(q); }
+      for(let i=0;i+1<chain.length;i++){ const q = quadAt.get(key(chain[i], chain[i+1])); if(q != null) cells.add(q); }
       const cyclic = adj.get(chain[0]).includes(chain[chain.length-1]);   // замкнутая петля вокруг дыры
       holeChains.push({ nodes: chain, cells: [...cells], cyclic });
     }
@@ -6931,6 +7066,24 @@ function viewX(){
 }
 function viewY(){ return vyBuf; }
 
+// ─── Валик кромки (сборка 88, видимый жест: разбор 17.11, п. 1) ───
+// Кромка настоящего роти толще середины и не растягивается в бумагу: она светлая и непрозрачная на всех
+// шагах растяжки. Прежде это делал один ряд ячеек кромки (rimEdgeQ) — на тонком листе он светлел вровень
+// с серединой и терялся, а второй ряд ячеек давал лесенку. Теперь валик — полоса вдоль нарисованной
+// кромки (rimLoop по dX/dY, тот же сглаженный контур, что у ячеек), обрезанная по листу: внутренний край
+// ровный, наружу лист не растёт. Мягкий край — вторая, шире и прозрачнее, полоса. Ширина — доля листа.
+const RIM_ROLL = "rgb(247,236,204)", RIM_ROLL_SOFT = "rgba(247,236,204,0.45)", RIM_ROLL_W = 0.035;
+function drawRimRoll(g, Pnt, sx){
+  const L = rimLoop; if(!L || L.length < 8) return false;
+  g.save(); g.beginPath();
+  for(let k=0;k<L.length;k++){ const p = Pnt(L[k]); k ? g.lineTo(p.x,p.y) : g.moveTo(p.x,p.y); }
+  g.closePath(); g.clip();
+  const w = Math.max(2, sheetRadius()*RIM_ROLL_W*sx);
+  g.lineJoin = "round";
+  g.strokeStyle = RIM_ROLL_SOFT; g.lineWidth = 2*w*1.7; g.stroke();
+  g.strokeStyle = RIM_ROLL; g.lineWidth = 2*w; g.stroke();
+  g.restore(); return true;
+}
 function pathSheetOutline(g, sx, ox, sy, oy, extraY){
   const c = centerOfSheet();
   const bins = 28;
@@ -7107,6 +7260,7 @@ function draw(){
       g.lineTo(Pd.x, Pd.y);
       g.closePath(); g.fill();
     }
+    if(!onPan && !xf && stepNo >= 2) drawRimRoll(g, Pnt, sx);   // сборка 88: валик кромки на всех шагах растяжки
     drawCornerFlash(g, sx, sy);
     // дуга хвата и палец видны только пока жест взводится: ARMED подсвечивает
     // выбранный край (audit, проход A), тесто при этом не двигается.

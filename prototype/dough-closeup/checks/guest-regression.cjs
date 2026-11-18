@@ -612,7 +612,7 @@ function knockFrames(h) {                    // the frames of one knock: the arm
   while (h.pic() === 2) { const G = h.gs(); if (G.arm) out.push(G.arm); h.frames(1); }
   return out;
 }
-test('G10', 'build 89 — the knock marks lie at the palest point of the roti edge (nearer to it than to the rim; not flipped — the edge nearest to her) and her arm is out; raw visible side taken to the table → one «no» (0.6 s, two shakes, then she looks at the tava); cooked → none; taken again → one more; serving and the answer unchanged', () => {
+test('G10', 'build 89 — the knock marks lie at the palest point of the roti edge (nearer to it than to the rim; not flipped — the edge nearest to her) and her arm is out; raw visible side taken to the table → one «no» (0.6 s, two shakes, then she looks at the tava); cooked → none; a carry back to the tava leaves it on the table (build 88), no second «no»; serving and the answer unchanged', () => {
   const out = [];
   // not flipped: the main knock goes to the edge of the roti nearest to her
   const h = guest(); light(h); onPan(h); until(h, 'GST.here');
@@ -659,18 +659,19 @@ test('G10', 'build 89 — the knock marks lie at the palest point of the roti ed
     assert.ok(at.no > 0 && tab.no === 0, `the look at the tava lasts 0.6 + 1 s (left ${at.no} s at frame 50, ${tab.no} at frame 99)`);   // the tava and the table are both «down» from her: the look is checked by its timer
     out.push(`no: head ${Math.max(...turns).toFixed(2)}/${Math.min(...turns).toFixed(2)}, still after ${last} frames`); }
   sec(m, 3); assert.deepEqual(m.gev().slice(n0), ['no'], 'only once for one removal');
-  serve(m, m.spots().pan); assert.equal(m.run('dish.mode'), 'fold', 'back on the tava');
-  const n1 = m.gev().length; toTable(m);
-  assert.deepEqual(m.gev().slice(n1).filter(e => e === 'no'), ['no'], 'taken off again: one more «no»');
+  // build 88: the uncut roti does not lift from the table — a carry to the tava leaves it there, and she does not shake again
+  const n1 = m.gev().length; serve(m, m.spots().pan); sec(m, 2);
+  assert.equal(m.run('dish.mode'), 'cut', 'build 88: the uncut roti stays on the table');
+  assert.ok(!m.gev().slice(n1).includes('no'), 'it never left the table: no second «no»');
   cut(m); serve(m, m.gs().som);
   assert.equal(m.g().answers.length, 1, 'served: she takes it'); assert.equal(m.g().answers[0].answer, 'nod'); assert.deepEqual(m.g().gifts, ['bananas'], 'one side cooked, the other raw — a nod and bananas, as before');
-  assert.equal(m.gev().filter(e => e === 'no').length, 2);
+  assert.equal(m.gev().filter(e => e === 'no').length, 1);
   // cooked visible side to the table: none
   const c = guest(); light(c); onPan(c); arrive(c); envelope(c); until(c, PALE);
   cookSides(c, 0.5, 0.5); const n2 = c.gev().length; toTable(c); sec(c, 2);
   assert.ok(!c.gev().slice(n2).includes('no'), `cooked on the table: no «no» (${c.gev().slice(n2).join(' ')})`);
   assert.deepEqual(h.errors.concat(m.errors, c.errors), []);
-  return { summary: out.join('; ') + '; raw → no, again → no, served → nod/bananas; cooked → none' };
+  return { summary: out.join('; ') + '; raw → no, carry back refused, served → nod/bananas; cooked → none' };
 });
 
 const passed = results.filter(r => r.status === 'PASS').length;

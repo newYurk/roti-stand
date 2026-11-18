@@ -234,13 +234,16 @@ test('D1', 'third ball: the dog sleeps, lifts its head once the roti in the hand
   // an uncut roti cannot be given, and a stroke from its middle into the dog's corner is an ordinary cut stroke
   // (review of step 4: it was refused with "cut first"); the same stroke up to the counter is still refused
   { const c = rotiBox(h).c; drive(h, line(c, h.spots().counter, { v: 420, hold: 80 }), { settle: 30 }); }
-  assert.match(h.run('dish.message'), /^сначала разрежь/, 'uncut, from the middle to the counter: "cut first"'); assert.equal(h.run('dish.cuts.length'), 0);
+  // Build 88 (visible gesture): the uncut roti does not lift at all — to the counter it is a failed knife stroke, no «сначала разрежь».
+  assert.doesNotMatch(h.run('dish.message'), /^сначала/, 'uncut, from the middle to the counter: no line pops up'); assert.equal(h.run('dish.cuts.length'), 0);
+  assert.equal(h.run('dish.mode'), 'cut'); assert.equal(h.eve().rotiDone, 2);
   h.run('dish.message="";dish.noteUntil=0');
   { const c = rotiBox(h).c; drive(h, line(c, h.ns().dog, { v: 420, hold: 80 }), { settle: 30 }); }
   assert.doesNotMatch(h.run('dish.message'), /^сначала разрежь/, 'uncut, from the middle to the dog: not refused as a serve');
   // Changed in build 80: a cut goes from edge to edge, so this stroke (it starts in the middle of the roti) is no
   // longer a cut — until build 79 it left one («it cuts, as before step 4»). The words say how to cut.
-  assert.equal(h.run('dish.cuts.length'), 0, 'a stroke from the middle is not a cut any more'); assert.equal(h.run('dish.message'), 'режь от края до края');
+  // Build 88: a failed stroke writes no line any more — its knife line fades (cutFade).
+  assert.equal(h.run('dish.cuts.length'), 0, 'a stroke from the middle is not a cut any more'); assert.equal(h.run('!!cutFade'), true, 'its line fades');
   assert.equal(h.eve().rotiDone, 2, 'an uncut roti is not served to the dog'); assert.equal(h.run('dish.mode'), 'cut'); assert.equal(h.NGT().dog, 0);
   cut(h);
   assert.equal(h.run('dish.message'), 'нарезано — за середину и неси', 'no "to the counter" in the words: the dog takes the roti too');
@@ -250,7 +253,8 @@ test('D1', 'third ball: the dog sleeps, lifts its head once the roti in the hand
   // Changed in the review of build 80: the middle of a roti on the table is always a carry, so the UNCUT roti led
   // to the counter above was in the hand and the dog has already looked once at it («look» in the journal before
   // this point). «One look per carry» is counted for the carry below.
-  const looks0 = h.ngt().length; assert.deepEqual(h.ngt(), ['look'], 'the uncut roti carried up to the counter: the dog looked once');
+  // Build 88: the uncut roti is no longer lifted at all, so the dog has not looked yet.
+  const looks0 = h.ngt().length; assert.deepEqual(h.ngt(), [], 'the uncut roti did not leave the table: the dog did not look');
   let p = grab(h);
   assert.ok(p.y > S.lookY, `the roti lies in the lower third (${p.y.toFixed(0)} > ${S.lookY.toFixed(0)})`);
   p = go(h, p, { x: p.x, y: S.lookY + 12 });
