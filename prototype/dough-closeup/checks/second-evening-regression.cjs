@@ -616,7 +616,8 @@ test('S8', 'without shelf.js the evening goes as in step 4 (bananas are not rati
   const bn = h0.run('BUILD').match(/· (\d+)$/)[1];
   const html = fs.readFileSync(path.join(path.dirname(H.sourcePath), 'index.html'), 'utf8');
   assert.match(html, /night\.js\?v=[^"]*"><\/script>\s*<script src="shelf\.js\?v=[^"]*"/, 'index.html loads shelf.js after night.js');
-  assert.match(html, new RegExp('stand\\.js\\?v=[^"]*b' + bn + '[a-z]?"'));   // a letter: a fix round of the same build (85b)
+  // повторный выпуск той же сборки — буква после номера (b84b: тяга без отскока, сборка та же)
+  assert.match(html, new RegExp('stand\\.js\\?v=[^"]*b' + bn + '[a-z]?"'));
   assert.equal(h.run('loopErrs'), 0); assert.deepEqual(h.errors, []);
   return { summary: 'evening.js + guest.js + notebook.js + night.js alone: banana laid, save.shelf and n kept; BUILD ' + h0.run('BUILD').split('·').pop().trim() };
 });

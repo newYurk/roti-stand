@@ -501,6 +501,48 @@ test('T9d', 'short pull and touch cancel restore the mesh and the rest lengths b
   if (rows.some(r => !r.same || r.gestures !== 0 || r.moved !== 'RESTING') || rows.slice(2).some(r => r.state !== 'PULLING' || !r.displaced) || rows[3].next !== 'pull') failWith(out, out.summary);
   return out;
 });
+// ── T9r: build 84 — the pull does not snap back on release ──────────────────────────────────
+// Live 17.11 (390×844, touches): the edge followed the finger while held, but the release replayed
+// the old tanh placement and the dough jumped back by 10–133 px. Dough is plastic: the held shape is
+// the committed one. Five slow pulls on one flattened sheet (length CSS px / duration s), 60 Hz
+// touches, held 0.3 s, released: the edge is within 6 px of the finger while it follows (not at the
+// limit), and no node moves more than 3 px between the last held frame and 3 frames after release.
+test('T9r', 'release does not snap: five slow pulls 40–160 px, the held shape is the committed one', () => {
+  const h = fresh(), rows = [];
+  h.run(`globalThis.__cl=()=>{const r=cv.getBoundingClientRect(),kx=r.width/cv.width,ky=r.height/cv.height,o=[];
+    for(let i=0;i<N;i++){if(conDeg&&conDeg[i]<=0){o.push(null);continue;}o.push([r.left+prX(px[i],py[i])*kx,r.top+prY(px[i],py[i])*ky]);}return o;};`);
+  const nodes = () => JSON.parse(h.run('JSON.stringify(__cl())'));
+  const PULLS = [[40, 0.7], [60, 0.9], [90, 1.2], [160, 1.6], [120, 1.0]], ANG = [0, Math.PI / 2, Math.PI, -Math.PI / 2, Math.PI / 4];
+  PULLS.forEach(([L, T], k) => {
+    const a = ANG[k];
+    const st = JSON.parse(h.run(`(()=>{const c=centerOfSheet();rimProfile(c);return JSON.stringify({c,r:rimProf[rimBin(${a})]*0.98})})()`));
+    const p0 = h.toClient(st.c.x + Math.cos(a) * st.r, st.c.y + Math.sin(a) * st.r), p1 = h.toClient(st.c.x + Math.cos(a) * st.r * 1.3, st.c.y + Math.sin(a) * st.r * 1.3);
+    let dx = p1.x - p0.x, dy = p1.y - p0.y; const l = Math.hypot(dx, dy); dx /= l; dy /= l;
+    h.touch('start', 't1', p0.x, p0.y); h.tick(18);
+    const n = Math.round(T * 60); let f = p0, follow = 0, early = null, prev = null;
+    const gap = () => { let m = 1e9; for (const q of nodes()) if (q) m = Math.min(m, Math.hypot(q[0] - f.x, q[1] - f.y)); return m; };
+    for (let i = 1; i <= n; i++) {
+      h.tick(1); f = { x: p0.x + dx * L * i / n, y: p0.y + dy * L * i / n }; h.touch('move', 't1', f.x, f.y);
+      const s = h.run('action.state'); if (s === 'ARMED') continue; if (s !== 'PULLING') { early = s; break; }
+      if (!h.run('action.pull.atLimit')) follow = Math.max(follow, gap());
+      prev = nodes();
+    }
+    let disp = 0;
+    if (!early) {
+      h.tick(18); const before = nodes(); h.touch('end', 't1', f.x, f.y); h.tick(3); const after = nodes();
+      for (let i = 0; i < before.length; i++) if (before[i] && after[i]) disp = Math.max(disp, Math.hypot(after[i][0] - before[i][0], after[i][1] - before[i][1]));
+    } else {   // fingers slipped: the pull committed itself on the move — the same 3-frame window from the last held frame
+      h.touch('end', 't1', f.x, f.y); h.tick(3); const after = nodes();
+      if (prev) for (let i = 0; i < prev.length; i++) if (prev[i] && after[i]) disp = Math.max(disp, Math.hypot(after[i][0] - prev[i][0], after[i][1] - prev[i][1]));
+    }
+    const decision = h.run('lastDecision');
+    for (let i = 0; i < 90 && h.run('action.state') !== 'RESTING'; i++) h.tick();
+    rows.push({ pull: `${L}px/${T}s`, followGapPx: r3(follow), releasePx: r3(disp), slipped: !!early, decision, kind: h.run('gestures.at(-1).kind') });
+  });
+  const out = { rows, summary: rows.map(r => `${r.pull}: gap ${r.followGapPx}, release ${r.releasePx}${r.slipped ? ' (slipped)' : ''}`).join('; ') };
+  if (rows.some(r => r.followGapPx > 6 || r.releasePx > 3 || r.kind !== 'pull')) failWith(out, out.summary);
+  return out;
+});
 test('T9e', 'thick rim: after pulls only the outer 10 % of the radius is thicker than the sheet mean', () => {
   const h = fresh(); let n = 0; while (n < 40 && h.run('stepNo') === 2) { pull(h, n * D + (n >= 8 ? D / 2 : 0), 2.4, 1.5); n++; }
   h.tick(60);

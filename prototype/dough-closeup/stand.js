@@ -11,7 +11,7 @@
 // до 400%+ и лист «рвётся» в середине от любого движения. Замер это обнаружил сразу.
 // Число узлов сохранено (1 060 после обрезки по кругу; прежняя оценка «~1150» была на глаз,
 // пересчитано 07.09.2026), однородность рёбер восстановлена.
-const BUILD = "2026-11-18 · подача: банан кучкой и яйцо, лоток и сгущёнка, роти над пальцем · 85";
+const BUILD = "2026-11-18 · подача: банан кучкой и яйцо, лоток и сгущёнка, роти над пальцем; жарка пятнами · 87";
 const GRID = 38;                   // 38x38, в круг попадает 1 060 узлов (посчитано, не оценка)
 let SUBSTEPS = 8;                  // T2: 8–10 подшагов, 1 итерация
 let DAMP = 0.986;
@@ -427,7 +427,7 @@ function startDish(){
     const tone=ids.reduce((s,i)=>s+thick[i],0)/4;
     // Внутренняя диагональ сохраняет вогнутые квады при выпуклом отсечении.
     for(const p of materialTriangles(points)){
-      if(polyArea(p)>1e-10) faces.push({points:p,kind:"dough",source:q,tone,turned:false});
+      if(polyArea(p)>1e-10) faces.push({points:p,kind:"dough",source:q,tone,turned:false,m:CRUST_M0});
     }
   }
   dish={mode:"fold",faces,folds:0,cuts:[],history:[],filling:[],message:tip("banana","коснись середины — ляжет банан",tip("fold","веди от края к середине"))};
@@ -442,6 +442,7 @@ function startDish(){
     tone:ids.reduce((s,i)=>s+thick[i],0)/4,contact:ids.reduce((s,i)=>s+contactF[i],0)/4
   });
   dish.flips=0; dish.panTime=0; dish.sessions=[{flip:0,start:0,gold:null}];
+  dish.seed=crustSeedNow();   // узор пятен — от номера роти (сборка 86)
   fryStageNow = 0; fryJumpAt = 0;
   dish.holes=quadCons.filter(cs=>cs.some(c=>c.broken)).length;   // рваные ячейки листа при посадке
   rebuildDishContact(); dish.hull=dishHull(); dish.env=envelopeFrame(); syncDishUI();
@@ -1268,6 +1269,294 @@ function dishCookColor(f,side,through=true){
   return color;
 }
 
+// ─── Жарка пятнами (сборка 86, docs/fry-spots-batch-spec.md). Только вид: пороги жарки, время, приговор
+// и строки не тронуты. Румянец ложится пятнами и точками, а не виньеткой от края:
+//  • поле пятен — шум в координатах МАТЕРИАЛА (лист в момент посадки), поэтому узор стоит на месте при
+//    складке, перевороте и повороте и одинаков от кадра к кадру. Каждая грань несёт рамку m —
+//    отображение материала в нынешние координаты блюда (CRUST_M0 при посадке; складка, переворот и
+//    поворот переводят её той же функцией, что и точки грани — crustFrameMap). У двух сторон листа
+//    узоры разные, зерно — от номера роти (dish.seed);
+//  • доля площади под пятнами растёт с прожаркой стороны (spotCover), сами пятна темнее фона на
+//    SPOT_LIFT…; сырая сторона (ниже FRY_STEPS[0]) — ни одного пятна, фон бледный и матовый;
+//  • у края роти и у шва конверта (рёбра складок) пятен больше и они темнее (EDGE_W, SEAM_W);
+//    румяная кайма стороны на стали (сборка 78) осталась, но тоже пятнами;
+//  • пятно — не свой цвет, а затемнение фона (множитель SPOT_TINT): фон золотеет с прожаркой, веснушки
+//    чуть темнее него, края мягкие (раунд 2, 18.11: на 86 пятна читались ржавчиной и камуфляжем);
+//  • на таве пятна рисуются текстурой в координатах материала (crustSpotTex): у каждой грани своё
+//    аффинное отображение материал → экран, умножение поверх фона грани, сила — globalAlpha; на столе
+//    тот же crustMix считается попиксельно (renderDishTable). Пятна круглые и там, и там.
+const CRUST_M0 = [1,0,0,1,0,0];                // материал = блюдо в момент посадки
+const SPOT_BIG = 0.09, SPOT_FINE = 0.03;       // шаг сетки пятен и веснушек в долях радиуса роти (раунд 2: круглые точки)
+const SPOT_SOFT = 0.09;                       // мягкость края пятна (в долях поля): край расплывается
+const SPOT_TINT = [0.76,0.65,0.56];            // множитель цвета в сердцевине пятна при полной силе: коричневее фона, не чёрное
+const EDGE_W = 0.075, EDGE_GROUND = 0.16;      // полоса края, где пятна гуще, — доля радиуса; румянец фона у края
+function crustSeedNow(){
+  const e=typeof EVE!=="undefined" && EVE ? EVE : null;
+  return 1+(e && Number.isFinite(e.rotiDone) ? e.rotiDone : 0);
+}
+// Рамка переводится той же функцией, что точки: начало и два единичных вектора.
+function crustFrameMap(m,fn){
+  if(!m) return m;
+  const o=fn({x:m[4],y:m[5]}), a=fn({x:m[0]+m[4],y:m[1]+m[5]}), b=fn({x:m[2]+m[4],y:m[3]+m[5]});
+  return [a.x-o.x,a.y-o.y,b.x-o.x,b.y-o.y,o.x,o.y];
+}
+function crustToMaterial(m,x,y){
+  const X=x-m[4], Y=y-m[5], det=m[0]*m[3]-m[1]*m[2]||1;
+  return {x:(m[3]*X-m[2]*Y)/det, y:(m[0]*Y-m[1]*X)/det};
+}
+function crustHash(ix,iy,seed){
+  let h=Math.imul(ix|0,374761393)+Math.imul(iy|0,668265263)+Math.imul(seed|0,1442695041);
+  h=Math.imul(h^(h>>>13),1274126177); h^=h>>>16;
+  return (h>>>0)/4294967296;
+}
+function crustNoise(x,y,seed){
+  const ix=Math.floor(x), iy=Math.floor(y), fx=x-ix, fy=y-iy, u=fx*fx*(3-2*fx), v=fy*fy*(3-2*fy);
+  const a=crustHash(ix,iy,seed), b=crustHash(ix+1,iy,seed), c=crustHash(ix,iy+1,seed), d=crustHash(ix+1,iy+1,seed);
+  return a+(b-a)*u+(c-a)*v+(a-b-c+d)*u*v;
+}
+// Поле пятен 0…1 в точке материала: круглые точки двух размеров (раунд 2; шум на решётке давал
+// квадратные кляксы). В каждой клетке сетки — одна точка со случайными местом, радиусом и весом;
+// поле — максимум по точкам от w·(1−(d/r)²). Порог поля по доле площади сначала открывает самые
+// весомые точки и их середины, дальше точек больше и они крупнее. Крупные пятна (вес ≤ 0,8)
+// появляются только у сильно зажаренной стороны. Медленный шум сверху — скопления веснушек.
+function spotDot(cx,cy,cell,s){
+  const h1=crustHash(cx,cy,s), h2=crustHash(cx,cy,s+101), h3=crustHash(cx,cy,s+202), h4=crustHash(cx,cy,s+303);
+  return [(cx+0.15+0.7*h1)*cell,(cy+0.15+0.7*h2)*cell,cell*(0.3+0.42*h3),0.45+0.55*h4];
+}
+function spotDots(x,y,cell,s){
+  const ix=Math.floor(x/cell), iy=Math.floor(y/cell); let v=0;
+  for(let j=-1;j<=1;j++) for(let i=-1;i<=1;i++){
+    const D=spotDot(ix+i,iy+j,cell,s), dx=x-D[0], dy=y-D[1], q=(dx*dx+dy*dy)/(D[2]*D[2]);
+    if(q<1){ const w=D[3]*(1-q); if(w>v) v=w; }
+  }
+  return v;
+}
+const SPOT_BIG_W = 0.7, SPOT_CLUSTER = 0.3;
+function spotCluster(x,y,s){ return 1-SPOT_CLUSTER+SPOT_CLUSTER*crustNoise(x/0.22+3.1,y/0.22+8.7,s+31); }
+function spotField(x,y,seed,side){
+  const s=seed*2+side;
+  return Math.max(SPOT_BIG_W*spotDots(x,y,SPOT_BIG,s+7919),spotDots(x,y,SPOT_FINE,s))*spotCluster(x,y,s);
+}
+// Квантили поля (считаются один раз): порог, выше которого лежит заданная доля площади.
+let spotQ=null;
+function spotQuant(p){
+  if(!spotQ){
+    const a=[]; for(let j=0;j<96;j++) for(let i=0;i<96;i++) a.push(spotField(-1+i/48+.003,-1+j/48+.007,1,0));
+    a.sort((x,y)=>x-y); spotQ=[]; for(let k=0;k<=100;k++) spotQ.push(a[Math.min(a.length-1,Math.round(k/100*(a.length-1)))]);
+  }
+  const q=Math.max(0,Math.min(100,p*100)), k=Math.floor(q), f=q-k;
+  return k>=100 ? spotQ[100] : spotQ[k]+(spotQ[k+1]-spotQ[k])*f;
+}
+// Доля площади стороны под пятнами по её прожарке c: сырое — 0; «приготовленное» — редкие веснушки,
+// «зажаренное» — гуще (до ~40 %). Больше половины — уже сплошные кляксы (камуфляж сборки 86).
+function spotCover(c){
+  if(!(c>=FRY_STEPS[0])) return 0;
+  const k=Math.min(1,(c-FRY_STEPS[0])/(FRY_STEPS[3]-FRY_STEPS[0]));
+  return Math.min(0.85,0.04+0.32*Math.pow(k,0.8)+Math.max(0,c-FRY_STEPS[3])*1.5);
+}
+// Сила пятна (0…1) — насколько сердцевина пятна доходит до SPOT_TINT: растёт с прожаркой, у края и
+// у шва сильнее. Горелое — тёмное целиком, пятна на нём почти не нужны.
+function spotStrength(c,edge){
+  if(!(c>=FRY_STEPS[0])) return 0;
+  const k=Math.min(1,(c-FRY_STEPS[0])/(FRY_STEPS[2]-FRY_STEPS[0]));
+  return Math.min(1,0.3+0.45*k+0.35*edge);
+}
+// Фон между пятнами — сама сторона, чуть светлее: с прожаркой золотеет (раунд 2: на 86 фон оставался
+// кремовым до «зажаренного»); у горелого догоняет её (горелое читается тёмным целиком).
+const CRUST_GROUND = 0.78;
+function crustGround(c){ return c<1 ? CRUST_GROUND*c : Math.min(c, CRUST_GROUND+(c-1)*4); }
+// Маска пятна 0…1 по значению поля n и порогу thr: мягкий край, к сердцевине гуще.
+function spotMask(n,thr,soft){
+  const s=Math.max(0,Math.min(1,(n-thr+soft)/(2*soft)));
+  if(s<=0) return 0;
+  const d=Math.max(0,Math.min(1,(n-thr)/Math.max(1e-6,spotQuant(1)-thr)));
+  return s*s*(3-2*s)*(0.5+0.5*d);
+}
+// Доля площади с поправкой на край и шов (там пятна гуще).
+function spotCoverAt(c,edge){ const cov=spotCover(c); return cov ? cov+(0.75-cov)*0.6*edge : 0; }
+// Параметры корки, одинаковые по всей грани: прожарка видимой стороны (с каймой стороны на стали),
+// близость к краю и шву, зерно узора. null — у грани нет тепла (порванная ячейка).
+function crustFace(f,side){
+  const base=f.turned ? [221,199,152] : [227,213,178];
+  const t=dish && dish.thermal && dish.thermal[f.source];
+  if(side===undefined) side=f.turned ? 0 : 1;
+  if(!t) return {base,c:0,edge:0,seed:1,side,ground:base};
+  const spot=0.55+0.8*(t.contact||1), L=dishLook();
+  let c=t.cook[side]*spot;
+  if(c<L.top) c+=(L.top-c)*PATCH_SMOOTH;       // заплатки над начинкой сглажены, как в dishCookColor
+  // Фон — по своей стороне, с лёгким просветом стороны на стали (как в dishCookColor); пятна — только у
+  // своей прожарки и у каймы: сырая сторона не получает пятен ни от просвета, ни от сглаживания.
+  const bot=t.cook[1-side]*spot;
+  let gc=crustGround(c);
+  if(bot>c+0.06) gc+=(crustGround(bot)-gc)*Math.min(0.32,(bot-c)*0.55);
+  let edge=0;
+  if(L.hull && L.hull.length>2){
+    const R=rimDist(f,L.hull);
+    if(R.d<EDGE_W){ const k=1-R.d/EDGE_W; edge=k*k*(3-2*k); }
+    if(L.rim){                                  // кайма стороны на стали, ползёт к середине (сборка 78)
+      let k=R.d<L.rimW ? 1-R.d/L.rimW : 0; k=k*k*(3-2*k)*RIM_MIX;
+      if(L.seam){
+        const E=L.seam, px=R.x-E.c.x, py=R.y-E.c.y, s=Math.min(Math.abs(px*E.u.x+py*E.u.y),Math.abs(px*E.v.x+py*E.v.y));
+        if(s<SEAM_W){ k=Math.max(k,(1-s/SEAM_W)*SEAM_MIX); edge=Math.max(edge,1-s/SEAM_W); }
+      }
+      const low=L.bot*spot; if(k>0 && low>c) c+=(low-c)*k;
+    }
+  }
+  // край и рёбра складок румянее и сами по себе, не только пятнами (раунд 2)
+  if(c>=FRY_STEPS[0]) gc+=EDGE_GROUND*edge*Math.min(1,c/FRY_STEPS[2]);
+  return {base,c,edge,seed:(dish && dish.seed)||1,side,ground:cookColor(base,gc)};
+}
+// Цвет корки в точке материала (x, y) для параметров грани P. Без пятна — фон.
+function crustMix(P,x,y,ground=P.ground,soft=SPOT_SOFT,field=null){
+  const cov=spotCoverAt(P.c,P.edge);
+  if(!cov) return ground;
+  const n=field===null ? spotField(x,y,P.seed,P.side) : field;
+  const m=spotMask(n,spotQuant(1-cov),soft)*spotStrength(P.c,P.edge);
+  if(m<=0) return ground;
+  return [ground[0]*(1-m*(1-SPOT_TINT[0])),ground[1]*(1-m*(1-SPOT_TINT[1])),ground[2]*(1-m*(1-SPOT_TINT[2]))];
+}
+// Середина грани в материале — кэш по массиву точек (новая геометрия — новый массив).
+const crustMid=new WeakMap();
+function faceMaterialMid(f){
+  let hit=crustMid.get(f.points); if(hit) return hit;
+  let x=0,y=0; for(const p of f.points){ x+=p.x; y+=p.y; } x/=f.points.length; y/=f.points.length;
+  hit=f.m ? crustToMaterial(f.m,x,y) : {x,y};
+  crustMid.set(f.points,hit); return hit;
+}
+// Вид грани на таве и в руке: заливка — фон корки, пятна поверх — текстурой (drawCrustSpots).
+// Пересчитывается раз в CRUST_DT секунд жарки: за это время прожарка сдвигается на тысячные, а рисунок
+// тавы иначе платил бы за crustFace (rimDist) каждый кадр (2 000+ граней).
+const CRUST_DT = 0.25, crustCache = new WeakMap();
+function crustLook(f){
+  const key=dish ? Math.floor((dish.panTime||0)/CRUST_DT+(f.source%16)/16)+"|"+(dish.seed||1) : "", hit=crustCache.get(f);
+  if(hit && hit.key===key) return hit;
+  const P=crustFace(f), cov=spotCoverAt(P.c,P.edge);
+  const L={key,c:P.ground,cov,k:cov ? spotStrength(P.c,P.edge) : 0,seed:P.seed,side:P.side};
+  crustCache.set(f,L); return L;
+}
+function dishCrustColor(f,side){ return side===undefined ? crustLook(f).c : crustFace(f,side).ground; }
+// Цвет в середине грани с пятном (для наборов: то, что текстура кладёт в этой точке).
+function dishCrustSample(f){ const P=crustFace(f), q=faceMaterialMid(f); return crustMix(P,q.x,q.y); }
+// Текстура пятен: поле в координатах материала на квадрате [U0, U0+N·S]², одна на сторону и зерно;
+// уровни — доля площади, квантованная на SPOT_LEVELS ступеней (у соседних граней разница ступени — край
+// пятна сдвигается на сотые поля, под мягким краем не виден). Значение текселя — множитель цвета.
+const SPOT_TEX_N = 512, SPOT_TEX_U0 = -1.15, SPOT_TEX_S = 2.3/512, SPOT_LEVELS = 24, SPOT_COV_MAX = 0.85;
+let spotTex = {seed:0, field:[null,null], pat:new Map()};
+function spotTexField(seed,side){
+  if(spotTex.seed!==seed) spotTex={seed, field:[null,null], pat:new Map()};
+  let F=spotTex.field[side]; if(F) return F;
+  // То же поле, что spotField, но раскладкой точек по текселям: в разы быстрее опроса 3×3 клеток
+  const N=SPOT_TEX_N, S=SPOT_TEX_S, U=SPOT_TEX_U0, s=seed*2+side; F=new Float32Array(N*N);
+  for(const [cell,sd,W] of [[SPOT_FINE,s,1],[SPOT_BIG,s+7919,SPOT_BIG_W]]){
+    const c0=Math.floor(U/cell)-1, c1=Math.ceil((U+N*S)/cell)+1;
+    for(let cy=c0;cy<=c1;cy++) for(let cx=c0;cx<=c1;cx++){
+      const D=spotDot(cx,cy,cell,sd), r2=D[2]*D[2];
+      const i0=Math.max(0,Math.floor((D[0]-D[2]-U)/S-.5)), i1=Math.min(N-1,Math.ceil((D[0]+D[2]-U)/S-.5));
+      const j0=Math.max(0,Math.floor((D[1]-D[2]-U)/S-.5)), j1=Math.min(N-1,Math.ceil((D[1]+D[2]-U)/S-.5));
+      for(let j=j0;j<=j1;j++){ const dy=U+(j+.5)*S-D[1];
+        for(let i=i0;i<=i1;i++){ const dx=U+(i+.5)*S-D[0], q=(dx*dx+dy*dy)/r2;
+          if(q<1){ const w=W*D[3]*(1-q); if(w>F[j*N+i]) F[j*N+i]=w; } } }
+    }
+  }
+  for(let j=0;j<N;j++){ const y=U+(j+.5)*S; for(let i=0;i<N;i++) F[j*N+i]*=spotCluster(U+(i+.5)*S,y,s); }
+  return spotTex.field[side]=F;
+}
+function spotLevel(cov){ return Math.max(1,Math.min(SPOT_LEVELS,Math.round(cov/SPOT_COV_MAX*SPOT_LEVELS))); }
+function crustSpotPattern(g,seed,side,lv){
+  if(typeof document==="undefined" || !g.createPattern) return null;
+  const key=seed+"|"+side+"|"+lv; let pat=spotTex.seed===seed ? spotTex.pat.get(key) : undefined;
+  if(pat!==undefined) return pat;
+  const F=spotTexField(seed,side), N=SPOT_TEX_N, thr=spotQuant(1-lv/SPOT_LEVELS*SPOT_COV_MAX);
+  const cv=document.createElement("canvas"); cv.width=cv.height=N;
+  const cx=cv.getContext("2d"), im=cx.createImageData(N,N), d=im.data;
+  for(let i=0;i<N*N;i++){
+    const m=spotMask(F[i],thr,SPOT_SOFT);
+    d[i*4]=255*(1-m*(1-SPOT_TINT[0])); d[i*4+1]=255*(1-m*(1-SPOT_TINT[1])); d[i*4+2]=255*(1-m*(1-SPOT_TINT[2])); d[i*4+3]=255;
+  }
+  cx.putImageData(im,0,0);
+  pat=g.createPattern(cv,"repeat"); spotTex.pat.set(key,pat); return pat;
+}
+// Точки грани в материале — кэш по массиву точек и рамке.
+const crustMat=new WeakMap();
+function faceMaterialPts(f){
+  let hit=crustMat.get(f.points); if(hit && hit.m===f.m) return hit.q;
+  const q=new Float32Array(6);
+  for(let k=0;k<3;k++){ const p=f.points[k], r=f.m ? crustToMaterial(f.m,p.x,p.y) : p; q[k*2]=r.x; q[k*2+1]=r.y; }
+  crustMat.set(f.points,{m:f.m,q}); return q;
+}
+// Грани под верхним слоем (клапаны конверта закрывают низ): пятна им не нужны — их всё равно закроют.
+// Скрыта, только если стопка выше верха грани во всех клетках вокруг её середины и вершин (с запасом).
+function crustBuried(faces,H){
+  if(!H || !H.zt || !H.top || !H.size) return null;
+  if(H.crustBuried) return H.crustBuried;
+  const n=H.size, out=new Uint8Array(faces.length);
+  const cell=(x,y)=>[Math.min(n-1,Math.max(0,Math.floor((x-H.L)/H.dx))),Math.min(n-1,Math.max(0,Math.floor((y-H.T)/H.dy)))];
+  for(let i=0;i<faces.length;i++){
+    const f=faces[i]; if(f.kind!=="dough") continue;
+    let cx=0,cy=0; for(const p of f.points){ cx+=p.x; cy+=p.y; }
+    // запас — 0,7 толщины самой грани: открытая грань стоит вровень со стопкой, под клапаном — на слой ниже
+    const c={x:cx/f.points.length,y:cy/f.points.length}, pts=[c,...f.points], lim=H.zt[i]+Math.max(0.05,0.7*layerMM(f,c));
+    let hid=true;
+    for(const p of pts){ const [a,b]=cell(p.x,p.y);
+      for(let j=Math.max(0,b-1);j<=Math.min(n-1,b+1) && hid;j++) for(let k=Math.max(0,a-1);k<=Math.min(n-1,a+1);k++) if(H.top[j*n+k]<=lim){ hid=false; break; }
+      if(!hid) break; }
+    out[i]=hid ? 1 : 0;
+  }
+  return H.crustBuried=out;
+}
+// Пятна поверх уже залитой грани (путь грани — текущий): умножение текстуры, у каждой грани своё
+// аффинное отображение материал → экран по трём первым точкам (s — их экранные x, y).
+const spotMatrix = typeof DOMMatrix!=="undefined" ? new DOMMatrix() : null;
+function drawCrustSpots(g,f,s){
+  const L=crustLook(f); if(!(L.k>0.01) || !spotMatrix) return;
+  const pat=crustSpotPattern(g,L.seed,L.side,spotLevel(L.cov)); if(!pat) return;
+  const q=faceMaterialPts(f), du1=q[2]-q[0], dv1=q[3]-q[1], du2=q[4]-q[0], dv2=q[5]-q[1], det=du1*dv2-du2*dv1;
+  if(Math.abs(det)<1e-12) return;
+  const dx1=s[2]-s[0], dy1=s[3]-s[1], dx2=s[4]-s[0], dy2=s[5]-s[1];
+  const a=(dx1*dv2-dx2*dv1)/det, c=(dx2*du1-dx1*du2)/det, b=(dy1*dv2-dy2*dv1)/det, d=(dy2*du1-dy1*du2)/det;
+  const e=s[0]-a*q[0]-c*q[1], h=s[1]-b*q[0]-d*q[1], S=SPOT_TEX_S, U=SPOT_TEX_U0;
+  const M=spotMatrix; M.a=a*S; M.b=b*S; M.c=c*S; M.d=d*S; M.e=e+(a+c)*U; M.f=h+(b+d)*U;
+  pat.setTransform(M);
+  const ga=g.globalAlpha;
+  g.globalCompositeOperation="multiply"; g.globalAlpha=L.k; g.fillStyle=pat; g.fill();
+  g.globalCompositeOperation="source-over"; g.globalAlpha=ga;
+}
+// Мокрый блеск маргарина (сборка 86): на ближнем к глазу крае роти, там, где под кромкой жир.
+// Нет, пока сторона на стали сырая; ярче всего у «бледного», тускнеет к «зажаренному». Без пузырьков.
+function marginGloss(bot){
+  if(!(bot>=FRY_STEPS[0])) return 0;
+  const up=Math.min(1,(bot-FRY_STEPS[0])/0.08), down=1-0.85*Math.max(0,Math.min(1,(bot-0.16)/(FRY_STEPS[3]-0.16)));
+  return up*down;
+}
+function drawMargarineGloss(g,screen,H,zk,sx){
+  if(!fatMap || !dish || dish.mode!=="fold" || phase!=="PAN" || !dish.hull || dish.hull.length<3) return;
+  const k0=marginGloss(dishSideMean("cook","contactWeights")); if(k0<=0.01) return;
+  const Hl=dish.hull, c=hullCentre(Hl), dpr=typeof devicePixelRatio==="number" ? devicePixelRatio : 1;
+  const w=Math.max(1.5,3.2*sx*Math.min(2,dpr));
+  g.save(); g.lineCap="round";
+  for(let i=0;i<Hl.length;i++){
+    const A=Hl[i], B=Hl[(i+1)%Hl.length], n=Math.max(1,Math.round(Math.hypot(B.x-A.x,B.y-A.y)/FIZZ_STEP));
+    // ближний край: наружная нормаль стороны смотрит вниз по экрану
+    let nx=B.y-A.y, ny=-(B.x-A.x); const l=Math.hypot(nx,ny)||1; nx/=l; ny/=l;
+    if(nx*((A.x+B.x)/2-c.x)+ny*((A.y+B.y)/2-c.y)<0){ nx=-nx; ny=-ny; }
+    const s0=screen(A), s1=screen({x:A.x+nx*.05,y:A.y+ny*.05}), near=(s1.y-s0.y)/(Math.hypot(s1.x-s0.x,s1.y-s0.y)||1);
+    if(near<0.2) continue;
+    for(let k=0;k<n;k++){                     // сторона по кусочкам: блеск там, где под кромкой жир
+    const a={x:A.x+(B.x-A.x)*k/n,y:A.y+(B.y-A.y)*k/n}, b={x:A.x+(B.x-A.x)*(k+1)/n,y:A.y+(B.y-A.y)*(k+1)/n};
+    const f=fatAtEdge((a.x+b.x)/2,(a.y+b.y)/2,c); if(!(f>0.02)) continue;
+    const al=k0*Math.min(1,f*2.5)*Math.min(1,(near-0.2)/0.4);
+    if(al<0.02) continue;
+    const IN=0.022, pa=screen({x:a.x-nx*IN,y:a.y-ny*IN}), pb=screen({x:b.x-nx*IN,y:b.y-ny*IN});
+    const za=H ? H.at({x:a.x-nx*IN,y:a.y-ny*IN})*zk : 0, zb=H ? H.at({x:b.x-nx*IN,y:b.y-ny*IN})*zk : 0;
+    g.strokeStyle=`rgba(255,247,222,${(0.30*al).toFixed(3)})`; g.lineWidth=w*2.2;
+    g.beginPath(); g.moveTo(pa.x,pa.y-za); g.lineTo(pb.x,pb.y-zb); g.stroke();
+    g.strokeStyle=`rgba(255,252,238,${(0.55*al).toFixed(3)})`; g.lineWidth=w*0.7;
+    g.beginPath(); g.moveTo(pa.x,pa.y-za); g.lineTo(pb.x,pb.y-zb); g.stroke();
+    }
+  }
+  g.restore();
+}
+
 // ─── Конверт (срез 3, сборка 72). Лист ложится на таву ровно к столу (посадка кратна 90°), и у него
 // четыре стороны. Рамка конверта привязана к МАТЕРИАЛУ, не к экрану: середина листа c, две оси u и v
 // и полуразмеры h — расстояние от середины до края по каждой из четырёх сторон (+u, −u, +v, −v).
@@ -1342,7 +1631,7 @@ function foldGeometry(anchor,end){
     if(lift.length){
       if(f.kind==="dough") aMoving+=polyArea(lift);
       const refl=p=>{const d=p.x*nx+p.y*ny-offset;return{x:p.x-2*d*nx,y:p.y-2*d*ny};};
-      moving.push(tag({...f,turned:!f.turned,flap:true,points:lift.map(refl)},src,true));
+      moving.push(tag({...f,turned:!f.turned,flap:true,points:lift.map(refl),m:crustFrameMap(f.m,refl)},src,true));
     }
   });
   if(aMoving<.025*(aFixed+aMoving)||aFixed<.18*(aFixed+aMoving)) return null;
@@ -1583,7 +1872,7 @@ function flipGeometry(dir,landing={x:0,y:0}){
   for(let i=dish.faces.length-1;i>=0;i--){
     const f=dish.faces[i];
     if(f.kind==="filling"){ if(slot===undefined) slot=faces.length; continue; }   // лист теперь над начинкой
-    faces.push({...f,turned:!f.turned,points:f.points.map(mirror)});
+    faces.push({...f,turned:!f.turned,points:f.points.map(mirror),m:crustFrameMap(f.m,mirror)});
   }
   const filling=(dish.filling||[]).map(t=>{ const q=mirror({x:t.x,y:t.y}); return {...t,x:q.x,y:q.y}; });
   const env=envMoved(dish.env, p=>mirror({x:p.x,y:p.y}), w=>{ const d=w.x*nx+w.y*ny; return {x:w.x-2*d*nx,y:w.y-2*d*ny}; });
@@ -1674,7 +1963,7 @@ function rotateDish(angle,pivot=twistPivot()){
   if(!canTwist() || dishGesture || !(Math.abs(angle)*180/Math.PI>=TWIST_MIN_DEG)) return false;
   const cs=Math.cos(angle), sn=Math.sin(angle), R=p=>rotAbout(p,pivot,cs,sn);
   const moved=new Map(), rot=p=>{ let q=moved.get(p); if(!q){ q=R(p); moved.set(p,q); } return q; };
-  const faces=dish.faces.map(f=>({...f,points:f.points.map(rot),...(f.pc?{pc:R(f.pc)}:{})}));
+  const faces=dish.faces.map(f=>({...f,points:f.points.map(rot),m:crustFrameMap(f.m,R),...(f.pc?{pc:R(f.pc)}:{})}));
   // Куски начинки поворачиваются вместе с блюдом: иначе следующая складка или переворот
   // штамповали бы их на прежнем, неповёрнутом месте.
   const filling=(dish.filling||[]).map(t=>{ const q=R(t); return {...t,x:q.x,y:q.y}; });
@@ -2872,12 +3161,13 @@ function drawDishFaces(g,faces,screen,H,zk,shadow=true,shift=null){
   const tone=(f,k)=>{
     let color=f.kind==="filling"
       ? (f.fill==="egg" ? EGG_COLORS[Math.round(f.tone)%3] : FILL_COLORS[Math.round(f.tone)%3])
-      : dishCookColor(f);
+      : dishCrustColor(f);
     return k===1 ? color : color.map(c=>Math.min(255,c*k));
   };
+  const tri=new Float64Array(6);   // экранные три первые точки последней залитой грани — для пятен
   const top=(i,off)=>{
-    const f=faces[i], p=screen(f.points[0],f); g.beginPath(); g.moveTo(p.x,p.y-off(0));
-    for(let k=1;k<f.points.length;k++){ const q=screen(f.points[k],f); g.lineTo(q.x,q.y-off(k)); }
+    const f=faces[i], p=screen(f.points[0],f), y0=p.y-off(0); g.beginPath(); g.moveTo(p.x,y0); tri[0]=p.x; tri[1]=y0;
+    for(let k=1;k<f.points.length;k++){ const q=screen(f.points[k],f), y=q.y-off(k); g.lineTo(q.x,y); if(k<3){ tri[k*2]=q.x; tri[k*2+1]=y; } }
     g.closePath(); g.fill();
   };
   const faceScreen=f=>p=>screen(p,f);
@@ -2920,12 +3210,14 @@ function drawDishFaces(g,faces,screen,H,zk,shadow=true,shift=null){
       : H ? Math.min(.95,.72+doughMM(f.tone)*.3)*doughSet(f)
       : Math.max(.48,Math.min(.92,.48+doughMM(f.tone)*.3));
     if(H){ const hs=H.vert(k); top(k,m=>hs[m]*zk); } else top(k,()=>0);
+    if(f.kind==="dough" && !(buried && buried[k])) drawCrustSpots(g,f,tri);   // сборка 86, раунд 2: пятна круглые и на таве
   };
   // Открытая начинка — всегда верх своей ячейки и выше соседнего теста, поэтому рисуется
   // последней: иначе низкий клапан за порцией закрашивал её верх (ревью толщины 16.09, п. 4).
   // Сперва стенки всех открытых кусочков, потом их верхи — стенка следующего кусочка не
   // ложится поверх уже нарисованного.
-  const open=[];
+  const buried=crustBuried(faces,H);
+  const open=[], smooth=g.imageSmoothingEnabled; g.imageSmoothingEnabled=true;   // текстура пятен — сглаженно
   for(let k=0;k<faces.length;k++){
     if(H && faces[k].kind==="filling" && H.exposed(k)) open.push(k); else paint(k);
   }
@@ -2937,7 +3229,7 @@ function drawDishFaces(g,faces,screen,H,zk,shadow=true,shift=null){
     drawFaceWalls(g,f.points,faceScreen(f),hs,zk,base);
   }
   for(const k of open) paint(k);
-  g.globalAlpha=1;
+  g.globalAlpha=1; g.imageSmoothingEnabled=smooth;
   if(H && open.length){
     drawEggFilm(g,faces,open,screen,H,zk);
     drawBananaSlices(g,faces,open,screen,H,zk);
@@ -3116,27 +3408,30 @@ function tableFaceData(faces,H){
   const acc=new Map();
   for(const f of faces){
     if(f.kind!=="dough") continue;
-    const c=dishCookColor(f);
-    for(const p of f.points){ const k=vkey(p,f), a=acc.get(k); if(a){ a[0]+=c[0]; a[1]+=c[1]; a[2]+=c[2]; a[3]++; } else acc.set(k,[c[0],c[1],c[2],1]); }
+    // сборка 86: вершины несут фон корки, прожарку и близость к краю; пятна кладёт topColor попиксельно —
+    // по гладким (усреднённым по вершинам) числам, иначе край пятна ступенькой шёл по рёбрам граней
+    const P=crustFace(f), c=P.ground;
+    for(const p of f.points){ const k=vkey(p,f), a=acc.get(k); if(a){ a[0]+=c[0]; a[1]+=c[1]; a[2]+=c[2]; a[3]++; a[4]+=P.c; a[5]+=P.edge; } else acc.set(k,[c[0],c[1],c[2],1,P.c,P.edge]); }
   }
   const V=faces.map(f=>{
-    const m=f.points.length, base=new Float32Array(m), lift=new Float32Array(m), cs=new Float32Array(m*3);
+    const m=f.points.length, base=new Float32Array(m), lift=new Float32Array(m), cs=new Float32Array(m*3), ce=new Float32Array(m*2);
     const b0=f.kind==="filling" && f.pc ? slabTop(H,f.pc) : null;   // ломтик — один уровень на весь диск
     f.points.forEach((p,k)=>{
       base[k]=b0!==null ? b0 : slabTop(H,p);
       let c;
       if(f.kind==="filling"){ lift[k]=fillHeight(f,p)*FILL_VIS*SLAB_GAIN; c=BANANA_FLESH[f.source%3]; }
-      else { const a=acc.get(vkey(p,f)); c=[a[0]/a[3],a[1]/a[3],a[2]/a[3]]; }
+      else { const a=acc.get(vkey(p,f)); c=[a[0]/a[3],a[1]/a[3],a[2]/a[3]]; ce[k*2]=a[4]/a[3]; ce[k*2+1]=a[5]/a[3]; }
       cs[k*3]=c[0]; cs[k*3+1]=c[1]; cs[k*3+2]=c[2];
     });
-    return {base,lift,cs};
+    return {base,lift,cs,ce};
   });
   const layer=new Int32Array(faces.length), isFill=new Uint8Array(faces.length);
   { const m=new Map(); faces.forEach((f,i)=>{ const k=f.kind+":"+f.source+":"+f.turned; if(!m.has(k)) m.set(k,m.size); layer[i]=m.get(k); isFill[i]=f.kind==="filling" ? 1 : 0; }); }
   const boxes=faces.map(f=>{ let x0=Infinity,x1=-Infinity,y0=Infinity,y1=-Infinity;
     for(const p of f.points){ if(p.x<x0)x0=p.x; if(p.x>x1)x1=p.x; if(p.y<y0)y0=p.y; if(p.y>y1)y1=p.y; }
     return {cx:(x0+x1)/2,cy:(y0+y1)/2,r:Math.hypot(x1-x0,y1-y0)/2}; });
-  const out={key,V,layer,isFill,boxes,cutFace:new Map()};
+  const crust=faces.map(f=>f.kind==="dough" ? crustFace(f) : null);
+  const out={key,V,layer,isFill,boxes,crust,cutFace:new Map()};
   cache.set(faces,out); return out;
 }
 // Грани далеко от резов попиксельно не проверяются; радиус зависит от размера пикселя (вид A/B).
@@ -3210,9 +3505,11 @@ function renderDishTable(faces,screen,H,zk,W,Hc,s,opts={}){
   const N=bw*bh, K=TABLE_K, padX=Math.ceil(SHADOW_DX*maxUp*RELIEF_K)+4, padY=Math.ceil(SHADOW_DY*maxUp*RELIEF_K)+4;
   const OW=bw+padX, OH=bh+maxUp+padY, NO=OW*OH;
   const A=tableArrays(N,NO), {tf,th,tl,tu,tv,col,pf,pn,pd}=A, layer=D.layer, isFill=D.isFill;
+  if(!A.ck || A.ck.length<N*2) A.ck=new Float32Array(N*2);   // прожарка и край корки в пикселе (сборка 86)
+  const ck=A.ck;
   // Грани идут снизу вверх: последняя накрывшая пиксель — его верх.
   for(let i=0;i<n;i++){
-    const q=P[i], ps=faces[i].points, {base,lift,cs}=D.V[i], dough=faces[i].kind==="dough";
+    const q=P[i], ps=faces[i].points, {base,lift,cs,ce}=D.V[i], dough=faces[i].kind==="dough";
     for(let t=1;t+1<q.length;t++){
       const Aa=q[0], B=q[t], C=q[t+1];
       const area=(B.x-Aa.x)*(C.y-Aa.y)-(B.y-Aa.y)*(C.x-Aa.x);
@@ -3264,6 +3561,7 @@ function renderDishTable(faces,screen,H,zk,W,Hc,s,opts={}){
           col[c*3]=la*cs[0]+lb*cs[t*3]+lc*cs[(t+1)*3];
           col[c*3+1]=la*cs[1]+lb*cs[t*3+1]+lc*cs[(t+1)*3+1];
           col[c*3+2]=la*cs[2]+lb*cs[t*3+2]+lc*cs[(t+1)*3+2];
+          if(dough){ ck[c*2]=la*ce[0]+lb*ce[t*2]+lc*ce[(t+1)*2]; ck[c*2+1]=la*ce[1]+lb*ce[t*2+1]+lc*ce[(t+1)*2+1]; }
         }
       }
     }
@@ -3293,6 +3591,8 @@ function renderDishTable(faces,screen,H,zk,W,Hc,s,opts={}){
   // Полоска начинки — не уже пикселя: в пиксельных видах A/B она иначе пропадает.
   const rimW=Math.max(CUT_RIM,unit*1.05);
   const cutFace=tableCutFaces(D,cuts,rimW+unit*3+.01);
+  // Край пятна сглажен на ~полтора пикселя: мелкие точки поля меняются быстрее пикселя (сборка 86, без лесенки)
+  const spotAA=Math.max(SPOT_SOFT,0.36*1.5/SPOT_FINE*unit*0.75);
   let ncD=0, ncAlong=0, ncFace=0;   // ncFace — насколько рез смотрит на зрителя (стенка столбца)
   const nearCut=(u,v)=>{
     let hit=false;
@@ -3330,6 +3630,13 @@ function renderDishTable(faces,screen,H,zk,W,Hc,s,opts={}){
   const topColor=(c,i,j,dl,light)=>{
     const f=faces[tf[c]]; let m=light;
     R=col[c*3]; G=col[c*3+1]; B=col[c*3+2];
+    if(f.kind==="dough"){   // сборка 86: пятна корки — попиксельно, в координатах материала, круглые
+      const P=D.crust[tf[c]];
+      if(P && ck[c*2]>=FRY_STEPS[0]){
+        const q=f.m ? crustToMaterial(f.m,tu[c],tv[c]) : {x:tu[c],y:tv[c]};
+        const k=crustMix({base:P.base,c:ck[c*2],edge:ck[c*2+1],seed:P.seed,side:P.side},q.x,q.y,[R,G,B],spotAA); R=k[0]; G=k[1]; B=k[2];
+      }
+    }
     if(f.kind==="filling" && f.pc && f.pr>0){
       const d=Math.hypot(tu[c]-f.pc.x,tv[c]-f.pc.y)/f.pr;
       if(f.fill==="egg"){
@@ -3428,6 +3735,16 @@ function renderDishTable(faces,screen,H,zk,W,Hc,s,opts={}){
       }
       ymin=rt;
     }
+  }
+  // Край силуэта без лесенки (сборка 86): пиксель роти, у которого сосед по кресту не роти, кладём на 3/4
+  // непрозрачности — грубое, но дешёвое сглаживание; рисунок внутри не трогаем.
+  {
+    const E=[];
+    for(let y=1;y<OHu-1;y++) for(let x=1;x<OWu-1;x++){
+      const q=(y*OWu+x)*4; if(out[q+3]!==255) continue;
+      if(out[q-1]!==255 || out[q+7]!==255 || out[q-OWu*4+3]!==255 || out[q+OWu*4+3]!==255) E.push(q);
+    }
+    for(const q of E) out[q+3]=190;
   }
   const t3=performance.now();
   const R_={x:X0,y:Y0-UP,w:OWu,h:OHu,up:UP,bw,bh,th,tf,data:out,owner,
@@ -3573,6 +3890,7 @@ function drawDish(g,sx,sy){
   if(dish.mode!=="fold" && !moving && !slide && faces===dish.faces) drawDishTable(g,screen,faces,H,zk,sx,sy);   // в руке (на стойку) — плоский вид: рельеф не пересчитывается каждый кадр
   else {
     drawDishFaces(g,faces,screen,H,zk,true,pieceShiftLive(faces));
+    if(!moving && !slide && faces===dish.faces) drawMargarineGloss(g,screen,H,zk,sx);
     if(lift) drawLiftedEdge(g,screen,lift,sx,sy);
     // Rebuild expensive boundary intersections only after a committed geometry
     // change. During a drag the existing flat preview remains immediate.
@@ -4469,9 +4787,14 @@ function noteRelease(v){   // числа жеста для журнала: по 
 }
 // ── Тяга: край идёт за пальцем по полю смещений; длины покоя пересчитываются на отпускании.
 // Физика на время тяги стоит (step): рост — функция пути пальца, а не времени удержания, поэтому
-// «липкой буксировки», снятой раньше, здесь нет. У тяги есть длина: палец уходит вперёд, тесто
-// отстаёт по tanh («резинка»), а когда палец ушёл далеко за предел — «пальцы соскользнули»,
-// тяга фиксируется сама. Предел — ещё и мишень: у дотянутой стороны хода нет, она упирается.
+// «липкой буксировки», снятой раньше, здесь нет. Сборка 81 (плейтест 77, п. 10): ПОКА ПАЛЕЦ
+// ДЕРЖИТ, край под пальцем идёт за ним без tanh-отставания — до PULL_KNEE·cap ровно 1:1, дальше
+// мягко к cap (пунктир × (1+PULL_OVER)) и не дальше предела разрыва; у предела край дрожит на
+// 2–3 px. Сборка 84: тесто пластичное — языка за пунктиром нет, расстановка зажата к пунктиру и
+// пока палец держит, и pullCommit фиксирует ровно держимую форму (сборка 83 переигрывала на
+// отпускании tanh-расстановку, и лист отскакивал на 10–134 px). Предел разрыва — физический:
+// самая тонкая ячейка полосы не тоньше PULL_TEAR_T (двойной порог разрыва; quadRest на коммите
+// не меняется — материал тот же, площадь больше); тяга не рвёт никогда — рвёт только шлепок.
 const PULL_SIGMA = 1.0;           // рад: угловая ширина поля тяги. 0,55 давало язык: соседи не шли, одни
                                   // тяги за углы строили звезду, а готовность требовала 16 тяг (ревью 17.11, P7)
 const PULL_OUT_COS = Math.cos(65*Math.PI/180);   // конус тяги уже конуса шлепка: вбок край не тащим
@@ -4482,10 +4805,14 @@ const PULL_FAST_BAND = 0.25;      // доля V_SLAP над порогом, за
 const PULL_MIN = 0.25;            // gs: короче — тесто возвращается
 const PULL_CAP_GS = 1.4, PULL_CAP_R = 0.55;   // предел хода: в gs и в радиусах листа
 const PULL_SLIP = 1.6;            // палец на столько пределов впереди — тяга фиксируется сама
+const PULL_KNEE = 0.8;            // доля cap, до которой край идёт за пальцем 1:1; дальше мягко к cap
 const PULL_BLOCK = 0.06;          // gs: меньше запаса до мишени — сторона дотянута
 const PULL_FAST_CAP = 0.40;       // gs: предел хода края под махом на пороге шлепка и быстрее
 const PULL_FLY_KEEP = 0.5;        // доля языка, остающаяся к удару (на main дуга хвата к удару держала ~0,6 подъёма)
 const PULL_NUDGE = 0.10;          // gs: настолько упёршаяся сторона подаётся под пальцем и возвращается
+const PULL_TEAR_T = 0.032;        // предел разрыва тяги: тоньше этой толщины полосу не тянем. Замер (Node,
+                                  // готовый лист): полоса при ходе 200 px — 0,033, при 244 px — 0,030; предел
+                                  // встаёт на ~210 px. Уже тоньше пола полоса тянется ещё на 15 %, не намертво
 let pullN = 0;                    // зафиксированных тяг на этом листе (контур листа рисуется по кромке)
 // Ход края от скорости руки: полный до V_PULL_FULL, дальше падает до PULL_GAIN_FAST на пороге
 // шлепка и остаётся таким под быстрым махом. Гасить его под махом до нуля пробовали (17.11):
@@ -4520,12 +4847,44 @@ function pullBegin(){
   const ab = new Float32Array(N), rim = [];
   for(let i=0;i<N;i++) ab[i] = (Math.atan2(py[i]-tc.y, px[i]-tc.x) + Math.PI)/(2*Math.PI)*RIM_BINS - 0.5;
   for(const i of edgeNodes) if(!(conDeg && conDeg[i] <= 0) && w[i] > 0) rim.push(i);
+  // Сборка 81: полоса тяги — целые ячейки под пальцем (по ним считается предел разрыва).
+  const strip = [];
+  for(let q=0;q<quads.length;q++){
+    if(quadCons[q].some(cc=>cc.broken)) continue;
+    let mx = 0; for(const id of quads[q]) if(w[id] > mx) mx = w[id];
+    if(mx >= 0.25) strip.push(q);
+  }
+  let thin0 = 1;
+  for(const q of strip) thin0 = Math.min(thin0, quadRest ? quadRest[q]/Math.max(1e-6, area(quads[q])) : 1);
   action.pull = { c, tc, rg, nx:gx/rg, ny:gy/rg, bx:Float32Array.from(px), by:Float32Array.from(py), w, ab, rim,
-    e:0, raw:0, gain:1, fast:0, k:1, dx:0, dy:0, cap };
+    strip, thin0, e:0, raw:0, gain:1, fast:0, k:1, dx:0, dy:0, ux:gx/rg, uy:gy/rg, cap,
+    limKin:0, atLimit:false, followed:false };
   action.state = "PULLING";
 }
+// Предел разрыва тяги: наибольший ход e ≤ want, при котором самая тонкая ячейка полосы ещё не
+// тоньше пола (PULL_TEAR_T; полоса, уже тоньше пола, тянется ещё на 15 %). Площадь ячейки при
+// ходе e — по её четырём узлам (база + ход×вес); секторные зажимы не учтены, оценка смотрит в
+// сторону разрыва с запасом. Тяга не рвёт — рвёт только шлепок.
+function pullTearLimit(P, ux, uy, want){
+  if(want <= 0 || !P.strip.length || !quadRest) return want;
+  const floor = Math.min(PULL_TEAR_T, P.thin0*0.85);
+  const areaAt = (q, e)=>{
+    const s = quads[q]; let acc = 0;
+    for(let k2=0;k2<4;k2++){
+      const i = s[k2], j = s[(k2+1)%4];
+      acc += (P.bx[i]+ux*e*P.w[i])*(P.by[j]+uy*e*P.w[j]) - (P.bx[j]+ux*e*P.w[j])*(P.by[i]+uy*e*P.w[i]);
+    }
+    return Math.abs(acc)/2;
+  };
+  const thin = (e)=>{ let m = 1; for(const q of P.strip){ const t = quadRest[q]/Math.max(1e-6, areaAt(q, e)); if(t < m) m = t; } return m; };
+  if(thin(want) >= floor) return want;
+  let lo = 0, hi = want;
+  for(let it=0; it<6; it++){ const m = (lo+hi)*0.5; if(thin(m) >= floor) lo = m; else hi = m; }
+  return lo;
+}
 // fast — 0…1: насколько рука быстрее порога шлепка (язык укорачивается до PULL_FAST_CAP).
-function pullTo(p, gain, fast){
+// follow — палец держит медленную тягу: край идёт за ним до предела разрыва (сборка 81).
+function pullTo(p, gain, fast, follow){
   const P = action.pull; let dx = p.x-action.down.x, dy = p.y-action.down.y; const len = Math.hypot(dx,dy);
   if(gain != null) P.gain = gain;
   if(fast != null) P.fast = Math.max(0, Math.min(1, fast));
@@ -4540,14 +4899,40 @@ function pullTo(p, gain, fast){
     const along = Math.max(0, dx*ux + dy*uy);
     // упёршаяся сторона чуть подаётся и вернётся на отпускании; в длины покоя это не идёт
     let lim = P.cap > 0 ? P.cap : PULL_NUDGE*gestureScale;
-    // Под махом быстрее порога шлепка язык короткий (PULL_FAST_CAP): длинный, отпущенный на подъёме,
-    // выворачивал ячейки при ударе (Node 17.11, шесть случайных серий тяг и шлепков: 323 против 193).
-    // В коридоре V_PULL_FULL…V_SLAP язык не укорачивается: там это ещё тяга, и её рост резать нечем.
-    lim += (Math.min(lim, PULL_FAST_CAP*gestureScale) - lim) * P.fast;
-    e = P.gain * lim * Math.tanh(along/lim);
-  }
+    if(follow){
+      // Сборка 84: край идёт за пальцем без отставания (без tanh), но не дальше cap (пунктир ×
+      // (1+PULL_OVER), соседи) и предела разрыва; расстановка зажата к пунктиру, как при коммите.
+      // То, что держит палец, и фиксируется на отпускании: тесто пластичное, отскока нет.
+      const give = PULL_NUDGE*gestureScale;
+      // Колено PULL_KNEE: до него край идёт за пальцем 1:1, дальше мягко подходит к cap (жёсткий
+      // упор оставлял излом кромки у пунктира: edge G1, конверт — 11 острых вершин против 8).
+      const a = along*P.gain, top = P.cap > 0 ? P.cap : give, kn = PULL_KNEE*top;
+      const want = a <= kn ? a : kn + (top - kn)*Math.tanh((a - kn)/(top - kn));
+      e = P.cap > 0 ? pullTearLimit(P, ux, uy, want) : want;
+      P.limKin = P.cap > 0 ? e : give;
+      P.followed = true;
+    } else {
+      // Под махом быстрее порога шлепка язык короткий (PULL_FAST_CAP): длинный, отпущенный на подъёме,
+      // выворачивал ячейки при ударе (Node 17.11, шесть случайных серий тяг и шлепков: 323 против 193).
+      // В коридоре V_PULL_FULL…V_SLAP язык не укорачивается: там это ещё тяга, и её рост резать нечем.
+      lim += (Math.min(lim, PULL_FAST_CAP*gestureScale) - lim) * P.fast;
+      e = P.gain * lim * Math.tanh(along/lim);
+      P.limKin = lim; P.atLimit = false;
+    }
+  } else { P.limKin = P.cap > 0 ? Infinity : 0; P.atLimit = false; }
   P.e = P.cap > 0 ? e : 0;
-  dx = ux*e*P.k; dy = uy*e*P.k;
+  P.ux = ux; P.uy = uy;
+  pullPlace(P, ux, uy, e);
+  if(follow && P.cap > 0 && len > 1e-9){
+    // У предела (cap, разрыв или пунктир в секторе хвата) палец уходит вперёд края — край дрожит в рисунке.
+    const g = action.edgeNode, d = (px[g]-P.bx[g])*ux + (py[g]-P.by[g])*uy;
+    P.atLimit = Math.max(0, dx*ux + dy*uy)*P.gain - d > 0.03*gestureScale;
+  }
+}
+// Расстановка узлов тяги: секторные зажимы к пунктиру. Сборка 84: языка за пунктиром нет и пока
+// палец держит — держимая форма и есть зафиксированная.
+function pullPlace(P, ux, uy, e){
+  const dx = ux*e*P.k, dy = uy*e*P.k;
   // Ход зажат ПО УГЛУ: в каждом секторе кромка идёт наружу не дальше контура мишени × (1+PULL_OVER).
   // Запас считался только в точке хвата, и соседи уезжали за пунктир (ревью 17.11, P6: 1,21 мишени).
   // Доля хода s — одна на сектор (наименьшая по узлам кромки в нём и в соседних секторах) и
@@ -4585,6 +4970,8 @@ function pullRestore(){
 }
 function pullCommit(){
   const P = action.pull;
+  // Сборка 84: коммит — та самая форма, что держал палец (зажатая к пунктиру, не дальше cap).
+  // Переигровка прежней tanh-расстановки на отпускании отбрасывала край на 10–134 px (живой замер).
   // Короткая тяга — по ходу ПАЛЬЦА, а не края: край отстаёт (резинка, коридор скоростей), и по
   // его ходу быстрая тяга у самого порога шлепка откатывалась бы целиком.
   if(!P || P.e <= 0 || P.raw < PULL_MIN*gestureScale){
@@ -4658,9 +5045,10 @@ function updateActionMove(p, tEv, client){
       if(len < 1e-9 || (dx*rad.x + dy*rad.y)/len < PULL_OUT_COS) return;
       pullBegin();
     }
-    pullTo(p, pullGain(v.speed), (v.speed - V_SLAP)/(PULL_FAST_BAND*V_SLAP));
-    const P = action.pull, lim = Math.max(P.cap, PULL_MIN*gestureScale);
-    // пальцы соскользнули: тяга — единица действия, а не буксировка
+    pullTo(p, pullGain(v.speed), (v.speed - V_SLAP)/(PULL_FAST_BAND*V_SLAP), true);
+    const P = action.pull, lim = Math.max(P.cap, P.limKin || 0, PULL_MIN*gestureScale);
+    // пальцы соскользнули: тяга — единица действия, а не буксировка. Предел — фактический ход
+    // языка (сборка 81: до предела разрыва), а не только запас до пунктира.
     if(P.cap > 0 && P.raw >= lim*PULL_SLIP && v.speed < V_SLAP*0.6 && action.last.t - action.stroke.start >= 120){
       noteRelease(v); pullCommit();
     }
@@ -4708,7 +5096,7 @@ function releaseAction(tEv){
     } else if(judgeEndedStroke()) return;
     const v = fresh ? sampleVelocity() : { x:0, y:0, speed:0 };
     if(action.state === "ARMED"){ if(!action.moved) edgeTwitch(); clearAction(); return; }   // вела внутрь — ничего; тап по краю — край дёрнулся
-    pullTo(action.last, pullGain(v.speed), 0);
+    pullTo(action.last, pullGain(v.speed), 0, true);
     noteRelease(v); pullCommit(); return;
   }
   if(action.state === "LIFTING"){ toFlying(); return; }    // шлепок
@@ -4741,7 +5129,7 @@ function updateAction(dt){
     if(performance.now() - action.stroke.lastMoveT > staleMs()){
       if(judgeEndedStroke()) return;                         // короткий рывок и стоп — шлепок бьёт сам
       const P = action.pull;
-      if(P && (P.gain < 1 || P.fast > 0)) pullTo(action.last, Math.min(1, P.gain + dt*4), Math.max(0, P.fast - dt*6));
+      if(P && (P.gain < 1 || P.fast > 0)) pullTo(action.last, Math.min(1, P.gain + dt*4), Math.max(0, P.fast - dt*6), true);
     }
   } else if(action.state === "ARMED" && stepNo !== 1){
     if(action.stroke && performance.now() - action.stroke.lastMoveT > staleMs()) judgeEndedStroke();
@@ -6619,6 +7007,12 @@ function draw(){
     // так видно, что он оторвался от доски и летит, хотя узлы физики стоят.
     if(!xf) rimDraw();
     const X = xf ? viewX() : dX, Y = xf ? viewY() : dY;
+    // Дрожь края у предела разрыва (сборка 81, спека п. 10): пока палец тянет у предела,
+    // язык мелко трясётся вдоль тяги — только в рисунке; физика и коммит стоят ровно на пределе.
+    if(!xf && phase === "TABLE" && action.state === "PULLING" && action.pull && action.pull.atLimit){
+      const P = action.pull, t = performance.now(), off = (1.9 + 0.9*Math.sin(t/310)) * Math.sin(t/43);
+      for(let i=0;i<N;i++) if(P.w[i] > 0.55){ dX[i] += P.ux*off; dY[i] += P.uy*off; }
+    }
     if(xf){
       const gx = xf.cx + xf.ox, gy = xf.cy + xf.oy, gr = sheetRadius()*1.03;
       g.fillStyle = "rgba(6,3,1,0.42)";
