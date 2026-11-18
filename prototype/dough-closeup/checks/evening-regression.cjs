@@ -209,9 +209,11 @@ test('V3', 'a whole ball by touches: flatten → stretch → tava → envelope �
   assert.equal(h.run('dish.message'), 'коснись середины — ляжет банан', 'no egg in the evening (it was «Положи банан и яйцо…»)');
   envelope(h); toTable(h);
   // an uncut roti led from its middle to the counter is neither a cut nor a serve
+  // Build 88 (visible gesture): the uncut roti does not lift at all — the stroke is a knife stroke that fails, nothing pops up.
   serve(h);
   assert.equal(h.run('dish.cuts.length'), 0, 'no cut by a carry to the counter'); assert.equal(h.eve().rotiDone, 0);
-  assert.equal(h.run('dish.message'), 'сначала разрежь');
+  assert.equal(h.run('dish.mode'), 'cut', 'still on the table'); assert.ok(!/^serve|pan-back/.test(h.run('gestures.at(-1).outcome') || ''), 'not lifted');
+  assert.equal(h.run('dish.message'), 'режь от края до края', 'no «сначала разрежь»');
   cut(h);
   serve(h, { short: true });
   assert.equal(h.run('!!dish'), true, 'released at the rim of the tava: the roti stays on the table');
@@ -428,10 +430,10 @@ test('V10', 'one short line at a time: no percent, no arrow, no «лепесто
   stretch(h); say('готово — за середину и на таву', 'ball 1, stretched');
   toPan(h); say('коснись середины — ляжет банан');
   tap(h, h.spots().pan); { const n = h.run('dish.filling.length'); assert.ok(n >= 10 && n <= 14, `a tap in the middle lays the banana heap (${n} slices; build 85)`); } say('веди от края к середине');
-  envelope(h, [2, 3]); say('теперь две другие стороны'); envelope(h, [0, 1]); assert.equal(h.run('envelopeDone()'), true); say('конверт готов');
+  envelope(h, [2, 3]); say('теперь две другие стороны'); envelope(h, [0, 1]); assert.equal(h.run('envelopeDone()'), true); say('', 'build 88: no «конверт готов» — the envelope is seen');
   h.frames(60 * 3); say('', 'both sides raw: silence');
   while (h.run('fryStep(meanCook())') < 2) h.frames(10);
-  h.frames(3); say('край румяный — мах от края');
+  h.frames(3); say('', 'build 88: no «край румяный — мах от края» — touching the edge lifts the corner');
   flick(h); assert.equal(h.run('dish.flips'), 1); say();
   toTable(h); say('режь от края до края');
   cut(h); say('нарезано — за середину и неси');
@@ -445,9 +447,9 @@ test('V10', 'one short line at a time: no percent, no arrow, no «лепесто
   flatten(h); say('палец на край — и мах наружу', 'the slap has not worked yet this evening');
   stretch(h); say('', 'ball 2, stretched: no «за середину и на таву»');
   toPan(h); say('', 'ball 2: no «коснись середины»');
-  envelope(h, [2, 3]); say(''); envelope(h, [0, 1]); say('конверт готов', 'what happened is still said');
+  envelope(h, [2, 3]); say(''); envelope(h, [0, 1]); say('', 'build 88: no «конверт готов»');
   while (h.run('fryStep(meanCook())') < 2) h.frames(10);
-  h.frames(160); say('край румяный — переверни', 'the state stays, the way to do it is gone');
+  h.frames(160); say('', 'build 88: the browned edge is shown by the lifted corner, not by a line');
   flick(h); toTable(h); say('', 'ball 2: no «режь от края до края»');
   cut(h); say('нарезано', 'ball 2: «нарезано» alone');
   for (const m of seen) {
@@ -559,8 +561,9 @@ test('V12', 'a cut counts only from edge to edge; «нарезано» after thr
   { const k = h.J('(()=>{const c=dish.cuts[0],b=dish.cutBounds;return {len:Math.hypot(c.b.x-c.a.x,c.b.y-c.a.y),w:b.right-b.left}})()'); assert.ok(k.len > k.w, `the cut runs through the whole roti (${k.len.toFixed(2)} > ${k.w.toFixed(2)})`); }
   assert.equal(msg(), 'ещё рез'); assert.equal(h.run('cutEnough()'), false);
   // one cut: led from the middle to the counter it is not served
-  serve(h); assert.equal(h.eve().rotiDone, 0, 'one cut does not serve'); assert.equal(msg(), 'сначала дорежь'); assert.equal(h.run('dish.cuts.length'), 1);
-  h.frames(160); assert.equal(liveNow(h), 'ещё рез', 'the correction holds for 2.4 s, then the line is the state of the cutting again');
+  // Build 88 (visible gesture): a roti with one cut does not lift — no «сначала дорежь», the line keeps the state of the cutting.
+  serve(h); assert.equal(h.eve().rotiDone, 0, 'one cut does not serve'); assert.equal(msg(), 'ещё рез'); assert.equal(h.run('dish.cuts.length'), 1);
+  h.frames(160); assert.equal(liveNow(h), 'ещё рез', 'the line is the state of the cutting');
   // a second cut along the first: two of one direction — «теперь поперёк»
   drive(h, line({ x: B.l.x - w * 0.2, y: B.c.y + hh * 0.17 }, { x: B.r.x + w * 0.2, y: B.c.y + hh * 0.17 }, { v: 380, hold: 60 }));
   assert.equal(h.run('dish.cuts.length'), 2); assert.deepEqual(h.J('cutFamilies()'), [2, 0]); assert.equal(msg(), 'теперь поперёк'); assert.equal(h.run('cutEnough()'), false);
@@ -592,19 +595,20 @@ test('V12', 'a cut counts only from edge to edge; «нарезано» after thr
     drive(k, line({ x: p.x + (p.x - q.x) * 0.4, y: p.y + (p.y - q.y) * 0.4 }, { x: q.x + (q.x - p.x) * 0.4, y: q.y + (q.y - p.y) * 0.4 }, { v: 380, hold: 60 }));
   }
   assert.equal(k.run('dish.cuts.length'), 0, 'a sliced corner is not a cut'); assert.equal(k.run('cutEnough()'), false); assert.equal(k.run('dish.message'), 'режь от края до края');
-  // Review of build 80 — the middle is always a carry. An UNCUT roti: to the counter — «сначала разрежь»; dropped
-  // short — it stays; to the middle of the tava — it fries on (build 80 answered «режь от края до края» and kept
-  // a roti with one or two cuts on the table).
-  const pan = h => h.J('gestures.filter(g=>g.kind==="pan").at(-1)').outcome;
-  serve(k); assert.equal(k.eve().rotiDone, 0); assert.equal(k.run('dish.message'), 'сначала разрежь'); assert.equal(pan(k), 'serve-uncut');
-  serve(k, { short: true }); assert.equal(k.run('dish.mode'), 'cut'); assert.equal(k.run('dish.message'), 'режь от края до края'); assert.equal(pan(k), 'serve-back');
-  serve(k, { short: 'pan' }); assert.equal(pan(k), 'pan-back'); assert.equal(k.run('dish.mode'), 'fold'); assert.equal(k.run('phase'), 'PAN'); assert.equal(k.run('dish.message'), 'снова на таве');
-  // one cut, then back to the tava: the cut is undone, the envelope fries on
-  toTable(k); { const B1 = rotiBox(k), w1 = B1.r.x - B1.l.x; drive(k, line({ x: B1.l.x - w1 * 0.2, y: B1.c.y }, { x: B1.r.x + w1 * 0.2, y: B1.c.y }, { v: 380, hold: 60 })); }
+  // Build 88 (visible gesture, spec part 2): until it is cut the roti does not lift from the table — to the counter,
+  // short of it, to the tava: it stays on the table, no line pops up, no way back to the tava (was: «сначала разрежь»,
+  // serve-uncut, pan-back with «снова на таве», build 80–87). A stroke from the middle is just a knife stroke that fails.
+  const pan = h => (h.J('gestures.filter(g=>g.kind==="pan").at(-1)') || {}).outcome;
+  for (const how of [undefined, { short: true }, { short: 'pan' }]) {
+    serve(k, how); assert.equal(k.eve().rotiDone, 0); assert.equal(k.run('dish.mode'), 'cut', 'stays on the table');
+    assert.equal(k.run('dish.message'), 'режь от края до края'); assert.ok(!/^serve|pan-back/.test(pan(k) || ''), `not lifted (${pan(k)})`);
+  }
+  // one cut, then towards the tava: still on the table, the cut stays
+  { const B1 = rotiBox(k), w1 = B1.r.x - B1.l.x; drive(k, line({ x: B1.l.x - w1 * 0.2, y: B1.c.y }, { x: B1.r.x + w1 * 0.2, y: B1.c.y }, { v: 380, hold: 60 })); }
   assert.equal(k.run('dish.cuts.length'), 1); serve(k, { short: 'pan' });
-  assert.equal(pan(k), 'pan-back', 'a roti with one cut goes back to the tava'); assert.equal(k.run('dish.mode'), 'fold'); assert.equal(k.run('dish.cuts.length'), 0); assert.equal(k.run('envelopeDone()'), true);
+  assert.notEqual(pan(k), 'pan-back', 'a roti with one cut does not go back to the tava'); assert.equal(k.run('dish.mode'), 'cut'); assert.equal(k.run('dish.cuts.length'), 1);
   assert.deepEqual(h.errors.concat(d.errors, k.errors), []);
-  return { summary: `three sliced corners → 0 cuts; uncut: counter → «сначала разрежь», tava → pan-back; one cut: tava → pan-back; scratch 30 % → no cut; 8 % inside both edges → a full cut; 1 cut and 2 along → not served; 2 + 1 → «нарезано»; 2 + 2 → 4 cuts; 1 + 1 → «ещё один рез», + diagonal → «нарезано»` };
+  return { summary: `three sliced corners → 0 cuts; uncut and one cut: not lifted, stays on the table (build 88); scratch 30 % → no cut; 8 % inside both edges → a full cut; 1 cut and 2 along → not served; 2 + 1 → «нарезано»; 2 + 2 → 4 cuts; 1 + 1 → «ещё один рез», + diagonal → «нарезано»` };
 });
 
 const passed = results.filter(r => r.status === 'PASS').length;
