@@ -538,18 +538,18 @@ test('G8', 'layout at 390×844 and 375×667: her picture is above the counter, b
   return { summary: out.join(' · ') };
 });
 
-test('G9', 'build 80 — the knock is seen at the tava: she leans, the arm reaches the far rim and the marks flash there; it repeats after 8 s of waiting over a FOLDED roti (never over an open sheet) until the roti is flipped or taken off; her eyes follow the roti and the folding finger; a roti carried past her onto the counter turns her head', () => {
+test('G9', 'build 80 — the knock is seen at the tava: she leans, the arm reaches over the counter and the marks flash there (build 89: at the edge of the roti nearest to her while it is not flipped, not at the far rim); it repeats after 8 s of waiting over a FOLDED roti (never over an open sheet) until the roti is flipped or taken off; her eyes follow the roti and the folding finger; a roti carried past her onto the counter turns her head', () => {
   const h = guest(); light(h); onPan(h); until(h, 'GST.here');
   // the main knock: arm at the rim of the tava, marks only around the two hits, she leans
   until(h, 'guestPic()===2');
   const S = h.spots(); let hits = 0, marks = 0, frames = 0, markNoHit = 0, rim = null, lean = 0;
   while (h.pic() === 2) {
-    const G = h.gs(); assert.ok(G.arm, 'the arm is out while she knocks'); rim = G.arm.rim; lean = G.lean;
+    const G = h.gs(); assert.ok(G.arm, 'the arm is out while she knocks'); rim = G.arm.at; lean = G.lean;
     if (G.arm.hit) { hits++; assert.ok(G.knock > 0, 'the tava jumps on the hit'); assert.ok(G.arm.marks, 'marks on every hit'); }
     if (G.arm.marks) marks++; if (G.arm.marks && !G.arm.hit) markNoHit++;
     h.frames(1); frames++;
   }
-  assert.ok(rim.y > S.counterBottom + 4 && rim.y < S.pan.y && Math.abs(rim.x - S.pan.x) <= S.panR, `the marks are at the far rim of the tava, below the counter (${rim.x.toFixed(0)},${rim.y.toFixed(0)}; counter bottom ${S.counterBottom.toFixed(0)}, tava ${S.pan.x.toFixed(0)},${S.pan.y.toFixed(0)})`);
+  assert.ok(rim.y > S.counterBottom + 4 && rim.y < S.pan.y && Math.abs(rim.x - S.pan.x) <= S.panR, `the marks are on the tava, below the counter, on her side (${rim.x.toFixed(0)},${rim.y.toFixed(0)}; counter bottom ${S.counterBottom.toFixed(0)}, tava ${S.pan.x.toFixed(0)},${S.pan.y.toFixed(0)})`);
   assert.ok(hits >= 12 && marks > hits && markNoHit >= 12, `marks outlast the hits (${hits} hit frames, ${marks} mark frames)`);
   assert.ok(lean > 5, `she leans to the tava while knocking (${lean} px)`); assert.equal(h.gs().arm, null, 'no arm between knocks'); assert.equal(h.gs().lean, 0);
   h.tick(2, 1 / 60, true); assert.equal(h.run('loopErrs'), 0);
@@ -599,6 +599,78 @@ test('G9', 'build 80 — the knock is seen at the tava: she leans, the arm reach
   const c = guest(); light(c); onPan(c); arrive(c); finish(c); serve(c, c.gs().som);
   assert.ok(!c.gev().includes('watch')); assert.deepEqual(h.errors.concat(b.errors, c.errors), []);
   return { summary: `knock: ${hits} hit frames, marks ${marks} frames at ${rim.x.toFixed(0)},${rim.y.toFixed(0)} (counter bottom ${S.counterBottom.toFixed(0)}); lean ${lean} px; open sheet 25 s: no repeat; after the fold repeats at ${at.map(x => x.toFixed(1)).join(' s, ')} s; gaze tava ${g0.x},${g0.y}; watch dir ${W.watchDir}, head ${W.head}` };
+});
+
+// Build 89 (docs/som-points-batch-spec.md): she knocks at the PALEST place of the roti's edge, not at the rim, and
+// shakes her head once at a roti taken to the table with its visible side raw.
+// Script shortcuts, named: the colours of the sides are set by script (cookSides / a gradient by face position);
+// one knock after the flip is started by script (guestKnock — the same entry as her «again»), because after a flip
+// she no longer repeats.
+const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
+function knockFrames(h) {                    // the frames of one knock: the arm and the marks
+  until(h, 'guestPic()===2'); const out = [];
+  while (h.pic() === 2) { const G = h.gs(); if (G.arm) out.push(G.arm); h.frames(1); }
+  return out;
+}
+test('G10', 'build 89 — the knock marks lie at the palest point of the roti edge (nearer to it than to the rim; not flipped — the edge nearest to her) and her arm is out; raw visible side taken to the table → one «no» (0.6 s, two shakes, then she looks at the tava); cooked → none; taken again → one more; serving and the answer unchanged', () => {
+  const out = [];
+  // not flipped: the main knock goes to the edge of the roti nearest to her
+  const h = guest(); light(h); onPan(h); until(h, 'GST.here');
+  { const A = knockFrames(h), S = h.spots(); assert.ok(A.length > 30, 'the arm is out for the whole knock');
+    const k = A.find(a => a.marks), E = k.pale.edge, ys = E.map(q => q.y), y0 = Math.min(...ys), y1 = Math.max(...ys);
+    assert.ok(k.at.y <= y0 + (y1 - y0) * 0.2 && k.at.y < S.pan.y, `not flipped: the marks at the edge on her side (y ${k.at.y.toFixed(0)}, edge ${y0.toFixed(0)}…${y1.toFixed(0)}, tava ${S.pan.y.toFixed(0)})`);
+    assert.ok(E.some(q => dist(q, k.at) < 1), 'the marks are at a point of the roti edge');
+    out.push(`not flipped: marks at y ${k.at.y.toFixed(0)} of edge ${y0.toFixed(0)}…${y1.toFixed(0)}`); }
+  // flipped: every side «бледное», one place of the edge paler (the colour of the visible side of the top layer
+  // there, set by script) — the marks go to it; two places in turn: the edge nearest to the player, the leftmost
+  envelope(h); flick(h, 700); assert.equal(h.run('dish.flips'), 1);
+  let E0 = null;
+  { h.run('guestKnock(GUEST_KNOCK_S,"again")'); h.frames(1); E0 = knockFrames(h).find(a => a.marks).pale.edge; }
+  for (const [name, pick] of [['nearest the player', E => E.reduce((m, q) => q.y > m.y ? q : m)], ['leftmost', E => E.reduce((m, q) => q.x < m.x ? q : m)]]) {
+    const q0 = pick(E0);
+    h.run(`for(const t of dish.thermal) if(t){t.dry[0]=t.dry[1]=1;t.cook[0]=t.cook[1]=0.5;} dish.thermal[${q0.src}].cook[${q0.side}]=0.12;`);
+    h.run('guestKnock(GUEST_KNOCK_S,"again")'); h.frames(1);
+    const A = knockFrames(h), k = A.find(a => a.marks), E = k.pale.edge;
+    const pale = E.reduce((m, q) => q.cook < m.cook ? q : m), rimD = dist(k.at, k.rim), paleD = dist(k.at, pale);
+    assert.ok(A.every(a => a.at.x === k.at.x && a.at.y === k.at.y), 'one place for the whole knock');
+    assert.ok(k.pale.cook <= 0.12 + 1e-9 && pale.cook <= 0.12 + 1e-9, `the marked point is the palest of the edge (${k.pale.cook}, palest ${pale.cook})`);
+    assert.ok(paleD < rimD, `nearer to the palest point (${paleD.toFixed(1)} px) than to the rim (${rimD.toFixed(1)} px)`);
+    assert.ok(dist(k.at, q0) < 40, `at the place made pale (${name}: ${dist(k.at, q0).toFixed(1)} px from it)`);
+    out.push(`pale ${name}: marks ${k.at.x.toFixed(0)},${k.at.y.toFixed(0)} — ${paleD.toFixed(1)} px from the palest point, ${rimD.toFixed(1)} px from the rim`);
+  }
+  assert.equal(h.run('loopErrs'), 0); h.tick(2, 1 / 60, true); assert.equal(h.run('loopErrs'), 0);
+  // the «no»: raw visible side to the table — one; back to the tava and off again — one more; then cut and serve: the answer as before
+  const m = guest(); light(m); onPan(m); arrive(m); envelope(m); until(m, PALE);
+  cookSides(m, 0.5, 0.02);   // script: the steel side «приготовленное», the visible side raw
+  const n0 = m.gev().length;
+  { const c0 = m.J('(()=>{const b=dishBounds();return __harness.dishToClient({x:(b.left+b.right)/2,y:(b.top+b.bottom)/2})})()');
+    drive(m, line(c0, m.spots().work, { v: 320, hold: 60 }), { settle: 0 }); m.frames(1); }   // toTable, but watched from the release on
+  assert.equal(m.run('dish.mode'), 'cut', 'on the table');
+  assert.deepEqual(m.gev().slice(n0), ['no'], 'raw on the table: one «no»');
+  const row = m.grows().at(-1); assert.equal(row.top, 'сырое'); assert.equal(row.flips, 0);
+  { const turns = [], looks = []; let t = 0;
+    while (t < 100) { const G = m.gs(); turns.push(G.head); looks.push({ ...G.gaze, no: G.noLook }); m.frames(1); t++; if (t === 3) m.tick(1, 1 / 60, true); }
+    let flipsSign = 0; for (let i = 1; i < turns.length; i++) if (Math.sign(turns[i]) && Math.sign(turns[i]) !== Math.sign(turns[i - 1]) && turns[i - 1]) flipsSign++;
+    const last = turns.map((v, i) => [v, i]).filter(([v]) => Math.abs(v) > 0.05).at(-1)[1];
+    assert.ok(Math.max(...turns) > 0.5 && Math.min(...turns) < -0.5, 'her head turns both ways');
+    assert.ok(last <= 37, `the shake is over in 0.6 s (last turn at frame ${last})`); assert.ok(flipsSign >= 3 && flipsSign <= 4, `two shakes (${flipsSign} sign changes)`);
+    const S = m.spots(), at = looks[50], tab = looks[99];
+    assert.ok(at.y > 0.9 && Math.abs(at.x) < 0.35, `after the shake she looks at the tava (${at.x},${at.y})`);
+    assert.ok(at.no > 0 && tab.no === 0, `the look at the tava lasts 0.6 + 1 s (left ${at.no} s at frame 50, ${tab.no} at frame 99)`);   // the tava and the table are both «down» from her: the look is checked by its timer
+    out.push(`no: head ${Math.max(...turns).toFixed(2)}/${Math.min(...turns).toFixed(2)}, still after ${last} frames`); }
+  sec(m, 3); assert.deepEqual(m.gev().slice(n0), ['no'], 'only once for one removal');
+  serve(m, m.spots().pan); assert.equal(m.run('dish.mode'), 'fold', 'back on the tava');
+  const n1 = m.gev().length; toTable(m);
+  assert.deepEqual(m.gev().slice(n1).filter(e => e === 'no'), ['no'], 'taken off again: one more «no»');
+  cut(m); serve(m, m.gs().som);
+  assert.equal(m.g().answers.length, 1, 'served: she takes it'); assert.equal(m.g().answers[0].answer, 'nod'); assert.deepEqual(m.g().gifts, ['bananas'], 'one side cooked, the other raw — a nod and bananas, as before');
+  assert.equal(m.gev().filter(e => e === 'no').length, 2);
+  // cooked visible side to the table: none
+  const c = guest(); light(c); onPan(c); arrive(c); envelope(c); until(c, PALE);
+  cookSides(c, 0.5, 0.5); const n2 = c.gev().length; toTable(c); sec(c, 2);
+  assert.ok(!c.gev().slice(n2).includes('no'), `cooked on the table: no «no» (${c.gev().slice(n2).join(' ')})`);
+  assert.deepEqual(h.errors.concat(m.errors, c.errors), []);
+  return { summary: out.join('; ') + '; raw → no, again → no, served → nod/bananas; cooked → none' };
 });
 
 const passed = results.filter(r => r.status === 'PASS').length;
