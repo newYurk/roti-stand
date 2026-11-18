@@ -265,7 +265,7 @@ test('F1', 'times by the model: the steel side is «приготовленное
   return { summary: `heap ${heap.split(',').length} slices; folded at ${folded.toFixed(1)} s; steel side: бледное ${at.pale} s, приготовленное ${at.cooked} s, зажаренное ${at.fried} s, горелое ${at.burnt} s of pan time; flip at ${tA.toFixed(1)} s → new bottom бледное +${tB.toFixed(1)} s (crunch with margarine at ${(tA + tB).toFixed(1)} s), приготовленное +${tB2.toFixed(1)} s (crunch at ${(tA + tB2).toFixed(1)} s); open sheet 25 s → colour ${openCook.toFixed(3)} (cap ${o.run('OPEN_COOK_CAP')}); folded at ${lazyT.toFixed(1)} s: bottom ${lazy.bottom.toFixed(3)}, top ${lazy.top.toFixed(3)}, no crunch without a flip; heap ${nb} + egg ${ne}: приготовленное ${ate.cooked} s, горелое ${ate.burnt} s (filling factor ${e.run('fillFryK()').toFixed(3)})` };
 });
 
-test('F2', 'one ladder and plain words: the line says nothing about frying until the envelope is done, never «можно начинку» or «→ сырое»; «край румяный — переверни» when the steel side is done; what it calls ready is a crunch for Som', () => {
+test('F2', 'one ladder and plain words: the line says nothing about frying until the envelope is done, never «можно начинку» or «→ сырое»; silent when the steel side is done (build 88: the lifted corner shows it); what it calls ready is a crunch for Som', () => {
   const h = guest(); light(h); onPan(h);
   const seen = new Set(), note = () => { const m = live(h); if (m) seen.add(m); };
   for (let i = 0; i < 60; i++) { h.frames(1); note(); }
@@ -278,7 +278,8 @@ test('F2', 'one ladder and plain words: the line says nothing about frying until
   assert.equal(h.run('fryHint()'), '', 'both sides raw: nothing to do with the hands, the line is silent');
   assert.equal(live(h), '');
   until(h, 'fryStep(meanCook())>=2'); h.frames(2); note();
-  assert.equal(live(h), 'край румяный — мах от края');
+  // Build 88 (visible gesture): «край румяный — мах от края» is gone — touching the edge lifts the corner and shows the browned underside.
+  assert.equal(live(h), '', 'the steel side is done: the line stays silent, the object shows it');
   edgeStroke(h, { v: 700 }); for (let i = 0; i < 40; i++) { h.frames(1); note(); }
   assert.equal(h.run('learned.flip'), 1, 'the flick is learned (build 80: learned.flip, was flipLearned)');
   let ready = null, n = 0;
@@ -513,7 +514,7 @@ test('F6', 'the refusal is not a dead end: a raw cut roti refused by Som is carr
     assert.equal(h.run('dish.cuts.length'), 0, 'whole again'); assert.equal(h.run('dish.folds'), 4); assert.equal(h.run('envelopeDone()'), true);
     assert.equal(h.eve().rotiDone, before, 'the evening did not count it'); assert.equal(h.eve().ball, true);
     assert.equal(h.run('dishCrisp'), 1.5, 'the crisp stays with the roti');
-    assert.equal(live(h), 'снова на таве');
+    assert.notEqual(live(h), 'снова на таве', 'build 88: no «снова на таве» line — the roti is visibly on the tava');
     const t0 = h.run('dish.panTime');
     until(h, 'fryStep(meanCook())>=2'); const side = h.run('dish.panTime') - t0;
     edgeStroke(h, { v: 700 }); h.frames(40); assert.equal(h.run('dish.flips'), 1);
