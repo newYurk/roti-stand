@@ -1333,11 +1333,11 @@ function crustFace(f,side){
   return {base,c,edge,seed:(dish && dish.seed)||1,side,ground:cookColor(base,gc)};
 }
 // Цвет корки в точке материала (x, y) для параметров грани P. Без пятна — фон.
-function crustMix(P,x,y,ground=P.ground,soft=SPOT_SOFT){
+function crustMix(P,x,y,ground=P.ground,soft=SPOT_SOFT,field=null){
   let cov=spotCover(P.c);
   if(!cov) return ground;
   cov+=(0.9-cov)*0.5*P.edge;
-  const n=spotField(x,y,P.seed,P.side), thr=spotQuant(1-cov);
+  const n=field===null ? spotField(x,y,P.seed,P.side) : field, thr=spotQuant(1-cov);
   const s=Math.max(0,Math.min(1,(n-thr+soft)/(2*soft)));
   if(s<=0) return ground;
   const d=Math.max(0,Math.min(1,(n-thr)/Math.max(1e-6,spotQuant(1)-thr)));
@@ -1355,9 +1355,23 @@ function faceMaterialMid(f){
   crustMid.set(f.points,hit); return hit;
 }
 // Цвет грани на таве и в руке: поле пятен в середине грани.
+// Цвет видимой стороны грани пересчитывается раз в CRUST_DT секунд жарки: за это время прожарка сдвигается
+// на тысячные, а рисунок тавы иначе платил бы за поле пятен каждый кадр (2 000+ граней).
+const CRUST_DT = 0.25, crustCache = new WeakMap();
 function dishCrustColor(f,side){
-  const P=crustFace(f,side), q=faceMaterialMid(f);
-  return crustMix(P,q.x,q.y);
+  if(side===undefined && dish){
+    // сдвиг по номеру ячейки: грани пересчитываются вразбивку, а не все в одном кадре
+    const key=Math.floor((dish.panTime||0)/CRUST_DT+(f.source%16)/16)+"|"+(dish.seed||1), hit=crustCache.get(f);
+    if(hit && hit.key===key) return hit.c;
+    const c=dishCrustColorNow(f); crustCache.set(f,{key,c}); return c;
+  }
+  return dishCrustColorNow(f,side);
+}
+function dishCrustColorNow(f,side){
+  const P=crustFace(f,side), q=faceMaterialMid(f), key=P.seed*2+P.side;
+  // значение поля в середине грани постоянно — считается один раз на грань, зерно и сторону
+  if(q.key!==key){ q.key=key; q.n=spotField(q.x,q.y,P.seed,P.side); }
+  return crustMix(P,q.x,q.y,P.ground,SPOT_SOFT,q.n);
 }
 // Мокрый блеск маргарина (сборка 86): на ближнем к глазу крае роти, там, где под кромкой жир.
 // Нет, пока сторона на стали сырая; ярче всего у «бледного», тускнеет к «зажаренному». Без пузырьков.

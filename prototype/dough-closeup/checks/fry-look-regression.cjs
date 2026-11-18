@@ -92,10 +92,11 @@ function toTable(h) {
 }
 const lum = c => 0.299 * c[0] + 0.587 * c[1] + 0.114 * c[2];
 function roti(opts) { const h = evening(opts); light(h); stretched(h); toPan(h); tap(h, h.spots().pan); envelope(h); return h; }
-// script: both sides of every cell at cook c (dry), frying frozen so the numbers hold
-const cookAll = (h, c) => h.run(`for(const t of dish.thermal) if(t){t.dry[0]=t.dry[1]=1;t.cook[0]=t.cook[1]=${c};} dish.panTime=(dish.panTime||0)+0.001; fryHold=true;`);
+// script: both sides of every cell at cook c (dry), frying frozen so the numbers hold; pan time +0.3 s so the
+// per-face colour cache of the tava (CRUST_DT 0.25 s) takes the new numbers
+const cookAll = (h, c) => h.run(`for(const t of dish.thermal) if(t){t.dry[0]=t.dry[1]=1;t.cook[0]=t.cook[1]=${c};} dish.panTime=(dish.panTime||0)+0.3; fryHold=true;`);
 const cookSides = (h, bottom, top) => h.run(`for(let i=0;i<dish.thermal.length;i++){const t=dish.thermal[i];if(!t)continue;t.dry[0]=t.dry[1]=1;
-  const w=dish.contactWeights[i]; const down=w&&w[1]>w[0]?1:0; t.cook[down]=${bottom}; t.cook[1-down]=${top};} dish.panTime=(dish.panTime||0)+0.001; fryHold=true;`);
+  const w=dish.contactWeights[i]; const down=w&&w[1]>w[0]?1:0; t.cook[down]=${bottom}; t.cook[1-down]=${top};} dish.panTime=(dish.panTime||0)+0.3; fryHold=true;`);
 // Seen faces of the envelope on the tava: colour drawn (dishCrustColor) against the ground of the same face.
 const FACES = `(()=>{const out=[];for(const f of dish.faces){ if(f.kind!=="dough"||!dish.topWeights[f.source][f.turned?0:1]) continue;
   const P=crustFace(f), c=dishCrustColor(f); out.push({c:c.map(v=>Math.round(v*10)/10),g:P.ground.map(v=>Math.round(v*10)/10),edge:P.edge,cook:P.c,src:f.source,t:f.turned}); } return out;})()`;
@@ -125,7 +126,7 @@ test('L1', 'a raw side: not one spot and no gloss; the ground is pale (the dough
   assert.equal(gl.strokes, 0, 'no gloss on a raw roti');
   // the top raw, the steel side fried: inside the rim the top stays spotless (the rim is the steel side showing)
   h.run(`for(let i=0;i<dish.thermal.length;i++){const t=dish.thermal[i];if(!t)continue;const w=dish.topWeights[i];t.dry[0]=t.dry[1]=1;
-    for(const s of [0,1]) t.cook[s]=w&&w[s]?0.03:0.6;} dish.panTime+=0.001; fryHold=true;`); h.frames(1);
+    for(const s of [0,1]) t.cook[s]=w&&w[s]?0.03:0.6;} dish.panTime+=0.3; fryHold=true;`); h.frames(1);
   const G = h.J(FACES), L = h.J('dishLook()'), inner = G.filter(f => f.cook < 0.08);
   const spottedInner = inner.filter(f => f.c.some((v, k) => Math.abs(v - f.g[k]) > 0.05)).length, rimSpots = G.length - inner.length;
   assert.ok(inner.length > 50, `faces with a raw top inside the rim: ${inner.length}`);
