@@ -790,6 +790,16 @@ window.setDrizzleMode = _setMode;
   }, { capture: true, passive: false });
 })();
 
+// Уход в фон (#83): струя кончается, как при отпускании пальца, без разгона по старой скорости.
+function _bgStop() {
+  if (_captureId == null) return;
+  _samples.length = 0;
+  _onUp({ pointerId: _captureId });
+}
+window.addEventListener("blur", _bgStop);
+window.addEventListener("pagehide", _bgStop);
+document.addEventListener("visibilitychange", () => { if (document.hidden) _bgStop(); });
+
 (function buildBtn() {
   if (document.readyState === "loading") {
     document.addEventListener("DOMContentLoaded", _buildButton);

@@ -11,7 +11,7 @@
 // до 400%+ и лист «рвётся» в середине от любого движения. Замер это обнаружил сразу.
 // Число узлов сохранено (1 060 после обрезки по кругу; прежняя оценка «~1150» была на глаз,
 // пересчитано 07.09.2026), однородность рёбер восстановлена.
-const BUILD = "2026-11-18 · рама и поворот не сбрасывают роти · 99";
+const BUILD = "2026-11-18 · уход в фон отменяет жест и струю · 100";
 const GRID = 38;                   // 38x38, в круг попадает 1 060 узлов (посчитано, не оценка)
 let SUBSTEPS = 8;                  // T2: 8–10 подшагов, 1 итерация
 let DAMP = 0.986;
@@ -7356,14 +7356,18 @@ window.addEventListener("pointermove", e=>{
 }, true);
 window.addEventListener("pointerup", e=>{ onUp("p"+e.pointerId, e.clientX, e.clientY, evTime(e)); }, true);
 window.addEventListener("pointercancel", e=>{ onCancel("p"+e.pointerId); }, true);
-// Уход в фон — та же отмена: не оставлять взведённый жест (audit §5).
-addEventListener("blur", ()=>{
+// Уход в фон — та же отмена: не оставлять взведённый жест (audit §5, политика #83).
+// На iPhone при смене приложения blur приходит не всегда, а visibilitychange и pagehide — всегда.
+function bgCancel(){
   releasePress(dishGesture); dishGesture=null; fatGesture=null;
   dishTouches.clear(); if(dishTwist) endTwist(dishTwist.input==="wheel");
   if(action.state==="CARRY"){ cancelCarry(); }
   else if(action.state==="PULLING"||action.state==="LIFTING"){ pullRestore(); clearAction(); }   // иначе тяга висела до «заново»: физика в ней стоит
   else if(action.state==="ARMED") clearAction();
-});
+}
+addEventListener("blur", bgCancel);
+addEventListener("pagehide", bgCancel);
+document.addEventListener("visibilitychange", ()=>{ if(document.hidden) bgCancel(); });
 
 addEventListener("keydown", e=>{
   if(e.code==="Space"){ e.preventDefault(); pressNow(); }
