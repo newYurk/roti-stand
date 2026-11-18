@@ -6194,6 +6194,7 @@ function draw(){
         const [a,b2,c,d] = quads[q];
         const t = (Hmap[a]+Hmap[b2]+Hmap[c]+Hmap[d])/4;
         if(t > 0.96) continue;
+        if(quadCons[q].some(cc=>cc.broken)) continue;   // дыра и в «круглом» виде — дыра: сквозь неё стол
         g.fillStyle = tableSkin(t, rimEdgeQ ? rimEdgeQ[q] : 0);
         const Pa=Pnt(a), Pb=Pnt(b2), Pc=Pnt(c), Pd=Pnt(d);
         g.beginPath();
