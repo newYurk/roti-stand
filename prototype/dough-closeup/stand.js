@@ -11,7 +11,7 @@
 // до 400%+ и лист «рвётся» в середине от любого движения. Замер это обнаружил сразу.
 // Число узлов сохранено (1 060 после обрезки по кругу; прежняя оценка «~1150» была на глаз,
 // пересчитано 07.09.2026), однородность рёбер восстановлена.
-const BUILD = "2026-11-17 · жарка видна и решает, вход и подсказки; картинки тёти Сом · 82";
+const BUILD = "2026-11-17 · светлое тесто, 8–10 шлепков, гладкий край дыры; жарка видна и решает; картинки тёти Сом · 83";
 const GRID = 38;                   // 38x38, в круг попадает 1 060 узлов (посчитано, не оценка)
 let SUBSTEPS = 8;                  // T2: 8–10 подшагов, 1 итерация
 let DAMP = 0.986;
@@ -3683,6 +3683,7 @@ function build(){
 let RIM_K = 4;                               // 0 — рисовать кромку как в физике (так её меряет checks/edge-regression.cjs «до»)
 let RIM_CAP = 0.8, RIM_AREA = 0.3, RIM_RAMP = 0.2, RIM_STEP = 0.75, RIM_STEPS = 8;   // пределы сглаживания: сдвиг узла в долях соседней стороны кромки; нарисованная площадь ячейки в долях физической
 let dX = null, dY = null, rimRaw = null, rimF = null, rimCells = [];
+let rimEdgeQ = null;                 // ячейка кромки — рисуется плотнее и светлее (сборка 81)
 function buildRimLoop(){
   rimLoop = []; rimLoopQuad = []; rimCells = [];
   const key = (a,b)=> a<b ? a*65536+b : b*65536+a;
@@ -3702,6 +3703,70 @@ function buildRimLoop(){
   rimLoop = loop; rimLoopQuad = lq;
   const onRim = new Uint8Array(N); for(const i of loop) onRim[i] = 1;
   for(let q=0;q<quads.length;q++){ const s = quads[q]; if(onRim[s[0]] || onRim[s[1]] || onRim[s[2]] || onRim[s[3]]) rimCells.push(q); }
+  if(!rimEdgeQ || rimEdgeQ.length !== quads.length) rimEdgeQ = new Uint8Array(quads.length);
+  rimEdgeQ.fill(0);
+  for(const q of rimCells) rimEdgeQ[q] = 1;
+}
+// ── Край дыры тем же сглаживанием, что кромка (сборка 81) ──
+// Дыра — рваные ячейки, и её граница — те же стороны ячеек: без сглаживания она такая же
+// лесенка, только из тёмных клеток (плейтест 77: «чёрные ступенчатые блоки»). Собираем
+// цепочки сторон между целой и рваной ячейкой и сглаживаем узлы тем же окном ±RIM_K,
+// с теми же пределами RIM_CAP/RIM_AREA. Цепочки открытые: дыра, дорвавшаяся до кромки,
+// кончается на узлах внешнего контура — концы цепочки не двигаем (их ведёт rimDraw).
+let holeChains = null, holeVer = -1;
+function brokenCount(){ let v = 0; for(let k=0;k<cons.length;k++) v += cons[k].broken ? 1 : 0; return v; }
+function buildHoleChains(){
+  const v = brokenCount();
+  holeVer = v; holeChains = [];
+  if(v === 0) return;
+  const key = (a,b)=> a<b ? a*65536+b : b*65536+a;
+  const uses = new Map();                       // сторона -> сколько целых и сколько рваных ячеек её делят
+  for(let q=0;q<quads.length;q++){
+    const torn = quadCons[q].some(c=>c.broken);
+    const [a,b,d,e] = quads[q];
+    for(const [u,w] of [[a,b],[b,d],[d,e],[e,a]]){
+      const k = key(u,w); let s = uses.get(k);
+      if(!s){ s = {u, w, intact:0, torn:0}; uses.set(k, s); }
+      torn ? s.torn++ : s.intact++;
+    }
+  }
+  const adj = new Map(), quadAt = new Map();    // узел -> соседи по границе дыры; сторона -> целая ячейка
+  for(const s of uses.values()){
+    if(s.intact !== 1 || s.torn === 0) continue;
+    if(!adj.has(s.u)) adj.set(s.u, []);
+    if(!adj.has(s.w)) adj.set(s.w, []);
+    adj.get(s.u).push(s.w); adj.get(s.w).push(s.u);
+    quadAt.set(key(s.u, s.w), null);
+  }
+  if(!adj.size) return;
+  for(let q=0;q<quads.length;q++){              // целая ячейка каждой границы — для предела площади
+    if(quadCons[q].some(c=>c.broken)) continue;
+    const [a,b,d,e] = quads[q];
+    for(const [u,w] of [[a,b],[b,d],[d,e],[e,a]]){ const k = key(u,w); if(quadAt.has(k)) quadAt.set(k, q); }
+  }
+  const used = new Set();
+  for(const start of adj.keys()){
+    if(used.has(start)) continue;
+    const chain = [start]; used.add(start);
+    for(const first of adj.get(start)){          // от старта — в каждую сторону (у тупика одна, у цикла две)
+      let prev = start, cur = first;
+      if(used.has(cur)) continue;
+      const seg = [];
+      for(;;){
+        seg.push(cur); used.add(cur);
+        const nxt = adj.get(cur).filter(n => n !== prev && !used.has(n));
+        if(!nxt.length) break;
+        prev = cur; cur = nxt[0];
+      }
+      if(first === adj.get(start)[0]) chain.push(...seg); else chain.unshift(...seg);
+    }
+    if(chain.length >= 5){
+      const cells = new Set();
+      for(let i=0;i+1<chain.length;i++){ const q = quadAt.get(key(chain[i], chain[i+1])); if(q !== null) cells.add(q); }
+      const cyclic = adj.get(chain[0]).includes(chain[chain.length-1]);   // замкнутая петля вокруг дыры
+      holeChains.push({ nodes: chain, cells: [...cells], cyclic });
+    }
+  }
 }
 // Тап по краю листа (сборка 80, плейтест 17.11 п. 12: «четыре тапа по краю ничего не дали»): край под
 // пальцем дёргается наружу и возвращается — видно, что касание дошло и что край живой. Только рисунок
@@ -3800,6 +3865,43 @@ function rimDrawBase(){
       }
     }
     if(touched) guard();
+  }
+  // Край дыры — тот же шаг сетки, что и кромка: сглаживаем его тем же окном и с теми же
+  // пределами (сборка 81). Концы цепочки не трогаем: дыра, дорвавшаяся до внешней кромки,
+  // кончается на её узлах. Плавного откатa долей, как у внешней кромки, нет — дыры малы.
+  if(holeVer !== brokenCount()) buildHoleChains();
+  if(holeChains && holeChains.length){
+    for(const { nodes: ch, cells, cyclic } of holeChains){
+      const n = ch.length;
+      for(let ci = cyclic ? 0 : 1; ci < (cyclic ? n : n-1); ci++){
+        const m = cyclic ? RIM_K : Math.min(RIM_K, ci, n-1-ci);
+        let sx = 0, sy = 0, sw = 0;
+        for(let j=-m;j<=m;j++){ const w = m+1-(j<0?-j:j), id = ch[(ci+j+n)%n]; sx += w*px[id]; sy += w*py[id]; sw += w; }
+        dX[ch[ci]] = sx/sw; dY[ch[ci]] = sy/sw;
+      }
+      for(let ci = cyclic ? 0 : 1; ci < (cyclic ? n : n-1); ci++){   // предел сдвига: у дыры глубже зубцы
+        const id = ch[ci], ex = dX[id]-px[id], ey = dY[id]-py[id], e2 = ex*ex+ey*ey;   // (ячейка во внутрь), окно режет угол на целую
+        if(e2 === 0) continue;                        // ячейку — держит только предел площади ниже
+        const a = ch[(ci+n-1)%n], b = ch[(ci+1)%n];
+        const la = Math.hypot(px[a]-px[id], py[a]-py[id]), lb = Math.hypot(px[b]-px[id], py[b]-py[id]);
+        const lim = 1.2*(la < lb ? la : lb);
+        if(e2 > lim*lim){ const k = lim/Math.sqrt(e2); dX[id] = px[id]+ex*k; dY[id] = py[id]+ey*k; }
+      }
+      for(let t=0;t<RIM_STEPS;t++){                  // целая ячейка у дыры не схлопывается в рисунке
+        let bad = false;
+        for(const q of cells){
+          const [a,b,d,e] = quads[q];
+          const ap = (px[d]-px[a])*(py[e]-py[b]) - (px[e]-px[b])*(py[d]-py[a]);
+          const ad = (dX[d]-dX[a])*(dY[e]-dY[b]) - (dX[e]-dX[b])*(dY[d]-dY[a]);
+          if(ap !== 0 && ad/ap < RIM_AREA){
+            bad = true;
+            const k = t < RIM_STEPS-1 ? RIM_STEP : 0;
+            for(const id of [a,b,d,e]){ dX[id] = px[id]+(dX[id]-px[id])*k; dY[id] = py[id]+(dY[id]-py[id])*k; }
+          }
+        }
+        if(!bad) break;
+      }
+    }
   }
 }
 
@@ -4922,7 +5024,10 @@ function meanDry(){
   return n ? s/n : 0;
 }
 
-let SLAP_GROW = 0.24;            // сторона маха длиннее, но растёт весь лист (19.10.2026: было 0.12)
+let SLAP_GROW = 0.145;           // сторона маха длиннее, но растёт весь лист. Сборка 81: 0,24 давал
+                                  // готовность за 5–7 шлепков (плейтест 77, п. 9: «решают всё за пять
+                                  // касаний»); 0,145 — сектор доходит до пунктира на 8–10-м шлепке,
+                                  // готовность одними шлепками на 12–14-м, углы — тяга (Node, сборка 81)
 let lastSlapDir = null, sameSlapN = 0;
 const SAME_SLAP_COS = Math.cos(20*Math.PI/180);
 let TEAR_I = 3.4;                // с этой силы шлепок опасен…
@@ -4943,15 +5048,26 @@ function applyTearFeel(){
 
 // Рваная дырка на дальней стороне по направлению маха: рвём связи небольшого
 // пятна с неровным краем. Дырка остаётся навсегда — это узор, не наказание.
+// Сборка 81 (плейтест 77, п. 9): рвёт только шлепок, пришедшийся ПО УЖЕ ТОНКОМУ МЕСТУ —
+// тонкий узел ищется в конусе удара ±50° (дальняя сторона по маху, не центр листа),
+// и дырка мала: пятно в полторы ячейки вместо 2,4 (было 19 рваных ячеек за 5 шлепков).
+// Тонкого места в конусе нет — шлепок не рвёт, каким бы сильным ни был.
 function punchHole(direction){
   const c = centerOfSheet(), sr = sheetRadius();
-  const pxT = c.x + direction.x * sr * 0.8, pyT = c.y + direction.y * sr * 0.8;
-  let best = 0, bd = 1e18;
+  const th = Math.atan2(direction.y, direction.x);
+  let best = -1, bt = 1;
   for(let i=0;i<N;i++){
-    const d = (px[i]-pxT)**2 + (py[i]-pyT)**2;
-    if(d < bd){ bd = d; best = i; }
+    if(conDeg && conDeg[i] <= 0) continue;
+    const dx = px[i]-c.x, dy = py[i]-c.y, r = Math.hypot(dx, dy);
+    if(r < sr*0.25 || r > sr*1.15) continue;        // не центр и не улетевший осколок
+    let dth = Math.atan2(dy, dx) - th;
+    while(dth > Math.PI) dth -= 2*Math.PI;
+    while(dth < -Math.PI) dth += 2*Math.PI;
+    if(Math.abs(dth) > Math.PI/3.6) continue;       // конус удара ±50°
+    if(thick[i] < bt){ bt = thick[i]; best = i; }
   }
-  const rad = (Math.max(R0, sheetRadius())*2/(GRID-1)) * 2.4;   // пятно в шагах ТЕКУЩЕЙ сетки
+  if(best < 0 || bt >= TEAR_THIN) return false;     // тонкого места под ударом нет
+  const rad = (Math.max(R0, sheetRadius())*2/(GRID-1)) * 1.5;   // маленькое пятно в шагах ТЕКУЩЕЙ сетки
   let torn = 0;
   for(let k2=0;k2<cons.length;k2++){
     const c2 = cons[k2]; if(c2.broken) continue;
@@ -4960,6 +5076,7 @@ function punchHole(direction){
     if(d < rad * (0.65 + Math.random()*0.5)){ if(breakCon(c2)) torn++; }  // неровный край
   }
   if(torn) onTear();
+  return torn > 0;
 }
 function impactAction(){
   action.state = "IMPACT";
@@ -4981,14 +5098,11 @@ function impactAction(){
     lastSlapDir = { x:action.direction.x, y:action.direction.y };
   }
   // Дырка рождается из перестарательности: сильный шлепок по уже тонкому листу
-  // рвёт дальнюю сторону. Глобальный порог толщины стили не разводит — средний и
-  // жёсткий стили приходят к одинаковой толщине (замер: 0.108 против 0.083),
-  // поэтому судим по паре «сила удара × текущая тонкость» (audit: «слабый,
-  // хороший, опасный результат»).
-  if(action.impulse >= TEAR_I){
-    let tmin = 1; for(let i=0;i<N;i++) if(thick[i]<tmin) tmin = thick[i];
-    if(tmin < TEAR_THIN && slapShareMean() >= SLAP_TEAR_SHARE) punchHole(action.direction);
-  }
+  // рвёт дальнюю сторону. Сборка 81: тонкость судится МЕСТОМ — конусом удара в punchHole,
+  // а не минимумом по всему листу: «шлепок по уже тонкому месту», дырка маленькая и у края.
+  // Порог по силе (TEAR_I) и доля роста (SLAP_TEAR_SHARE) прежние: шлепок, который лист
+  // уже не растит, не рвёт; средний шлепок (2,3 < 3,4) не рвёт никогда.
+  if(action.impulse >= TEAR_I && slapShareMean() >= SLAP_TEAR_SHARE) punchHole(action.direction);
   audioSlap(action.impulse);
   plasticT = 0.15;
   action.timer = 0.30;             // успокоение = релаксация в новые длины покоя
@@ -6277,6 +6391,28 @@ let PAL = buildPal();
 function buildPal(){ return Array.from({length:16}, (_,i)=>{ const c = mix(i/15); return `rgb(${c[0]},${c[1]},${c[2]})`; }); }
 function quant(t){ return PAL[Math.max(0,Math.min(15, Math.round(t*15)))]; }
 
+// ── Сборка 81: тесто НА СТОЛЕ — светлое и тёплое, тонкость видна прозрачностью ──
+// Плейтест 77 (п. 8): лист на столе был тёмно-хаки rgb(96,87,68) — mix() при толщине
+// растянутого листа (~0,1) даёт всего 26 % пигмента. Теперь пигмент светлый всегда,
+// а толщина показывает себя альфой: где тоньше, сквозь тесто проступает доска.
+// Совсем тонкое (у порога разрыва) выцветает к светлому и почти прозрачному —
+// предупреждение без мигания и значков. На таве лист рисуется иначе (mixOn + прожарка)
+// и не тронут. Рваный край и так рисуется плотнее (t + 0,28 у порванных ячеек).
+const DOUGH_PALE = [250, 242, 216];   // выцветший пигмент самого тонкого теста
+const TEAR_VIEW = 0.004;              // ниже этой толщины лист в рисунке почти прозрачен (порог разрыва 0,003)
+const TABLE_ALPHA_TOP = 0.20;         // толще — непрозрачно: диск и толстые места светятся собой
+function tableAlpha(t){
+  const k = Math.max(0, Math.min(1, (t - TEAR_VIEW) / (TABLE_ALPHA_TOP - TEAR_VIEW)));
+  return 0.05 + 0.95 * Math.sqrt(k);   // 0,12 → 0,78 · 0,05 → 0,52 · 0,02 → 0,33 · у порога → 0,05
+}
+// rim: 1 — ячейка кромки: плотнее (альфа выше) и светлее, как толстый край в жизни
+function tableSkin(t, rim = 0){
+  const a = Math.min(1, tableAlpha(t) + 0.10 * rim);
+  const pale = Math.max(0, Math.min(1, 1 - t / TABLE_ALPHA_TOP)) * 0.45 + 0.25 * rim;
+  const c = [0, 1, 2].map(k => Math.round(DOUGH[k] + (DOUGH_PALE[k] - DOUGH[k]) * pale));
+  return `rgba(${c[0]},${c[1]},${c[2]},${a.toFixed(3)})`;
+}
+
 // На таве тонкое тесто просвечивает уже не столом, а дном тавы, и поверх ложится прожарка:
 // сырое → золотистое → коричневое → тёмное. Тёмное — не провал (см. docs/frying-mechanics.md).
 const PAN_BG_DEFAULT = [66, 58, 48];
@@ -6437,15 +6573,14 @@ function draw(){
         let s=0,n=0; for(let i=0;i<N;i++){ if(conDeg && conDeg[i]<=0) continue; s+=Hmap[i]; n++; }
         if(n) base = Math.max(0.28, s/n);
       }
-      const col = mix(base);
-      g.fillStyle = `rgb(${col[0]},${col[1]},${col[2]})`;
+      g.fillStyle = tableSkin(base);
       g.fill();
       for(let q=0;q<quads.length;q++){
         const [a,b2,c,d] = quads[q];
         const t = (Hmap[a]+Hmap[b2]+Hmap[c]+Hmap[d])/4;
         if(t > 0.96) continue;
-        const c2 = mix(t);
-        g.fillStyle = `rgb(${c2[0]},${c2[1]},${c2[2]})`;
+        if(quadCons[q].some(cc=>cc.broken)) continue;   // дыра и в «круглом» виде — дыра: сквозь неё стол
+        g.fillStyle = tableSkin(t, rimEdgeQ ? rimEdgeQ[q] : 0);
         const Pa=Pnt(a), Pb=Pnt(b2), Pc=Pnt(c), Pd=Pnt(d);
         g.beginPath();
         g.moveTo(Pa.x,Pa.y); g.lineTo(Pb.x,Pb.y); g.lineTo(Pc.x,Pc.y); g.lineTo(Pd.x,Pd.y);
@@ -6484,8 +6619,9 @@ function draw(){
           const ck = (cook[a]+cook[b2]+cook[c]+cook[d])/4;
           g.fillStyle = pixelated ? quantOn(t, ck) : shadeOn(t, ck);
         } else {
-          const col = mix(t);
-          g.fillStyle = `rgb(${col[0]},${col[1]},${col[2]})`;
+          // Сборка 81: на столе тесто светлое, тонкость — прозрачностью (стол проступает),
+          // кромка плотнее и светлее; ячейки кромки знает buildRimLoop (rimEdgeQ).
+          g.fillStyle = tableSkin(t, rimEdgeQ ? rimEdgeQ[q] : 0);
         }
       }
       const Pa=Pnt(a), Pb=Pnt(b2), Pc=Pnt(c), Pd=Pnt(d);

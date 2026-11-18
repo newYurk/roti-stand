@@ -301,12 +301,19 @@ const D = Math.PI / 4;
 const midSlap = (h, i) => slap(h, i, 2.3), strongSlap = (h, i) => slap(h, i, 3.5);
 const inverted = h => h.metrics().invertedQuads;
 function untilReady(h, gesture, max) { let n = 0; while (n < max && h.run('stepNo') === 2 && h.run('phase') === 'TABLE') { gesture(n); n++; } return n; }
-test('T8a', 'tempo, slaps only: ready in 5–7 moderate slaps', () => {
-  const a = fresh(), slaps = untilReady(a, i => midSlap(a, i), 14), sa = shape(a);
-  const a2 = fresh(), strong = untilReady(a2, i => strongSlap(a2, i), 14);
-  const out = { slapsToReady: slaps, strongSlapsToReady: strong, shape: sa,
-    summary: `ready in ${slaps} moderate slaps (2.3) or ${strong} at the force ceiling (3.5); fill ${r3(sa.fill)}, squareness ${r3(sa.squareness)}, inverted ${sa.inverted}` };
-  if (!(slaps >= 5 && slaps <= 7 && sa.step === 3)) failWith(out, out.summary);
+test('T8a', 'tempo, slaps only: ready in 12–14 moderate slaps, the first sector reaches the dashes on the 8th–10th, corners stay rounded', () => {
+  // Build 81 (spec §2): a weaker slap is the vendor's rhythm — the dashes in 8–10 slaps,
+  // ready by slaps alone later (12–14), the corners are the pulls' work and stay rounded.
+  const a = fresh(); let dashAt = null;
+  const slaps = untilReady(a, i => { midSlap(a, i);
+    if (dashAt === null) { const mx = a.run(`(()=>{rimProfile();let m=0;for(let b=0;b<RIM_BINS;b++){const th=(b+0.5)/RIM_BINS*2*Math.PI-Math.PI;if(rimProf[b]/targetAt(th)>m)m=rimProf[b]/targetAt(th)}return m})()`);
+      if (mx >= 0.995) dashAt = i + 1; } }, 18);
+  const sa = shape(a);
+  const a2 = fresh(), strong = untilReady(a2, i => strongSlap(a2, i), 18);
+  const out = { slapsToReady: slaps, firstSectorAtDashes: dashAt, strongSlapsToReady: strong, shape: sa,
+    summary: `first sector at the dashes after slap ${dashAt}, ready after ${slaps} moderate slaps (2.3) or ${strong} at the ceiling (3.5); fill ${r3(sa.fill)}, corner/side ${r3(sa.squareness)}, corners ticked ${sa.corners}, inverted ${sa.inverted}` };
+  if (!(dashAt >= 8 && dashAt <= 10 && slaps >= 12 && slaps <= 14 && sa.step === 3)) failWith(out, out.summary);
+  if (!(sa.corners === 0 && sa.squareness <= 1.18)) failWith(out, 'slaps alone must leave rounded corners: ' + out.summary);
   return out;
 });
 test('T8b', 'tempo, pulls only walking around 8 directions: ready in 8–12 pulls', () => {
@@ -316,11 +323,11 @@ test('T8b', 'tempo, pulls only walking around 8 directions: ready in 8–12 pull
   if (!(pulls >= 8 && pulls <= 12 && sb.step === 3)) failWith(out, out.summary);
   return out;
 });
-test('T8c', 'tempo, mix: 4 moderate slaps + 12 corner pulls reach step 3', () => {
-  const c = fresh(); for (let i = 0; i < 4; i++) midSlap(c, i);
+test('T8c', 'tempo, mix: 8 moderate slaps + 12 corner pulls reach step 3 (the pulls finish the corners)', () => {
+  const c = fresh(); for (let i = 0; i < 8; i++) midSlap(c, i);
   let n = 0, at = null; for (let i = 0; i < 12 && c.run('phase') === 'TABLE'; i++, n++) { pull(c, D + i * 2 * D, 2.4, 1.5); if (at === null && c.run('stepNo') === 3) at = i + 1; }
-  const sc = shape(c), out = { readyAfterPulls: at, shape: sc, summary: `step ${sc.step} after 4 slaps + ${at === null ? '—' : at} corner pulls; fill ${r3(sc.fill)}, squareness ${r3(sc.squareness)}, corners ticked ${sc.corners}` };
-  if (sc.step !== 3) failWith(out, out.summary);
+  const sc = shape(c), out = { readyAfterPulls: at, shape: sc, summary: `step ${sc.step} after 8 slaps + ${at === null ? '—' : at} corner pulls; fill ${r3(sc.fill)}, squareness ${r3(sc.squareness)}, corners ticked ${sc.corners}` };
+  if (!(sc.step === 3 && sc.corners === 4)) failWith(out, out.summary);
   return out;
 });
 // ── T9: the square ────────────────────────────────────────────────────────────────────────────
@@ -328,15 +335,16 @@ test('T8c', 'tempo, mix: 4 moderate slaps + 12 corner pulls reach step 3', () =>
 // former "steady 60 Hz swipe" check: 0, 4, 8, 13, 13 after five swipes). So the spec's "inverted 0"
 // is asserted for what the PULLS add; what the four slaps left is reported next to it.
 function squareRun(w, hh) {
-  const h = fresh(w, hh); for (let i = 0; i < 4; i++) midSlap(h, i);
+  const h = fresh(w, hh); for (let i = 0; i < 8; i++) midSlap(h, i);
   const afterSlaps = inverted(h); let fromPulls = 0, real = 0;
   for (let i = 0; i < 12 && h.run('phase') === 'TABLE'; i++) { const b = inverted(h), r = pull(h, D + i * 2 * D, 2.4, 1.5); fromPulls += Math.max(0, inverted(h) - b); if (r.kind === 'pull') real++; }
   h.tick(60); return { ...shape(h), invertedAfterSlaps: afterSlaps, invertedFromPulls: fromPulls, pullsCommitted: real };
 }
-test('T9', 'square: 4 slaps + 12 corner pulls, portrait and landscape', () => {
+test('T9', 'square: 8 slaps + 12 corner pulls, portrait and landscape', () => {
   // Median thickness is compared at EQUAL AREA (review 17.11, P8): a square that fills the target is
   // larger than the disc that fills it, hence thinner; thickness × area is what must agree.
-  const ref = fresh(); untilReady(ref, i => midSlap(ref, i), 14); const rs = shape(ref), band = rs.medianThickness, refArea = rs.areaOverDisc;
+  // Build 81: 8 moderate slaps bring the sides to the dashes, the pulls square the corners.
+  const ref = fresh(); untilReady(ref, i => midSlap(ref, i), 18); const rs = shape(ref), band = rs.medianThickness, refArea = rs.areaOverDisc;
   const rows = { portrait: squareRun(390, 844), landscape: squareRun(844, 390) }, bad = [];
   for (const [name, s] of Object.entries(rows)) {
     if (!(s.fill >= 0.92)) bad.push(`${name}: fill ${r3(s.fill)}`);
@@ -385,18 +393,20 @@ test('T9b', `convergence: ${FULL ? 200 : 12} seeded random sequences of pulls an
   if (bad.length) failWith({ ...out, bad }, out.summary);
   return out;
 });
-// Asserted for nine MODERATE slaps (ready takes six). Nine slaps at the force ceiling are reported
-// only: the sheet is shredded by then, and what still grows past the cap is creep()/evenOut(),
-// whose cut-off the spec told not to touch (§7).
-test('T9c', 'cap: 9 slaps, then 10 pulls on a finished side', () => {
-  const h = fresh(); for (let i = 0; i < 9 && h.run('phase') === 'TABLE'; i++) midSlap(h, i);
+// The finished side is BUILT (slaps + pulls until the stand refuses that side), then ten pulls on
+// it must do nothing. Ready by slaps alone takes 12–14 (build 81), so the side is finished with a
+// few pulls; slaps at the force ceiling are reported only (the sheet is shredded by then, and what
+// still grows past the cap is creep()/evenOut(), whose cut-off the spec told not to touch §7).
+test('T9c', 'cap: slaps + pulls finish a side, then 10 more pulls on it', () => {
+  const h = fresh(); for (let i = 0; i < 8 && h.run('phase') === 'TABLE'; i++) midSlap(h, i);
+  let finishers = 0; for (let i = 0; i < 12; i++) { const r = pull(h, 0, 1.2, 1.5); if (r.kind === 'none') break; finishers++; }
   h.tick(60); const s0 = shape(h), rest0 = restSum(h), rows = [];
   for (let i = 0; i < 10; i++) { const r = pull(h, 0, 1.2, 1.5); rows.push({ kind: r.kind, decision: r.decision, restSum: restSum(h) }); }
   h.tick(60); const s1 = shape(h);
-  const x = fresh(); for (let i = 0; i < 9 && x.run('phase') === 'TABLE'; i++) strongSlap(x, i);
+  const x = fresh(); for (let i = 0; i < 10 && x.run('phase') === 'TABLE'; i++) strongSlap(x, i);
   x.tick(60); const sx = shape(x);
-  const out = { afterSlaps: s0, afterPulls: s1, pulls: rows.map(r => r.kind + ' · ' + r.decision), restDrift: restSum(h) / rest0 - 1, nineCeilingSlaps: sx,
-    summary: `after 9 moderate slaps: side max ${r3(s0.sideMax)}, corner max ${r3(s0.cornerMax)} targetR, holes ${s0.holes}; 10 pulls on the side: ${JSON.stringify(count(rows, 'kind'))}, rest length sum changed by ${(restSum(h) / rest0 - 1).toExponential(2)}; then side max ${r3(s1.sideMax)}, corner max ${r3(s1.cornerMax)}. Not asserted — 9 slaps at the force ceiling: side max ${r3(sx.sideMax)}, corner max ${r3(sx.cornerMax)}, holes ${sx.holes}` };
+  const out = { finisherPulls: finishers, afterSlaps: s0, afterPulls: s1, pulls: rows.map(r => r.kind + ' · ' + r.decision), restDrift: restSum(h) / rest0 - 1, tenCeilingSlaps: sx,
+    summary: `after 8 slaps + ${finishers} finisher pulls: side max ${r3(s0.sideMax)}, corner max ${r3(s0.cornerMax)} targetR, holes ${s0.holes}; 10 pulls on the side: ${JSON.stringify(count(rows, 'kind'))}, rest length sum changed by ${(restSum(h) / rest0 - 1).toExponential(2)}; then side max ${r3(s1.sideMax)}, corner max ${r3(s1.cornerMax)}. Not asserted — 10 slaps at the force ceiling: side max ${r3(sx.sideMax)}, corner max ${r3(sx.cornerMax)}, holes ${sx.holes}` };
   if (!(s1.sideMax <= 1.15 && s1.cornerMax <= 1.25 && s0.sideMax <= 1.15 && s0.cornerMax <= 1.25) || !s1.finite) failWith(out, out.summary);
   // the pulls beyond the cap must be "short": no log entry, rest lengths unchanged
   // (between the pulls the solver's own evenOut()/creep() still run, so the sum is compared to 1e-3, not bit-for-bit;
@@ -430,6 +440,38 @@ test('T9i', 'slaps stop at the dashes: 14 moderate slaps; 14 slaps at the force 
   if (!(worst <= 1.05 && sa.binMin >= 0.85 && sa.squareness <= 1.18 && sa.inverted === 0 && sa.finite)) failWith(out, out.summary);
   if (!(worstC <= 1.07 && sc.finite) || sa.chord || chordC || sc.chord) failWith(out, out.summary);
   if (!(Math.max(after, ...track) <= 1.05 && sb.binMax <= 1.05 && sb.finite)) failWith(out, out.summary);
+  return out;
+});
+// ── T9j: build 81 — the slap rhythm and the tear rule ────────────────────────────────────────
+// Spec §2: 8 moderate slaps make no holes (a novice does not tear the sheet); the tear is a
+// ceiling slap that lands on an already thin place — one SMALL hole AT THE RIM; pulls never tear.
+const holesOf = h => +h.run('quadCons.filter(cs=>cs.some(c=>c.broken)).length');
+test('T9j', 'slaps: 8 moderate slaps leave no holes; a ceiling slap tears once, small, at the rim of the impact side; a moderate slap and pulls on the same thin sheet tear nothing', () => {
+  const a = fresh(); let worst = 0;
+  for (let i = 0; i < 8; i++) { midSlap(a, i); worst = Math.max(worst, holesOf(a)); }
+  const sa = shape(a);
+  const bad = [];
+  if (worst !== 0) bad.push(`8 moderate slaps made ${worst} torn cells`);
+  // ceiling slaps until the sheet tears: one punch, small, near the rim of the slapped side
+  const b = fresh(); let n = 0;
+  for (; n < 10 && !holesOf(b); n++) strongSlap(b, n);
+  const tb = JSON.parse(b.run(`(()=>{const torn=quadCons.map((cs,q)=>cs.some(c=>c.broken)?q:-1).filter(q=>q>=0);
+    const c=centerOfSheet();let x=0,y=0;for(const q of torn){for(const i of quads[q]){x+=px[i];y+=py[i];}}
+    x/=torn.length*4;y/=torn.length*4;const r=Math.hypot(x-c.x,y-c.y),th=Math.atan2(y-c.y,x-c.x);
+    rimProfile();const rim=rimProf[rimBin(th)];
+    return JSON.stringify({slaps:${n},torn:torn.length,atRim:+(r/rim).toFixed(2)})})()`));
+  if (!(tb.torn > 0 && tb.torn <= 8)) bad.push(`the tear left ${tb.torn} torn cells (expected a small hole)`);
+  if (!(tb.atRim >= 0.65)) bad.push(`the hole sits at ${tb.atRim} of the rim (expected near the edge)`);
+  // the same thin sheet: one more moderate slap and four long pulls add no holes
+  const before = holesOf(b);
+  midSlap(b, 10);
+  const afterMod = holesOf(b);
+  for (let k = 0; k < 4; k++) pull(b, k * Math.PI / 2 + 0.4, 1.5, 1.2);
+  const afterPull = holesOf(b);
+  if (!(afterMod === before && afterPull === before)) bad.push(`on the thin sheet: moderate slap ${before}→${afterMod}, pulls →${afterPull} torn cells`);
+  const out = { eightModerate: { worst, fill: r3(sa.fill), step: sa.step }, tear: tb, after: { before, afterMod, afterPull },
+    summary: `8 moderate slaps: worst ${worst} torn cells, fill ${r3(sa.fill)}; ceiling slaps: first tear at slap ${tb.slaps}, ${tb.torn} cells at ${tb.atRim} of the rim; on the thin sheet a moderate slap and 4 pulls added ${afterPull - before} holes` };
+  if (bad.length) failWith({ ...out, bad }, bad.join('; '));
   return out;
 });
 test('T9d', 'short pull and touch cancel restore the mesh and the rest lengths bit-for-bit', () => {
@@ -502,6 +544,36 @@ test('T9h', 'oblique pulls from a side mid-point (0 / 20 / 40 / 60° off the rad
   }
   const out = { rows, summary: rows.map(r => `${r.offDeg}°: ${r.kinds}, sectors max ${r.binMaxBefore} → ${r.binMax}, inverted +${r.inverted}, corners ${r.corners}`).join('; ') };
   if (rows.some(r => r.binMax > 1.08 || r.inverted > 0 || r.corners > 0) || !/p/.test(rows[0].kinds)) failWith(out, out.summary);
+  return out;
+});
+// ── T9t: build 81 — thinness on the table shows as transparency ───────────────────────────────
+// Spec §1: light warm dough (not khaki), the board shows through where the sheet is thinner,
+// the near-tear zone fades to almost transparent, the rim is denser and lighter. The pan
+// (mixOn + cook) is another branch's work and is not touched here.
+test('T9t', 'table skin: alpha grows with thickness, near-tear almost transparent, rim denser and lighter; the sheet on the table draws rgba', () => {
+  const h = fresh();
+  const skin = (t, rim = 0) => h.run(`tableSkin(${t},${rim})`);
+  const alpha = s => +s.match(/([\d.]+)\)$/)[1];
+  const lum = s => { const m = s.match(/rgba\(([\d.]+),([\d.]+),([\d.]+),/); return +m[1] + +m[2] + +m[3]; };
+  const ts = [0.004, 0.006, 0.01, 0.02, 0.05, 0.1, 0.15, 0.3, 1], as_ = ts.map(t => alpha(skin(t)));
+  const bad = [];
+  if (!as_.every((a, i) => i === 0 || a >= as_[i - 1] - 1e-9)) bad.push(`alpha not monotone: ${as_.join(' ')}`);
+  if (!(as_[0] <= 0.08 && as_[1] <= 0.20)) bad.push(`near-tear not almost transparent: ${as_[0]}, ${as_[1]}`);
+  if (!(as_[5] >= 0.6 && as_[7] >= 0.99)) bad.push(`stretched sheet not light enough: t=0.1 → ${as_[5]}, t=0.3 → ${as_[7]}`);
+  if (!(alpha(skin(0.1, 1)) > alpha(skin(0.1)) && lum(skin(0.1, 1)) > lum(skin(0.1)))) bad.push('rim not denser and lighter');
+  // drawn on the table: rgba fillStyles whose alpha follows the thickness (no opaque khaki path left)
+  h.run('thick.fill(0.12);draw();');
+  const fills1 = h.drawCalls.filter(c => c.fillStyle && String(c.fillStyle).startsWith('rgba')).map(c => alpha(c.fillStyle));
+  h.drawCalls.length = 0;
+  h.run('thick.fill(0.004);draw();');
+  const fills2 = h.drawCalls.filter(c => c.fillStyle && String(c.fillStyle).startsWith('rgba')).map(c => alpha(c.fillStyle));
+  const rgb_ = h.drawCalls.filter(c => c.fillStyle && String(c.fillStyle).startsWith('rgb(')).length;   // holes are #100a06 (hex), not rgb()
+  if (fills1.length < 100 || fills2.length < 100) bad.push(`draw fills rgba ${fills1.length}/${fills2.length}`);
+  if (Math.min(...fills1) < 0.55) bad.push(`t=0.12 drawn alpha min ${Math.min(...fills1)}`);
+  if (Math.max(...fills2) > 0.15) bad.push(`near-tear t=0.004 drawn alpha max ${Math.max(...fills2)}`);
+  const out = { alpha: as_.join(' '), rimAlpha: [alpha(skin(0.1)), alpha(skin(0.1, 1))].join(' '), drawn: { t012: [Math.min(...fills1), Math.max(...fills1)], t0004: [Math.min(...fills2), Math.max(...fills2)], rgbPaths: rgb_ },
+    summary: `alpha ${as_.join(' ')}; rim ${alpha(skin(0.1))}→${alpha(skin(0.1, 1))}, lum ${lum(skin(0.1))}→${lum(skin(0.1, 1))}; drawn alpha t=0.12 ${Math.min(...fills1)}…${Math.max(...fills1)}, t=0.004 ${Math.min(...fills2)}…${Math.max(...fills2)}` };
+  if (bad.length) failWith({ ...out, bad }, bad.join('; '));
   return out;
 });
 
