@@ -284,18 +284,55 @@ test('G5', 'touching the edge of the roti on the tava without a flick lifts that
   let up = 0, frames = 0; while (h.run('!!cornerLift') && frames < 60) { h.tick(1, 1 / 60, true); up = Math.max(up, h.run('cornerLift?cornerLiftAmount():0')); frames++; }
   assert.ok(up > 0.9, `the corner rose (${r3(up)})`); assert.ok(frames >= 20 && frames <= 30, `a tap lifts it for about 0.4 s (${frames} frames)`);
   // a hold: up while the finger stays, the underside is the steel side (browned), down after release
-  h.touch('start', 't1', e.x, e.y); h.frames(40); h.tick(1, 1 / 60, true);
+  // the hold lands at ¾ of the right side: the lower right corner must be the one that lifts
+  const e2 = h.J(`(()=>{const b=dishBounds();return __harness.dishToClient({x:b.right-0.02,y:b.top+(b.bottom-b.top)*.75})})()`);
+  h.touch('start', 't1', e2.x, e2.y); h.frames(40); h.tick(1, 1 / 60, true);
   const held = h.run('cornerLiftAmount()'), cap = h.J('(()=>{const c=cornerLiftCap();return c?c.P.length:0})()');
-  const under = h.J('cornerUnderColor()'), top = h.J('(()=>{const L=cornerLift,q={x:L.a.x+L.n.x*.03,y:L.a.y+L.n.y*.03};const f=dish.faces.filter(f=>f.kind==="dough"&&pointInFace(f.points,q.x,q.y)).at(-1);return dishCrustColor(f)})()');
+  const under = h.J('cornerUnderColor()'), top = h.J('cornerTopColor(cornerLiftCap().mid)');
   assert.ok(held > 0.99, `held 0.7 s: still up (${r3(held)})`); assert.ok(cap >= 3, 'the lifted cap is a polygon');
+  // round 2: only the corner nearest the finger — a small triangle (legs ≈ ¼ side), not a strip of the side
+  const geo = h.J(`(()=>{const c=cornerLiftCap(),H=dish.hull,a=cornerLift.a;let near=Infinity;for(const p of H)near=Math.min(near,Math.hypot(p.x-a.x,p.y-a.y));
+    return {frac:polyArea(c.P)/polyArea(H),vd:Math.hypot(c.V.x-a.x,c.V.y-a.y)/c.side,reach:c.reach/c.side,hullPts:H.length,vx:(c.V.x-(Math.min(...H.map(p=>p.x))+Math.max(...H.map(p=>p.x)))/2)/c.side,vy:(c.V.y-(Math.min(...H.map(p=>p.y))+Math.max(...H.map(p=>p.y)))/2)/c.side}})()`);
+  assert.ok(geo.frac > 0.01 && geo.frac < 0.06, `the cap is a small corner: ${r3(geo.frac)} of the roti area`);
+  assert.ok(geo.vd < 0.35 && geo.vy > 0.3 && geo.vx > 0.3, `the lifted corner is the one near the finger: ${r3(geo.vd)} side away`);
+  assert.ok(geo.reach < 0.3, `the cap reaches ${r3(geo.reach)} side from the hinge (a strip of the side would be wider)`);
   assert.ok(lum(under) < lum(top) - 10, `the underside is browner than the top: ${lum(under).toFixed(0)} vs ${lum(top).toFixed(0)}`);
-  h.touch('end', 't1', e.x, e.y); h.frames(12); h.tick(1, 1 / 60, true);
+  h.touch('end', 't1', e2.x, e2.y); h.frames(12); h.tick(1, 1 / 60, true);
   assert.equal(h.run('!!cornerLift'), false, 'released: it lies down');
   assert.equal(h.run('dish.flips||0'), flips0, 'no flip'); assert.equal(h.run('JSON.stringify(dish.faces.map(f=>f.points))'), faces0, 'the material did not change');
   assert.equal(h.run('loopErrs'), 0);
   flick(h); assert.equal(h.run('dish.flips'), flips0 + 1, 'a flick from the edge flips');
   assert.deepEqual(h.errors, []);
-  return { summary: `tap: up to ${r3(up)} for ${frames} frames; hold 0.7 s: ${r3(held)}, cap ${cap} points, underside lum ${lum(under).toFixed(0)} vs top ${lum(top).toFixed(0)}; down after release; flips ${flips0} → ${h.run('dish.flips')} by a flick` };
+  return { summary: `tap: up to ${r3(up)} for ${frames} frames; hold 0.7 s: ${r3(held)}, cap ${cap} points, ${r3(geo.frac)} of the area, corner ${r3(geo.vd)} side from the finger, reach ${r3(geo.reach)} side, underside lum ${lum(under).toFixed(0)} vs top ${lum(top).toFixed(0)}; down after release; flips ${flips0} → ${h.run('dish.flips')} by a flick` };
+});
+
+// ── G6: a torn sheet carried to the tava becomes a roti (round 2) ─────────────────────────────
+// buildHoleChains joined the second branch of a hole edge unreversed: the join cell was undefined and
+// rimDraw threw on every frame once the torn sheet landed (also in build 87). The tear is the real one:
+// fast edge swipes (110 px in 0.08 s, like runs/merge-gesture/gesture88.py) with the random stream
+// advanced by 4·97 draws tear at slap 8 here.
+test('G6', 'a sheet torn by fast slaps, carried to the tava, lands as a roti and draws without errors; every hole chain is a path of boundary edges', () => {
+  const h = evening(); h.run('for(let i=0;i<388;i++)Math.random()'); light(h); flatten(h);
+  const dirs = [0, Math.PI / 2, Math.PI, -Math.PI / 2, Math.PI / 4, 3 * Math.PI / 4, -3 * Math.PI / 4, -Math.PI / 4];
+  const torn = () => +h.run('quadCons.filter(cs=>cs.some(c=>c.broken)).length');
+  let n = 0;
+  for (let i = 0; i < 14 && h.run('stepNo') === 2 && !torn(); i++, n++) {
+    const ang = dirs[i % 8] + (i >= 8 ? 0.2 : 0) + 0.4;
+    const p0 = h.J(`(()=>{const c=centerOfSheet(),R=sheetRadius();return __harness.toClient(c.x+Math.cos(${ang})*R*.93,c.y+Math.sin(${ang})*R*.93)})()`);
+    const c = h.J('__harness.toClient(centerOfSheet().x,centerOfSheet().y)');
+    const d = Math.hypot(p0.x - c.x, p0.y - c.y), dx = (p0.x - c.x) / d, dy = (p0.y - c.y) / d;
+    const pts = [{ x: p0.x, y: p0.y, t: 0 }]; for (let k = 1; k <= 5; k++) pts.push({ x: p0.x + dx * 110 * k / 5, y: p0.y + dy * 110 * k / 5, t: 130 + k * 1000 / 60 });
+    pts.push({ x: pts[5].x, y: pts[5].y, t: 130 + 5 * 1000 / 60 + 50 });
+    drive(h, pts, { settle: 48 });
+  }
+  assert.ok(torn() > 0, `the fast slaps tore the sheet (after ${n})`);
+  const chains = h.J(`(buildHoleChains(),holeChains.map(c=>({bad:c.cells.filter(q=>!quads[q]).length,gaps:c.nodes.slice(1).filter((v,i)=>!quads.some(s=>{const u=c.nodes[i];return [[s[0],s[1]],[s[1],s[2]],[s[2],s[3]],[s[3],s[0]]].some(([a,b])=>a===u&&b===v||a===v&&b===u)})).length,len:c.nodes.length})))`);
+  for (const c of chains) { assert.equal(c.bad, 0, 'no undefined cell in a hole chain'); assert.equal(c.gaps, 0, 'consecutive chain nodes share a cell side'); }
+  toPan(h);
+  for (let f = 0; f < 20; f++) h.tick(1, 1 / 60, true);
+  assert.equal(h.run('!!dish && dish.mode==="fold"'), true, 'the torn sheet is a roti on the tava');
+  assert.equal(h.run('loopErrs'), 0); assert.deepEqual(h.errors, []);
+  return { summary: `torn after ${n} fast slaps (${torn()} cells), hole chains ${chains.map(c => c.len).join('/')} nodes, no gaps; on the tava: dish ${h.run('dish.mode')}, holes ${h.run('dish.holes')}, frame errors 0` };
 });
 
 const passed = results.filter(r => r.status === 'PASS').length;

@@ -3363,11 +3363,11 @@ function edgeFrame(d){
   return {tx:d.edge.dx/len, ty:d.edge.dy/len, nx:d.inward.x, ny:d.inward.y, a:d.anchor};
 }
 // ─── Поддетый угол (сборка 88, видимый жест: разбор 17.11, п. 4) ───
-// Касание края роти на таве без маха поднимает угол: шапка листа у точки касания поворачивается
-// на петле поперёк луча от середины на CORNER_LIFT_DEG и показывает низ — сторону на стали с её
-// румянцем. Держит палец — угол поднят; отпустила — ложится; короткое касание длится CORNER_LIFT_S.
+// Касание края роти на таве без маха поднимает ближайший к пальцу угол конверта: небольшой треугольник
+// сворачивается завитком (кончик — на CORNER_LIFT_DEG) и показывает низ — сторону на стали с её
+// румянцем; под ним на таве мягкая тень. Держит палец — угол поднят; отпустила — ложится; короткое касание длится CORNER_LIFT_S.
 // Только картинка: материал, тепло и контакт не меняются, переворота нет.
-const CORNER_LIFT_S = 0.4, CORNER_LIFT_UP = 0.1, CORNER_LIFT_DOWN = 0.15, CORNER_LIFT_DEG = 125;
+const CORNER_LIFT_S = 0.4, CORNER_LIFT_UP = 0.1, CORNER_LIFT_DOWN = 0.15, CORNER_LIFT_DEG = 160;
 let cornerLift = null;             // {a,n,R,t0,up}: точка кромки, внутренняя нормаль к середине, отпускание
 function cornerLiftAmount(now=performance.now()){
   const L=cornerLift; if(!L) return 0;
@@ -3378,34 +3378,77 @@ function cornerLiftAmount(now=performance.now()){
   if(k<=0){ cornerLift=null; return 0; }
   return Math.min(rise,k)*Math.min(rise,k)*(3-2*Math.min(rise,k));
 }
-// Шапка угла в координатах блюда: часть оболочки за петлёй, не шире ±0,6 расстояния до середины.
+// Шапка угла в координатах блюда (раунд 2: была полоса стороны — «крышка коробки»). Теперь — только угол
+// конверта, ближайший к пальцу: треугольник, катеты — CORNER_LIFT_LEG стороны вдоль каждой кромки от угла
+// (сторона ≈ √площади оболочки), петля — прямая через концы катетов. Угол — вершина оболочки, где кромка
+// поворачивает больше CORNER_LIFT_TURN на отрезке ±0,1 стороны (скруглённый угол тоже угол).
+const CORNER_LIFT_LEG = 0.25, CORNER_LIFT_TURN = 30*Math.PI/180;
 function cornerLiftCap(){
   const L=cornerLift, H=dish.hull; if(!L || !H || H.length<3) return null;
-  const {a,n}=L, t={x:-n.y,y:n.x}, depth=Math.min(.22,.42*L.R), half=.6*L.R;
-  const hinge=a.x*n.x+a.y*n.y+depth, at=a.x*t.x+a.y*t.y;
-  let P=clipPoly(H,-n.x,-n.y,-hinge);
-  if(P.length) P=clipPoly(P,t.x,t.y,at-half);
-  if(P.length) P=clipPoly(P,-t.x,-t.y,-(at+half));
-  return P.length ? {P,hinge,n} : null;
+  const n=H.length, side=Math.sqrt(polyArea(H)), leg=CORNER_LIFT_LEG*side;
+  // точка кромки на расстоянии len от вершины k, идя по оболочке в сторону dir
+  const walk=(k,dir,len)=>{ let left=len, i=k;
+    for(let m=0;m<n;m++){ const a=H[i], j=(i+dir+n)%n, b=H[j], l=Math.hypot(b.x-a.x,b.y-a.y);
+      if(l>=left && l>1e-12) return {x:a.x+(b.x-a.x)*left/l,y:a.y+(b.y-a.y)*left/l}; left-=l; i=j; }
+    return H[k]; };
+  const turn=k=>{ const a=walk(k,-1,.1*side), b=H[k], c=walk(k,1,.1*side);
+    const u=Math.atan2(b.y-a.y,b.x-a.x), v=Math.atan2(c.y-b.y,c.x-b.x); return Math.abs(Math.atan2(Math.sin(v-u),Math.cos(v-u))); };
+  let k=-1, best=Infinity;
+  for(let pass=0;pass<2 && k<0;pass++) for(let i=0;i<n;i++){
+    const d=Math.hypot(H[i].x-L.a.x,H[i].y-L.a.y); if(d<best && (pass || turn(i)>CORNER_LIFT_TURN)){ best=d; k=i; } }
+  const V=H[k], B1=walk(k,1,leg), B2=walk(k,-1,leg);
+  let m={x:-(B2.y-B1.y),y:B2.x-B1.x}; const ml=Math.hypot(m.x,m.y); if(ml<1e-9) return null;
+  m={x:m.x/ml,y:m.y/ml}; if((V.x-B1.x)*m.x+(V.y-B1.y)*m.y<0) m={x:-m.x,y:-m.y};   // m — от петли к углу
+  const hinge=B1.x*m.x+B1.y*m.y, P=clipPoly(H,m.x,m.y,hinge); if(!P.length) return null;
+  const reach=Math.max(...P.map(p=>p.x*m.x+p.y*m.y-hinge)); if(reach<1e-6) return null;
+  const mid={x:P.reduce((s,p)=>s+p.x,0)/P.length,y:P.reduce((s,p)=>s+p.y,0)/P.length};
+  return {P,hinge,m,reach,V,mid,leg,side};
 }
-// Цвет низа у точки касания: самая нижняя грань теста под точкой (порядок граней — снизу вверх),
-// её сторона на стали.
-function cornerUnderColor(){
-  const L=cornerLift, q={x:L.a.x+L.n.x*.03,y:L.a.y+L.n.y*.03};
-  let f=dish.faces.find(f=>f.kind==="dough" && pointInFace(f.points,q.x,q.y));
+// Цвета угла в точке q (середина шапки): верх — верхняя грань теста, низ — самая нижняя грань
+// (порядок граней — снизу вверх), её сторона на стали с румянцем.
+function cornerFaceAt(q,top){
+  const fs=dish.faces.filter(f=>f.kind==="dough" && pointInFace(f.points,q.x,q.y));
+  let f=top ? fs.at(-1) : fs[0];
   if(!f){ let best=Infinity; for(const g of dish.faces) if(g.kind==="dough"){ const p=g.points[0], d=Math.hypot(p.x-q.x,p.y-q.y); if(d<best){ best=d; f=g; } } }
-  return f ? dishCrustColor(f,f.turned ? 1 : 0) : [221,199,152];
+  return f;
 }
+function cornerUnderColor(q){
+  if(!q){ const c=cornerLiftCap(); q=c ? c.mid : cornerLift.a; }
+  const f=cornerFaceAt(q,false); return f ? dishCrustColor(f,f.turned ? 1 : 0) : [221,199,152];
+}
+function cornerTopColor(q){ const f=cornerFaceAt(q,true); return f ? dishCrustColor(f) : [227,213,178]; }
+// Угол не поворачивается плоской доской на петле, а сворачивается завитком: точка на расстоянии s от петли
+// уходит по дуге радиуса r = reach/θ на угол s/r — у петли лист почти лежит, кончик поднят на θ и
+// смотрит низом. Рисуется полосами поперёк завитка (снизу к кончику), верх и низ — своими цветами,
+// свет по наклону. Под углом на таве — мягкая тень (shadowBlur), сталь в следе шапки темнее.
+const CORNER_CURL_STRIPS = 12;
 function drawCornerLift(g,screen,lifted,cap,e,sx,sy){
-  const {P,hinge,n}=cap, th=e*CORNER_LIFT_DEG*Math.PI/180, co=Math.cos(th), si=Math.sin(th);
-  // под поднятым углом — сталь в тени
-  g.fillStyle=`rgba(6,3,1,${(.22*e).toFixed(3)})`; g.beginPath();
-  P.forEach((p,i)=>{ const q=screen(p); i ? g.lineTo(q.x,q.y) : g.moveTo(q.x,q.y); }); g.closePath(); g.fill();
-  const Q=P.map(p=>{ const s=Math.max(0,hinge-(p.x*n.x+p.y*n.y)), d=s*(1-co); return lifted({x:p.x+n.x*d,y:p.y+n.y*d},s*si); });
-  const under=th>Math.PI/2, base=under ? cornerUnderColor() : [227,213,178];
-  g.fillStyle=rgb(under ? base : base.map(c=>c*.82)); g.beginPath();
-  Q.forEach((q,i)=>i ? g.lineTo(q.x,q.y) : g.moveTo(q.x,q.y)); g.closePath(); g.fill();
-  g.strokeStyle=rgb(base.map(c=>c*.72)); g.lineWidth=Math.max(1,1.2*sx); g.stroke();
+  const {P,hinge,m,reach,mid}=cap, th=e*CORNER_LIFT_DEG*Math.PI/180; if(th<1e-3) return;
+  const r=reach/th;
+  const bend=p=>{ const s=Math.max(0,p.x*m.x+p.y*m.y-hinge), f=s/r, d=s-r*Math.sin(f);
+    return lifted({x:p.x-m.x*d,y:p.y-m.y*d},r*(1-Math.cos(f))); };
+  // рёбра шапки — мелко, чтобы изгиб читался
+  const dense=Q=>{ const out=[]; Q.forEach((a,i)=>{ const b=Q[(i+1)%Q.length], k=Math.max(1,Math.ceil(Math.hypot(b.x-a.x,b.y-a.y)/(reach/16)));
+    for(let j=0;j<k;j++) out.push({x:a.x+(b.x-a.x)*j/k,y:a.y+(b.y-a.y)*j/k}); }); return out; };
+  const path=Q=>{ g.beginPath(); Q.forEach((q,i)=>i ? g.lineTo(q.x,q.y) : g.moveTo(q.x,q.y)); g.closePath(); };
+  // тень на таве: след шапки и мягкий ореол вокруг
+  g.save(); g.shadowColor=`rgba(0,0,0,${(.5*e).toFixed(3)})`; g.shadowBlur=Math.max(2,9*sx*e);
+  g.fillStyle=`rgba(8,4,2,${(.32*e).toFixed(3)})`; path(P.map(screen)); g.fill(); g.restore();
+  const top=cornerTopColor(mid), under=cornerUnderColor(mid);
+  for(let i=0;i<CORNER_CURL_STRIPS;i++){
+    const s0=hinge+reach*i/CORNER_CURL_STRIPS, s1=hinge+reach*(i+1)/CORNER_CURL_STRIPS;
+    let Q=clipPoly(P,m.x,m.y,s0); if(Q.length) Q=clipPoly(Q,-m.x,-m.y,-s1); if(!Q.length) continue;
+    const f=(i+.5)/CORNER_CURL_STRIPS*th, c=Math.cos(f);
+    const col=c>=0 ? top.map(v=>v*(.72+.28*c)) : under.map(v=>v*(.80+.20*-c));
+    path(dense(Q).map(bend)); g.fillStyle=rgb(col); g.fill();
+    g.strokeStyle=rgb(col); g.lineWidth=Math.max(.6,.6*sx); g.stroke();   // шов между полосами не виден
+  }
+  // кромка завитка — тонкая тёмная линия по краю листа (без петли)
+  const D=dense(P); g.strokeStyle=rgb(under.map(v=>v*.62)); g.lineWidth=Math.max(1,1*sx); g.beginPath();
+  let on=false;
+  D.forEach((p,i)=>{ const q=D[(i+1)%D.length], onHinge=Math.abs(p.x*m.x+p.y*m.y-hinge)<1e-6 && Math.abs(q.x*m.x+q.y*m.y-hinge)<1e-6;
+    if(onHinge){ on=false; return; } const a=bend(p), b=bend(q); if(!on){ g.moveTo(a.x,a.y); on=true; } g.lineTo(b.x,b.y); });
+  g.stroke();
 }
 function drawSpatula(g,screen,d,sx,sy){
   const {tx,ty,nx,ny,a}=edgeFrame(d), w=.13, back=.10, fwd=.24;
@@ -4247,11 +4290,13 @@ function buildHoleChains(){
         if(!nxt.length) break;
         prev = cur; cur = nxt[0];
       }
-      if(first === adj.get(start)[0]) chain.push(...seg); else chain.unshift(...seg);
+      // вторая ветка от старта встаёт перед ним в обратном порядке (сборка 88: без reverse цепочка
+      // рвалась на стыке, ячейка стыка была undefined, и рваный лист на таве ронял каждый кадр в rimDraw)
+      if(first === adj.get(start)[0]) chain.push(...seg); else chain.unshift(...seg.reverse());
     }
     if(chain.length >= 5){
       const cells = new Set();
-      for(let i=0;i+1<chain.length;i++){ const q = quadAt.get(key(chain[i], chain[i+1])); if(q !== null) cells.add(q); }
+      for(let i=0;i+1<chain.length;i++){ const q = quadAt.get(key(chain[i], chain[i+1])); if(q != null) cells.add(q); }
       const cyclic = adj.get(chain[0]).includes(chain[chain.length-1]);   // замкнутая петля вокруг дыры
       holeChains.push({ nodes: chain, cells: [...cells], cyclic });
     }
