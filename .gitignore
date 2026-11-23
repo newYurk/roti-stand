@@ -17,3 +17,7 @@ runs/pitch-mood/
 
 # локальные настройки Claude Code — не в git (19.10 уехали в публичный main)
 .claude/settings.local.json
+
+# макеты интерфейса: снимки состояний — локально (23.11)
+mockups/ui/*/shots/
+mockups/ui/*/*.png
