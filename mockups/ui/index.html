@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Roti Stand — варианты экрана</title>
+<style>
+  body { margin: 0; font: 16px/1.45 -apple-system, system-ui, sans-serif; background: #f6f3ee; color: #222; }
+  main { max-width: 980px; margin: 0 auto; padding: 18px 14px 60px; }
+  h1 { font-size: 22px; margin: 6px 0 4px; }
+  h2 { font-size: 18px; margin: 28px 0 6px; }
+  p.lead { margin: 0 0 6px; color: #555; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; }
+  a.card { display: block; background: #fff; border-radius: 10px; overflow: hidden; color: inherit; text-decoration: none;
+           box-shadow: 0 1px 3px rgba(0,0,0,.12); }
+  a.card img { display: block; width: 100%; height: 220px; object-fit: cover; object-position: top; background: #ddd; }
+  a.card div { padding: 8px 10px 10px; }
+  a.card b { display: block; }
+  a.card span { font-size: 14px; color: #555; }
+  .wait img { opacity: .35; }
+</style>
+</head>
+<body>
+<main>
+<h1>Roti Stand — варианты экрана</h1>
+<p class="lead">23.11.2026. Решено: экран стоя, играем одной рукой; время суток — по часам телефона; роти можно показать миру, сердечки ни на что не влияют. Каждый вариант открывается и прокликивается: тап там, где тапал бы игрок, или ◀ ▶ в углу.</p>
+
+<h2>Карта экранов</h2>
+<div class="grid" id="map"></div>
+
+<h2>Новый дизайн — без ИИ, всё нарисовано кодом</h2>
+<p class="lead">Опираются на свежие игры, нарисованные людьми (Venba, Tiny Bookshop, PBJ, Hauntii и др.).</p>
+<div class="grid" id="fresh"></div>
+
+</main>
+<script>
+const V = {
+  map: [["K", "Карта экранов (wireflow)", "все экраны игры на одной доске; пальцами — двигать и увеличивать"]],
+  fresh: [
+    ["H", "H · восковые мелки и плоский цвет", "всё на крафт-бумаге, в которую заворачивают роти; меню — жестяная банка"],
+    ["I", "I · бумага, вырезки, ризограф", "бумажная диорама в три краски, краски меняет час; заказ — листок на прищепке"],
+    ["J", "J · линия и два цвета", "перо и две краски часа; интерфейс — одно рукописное слово под пальцем"],
+  ],
+};
+for (const [id, list] of Object.entries(V)) {
+  const box = document.getElementById(id);
+  for (const [k, title, note] of list) {
+    const a = document.createElement("a");
+    a.className = "card" + (note === "готовится" ? " wait" : "");
+    a.href = k + "/";
+    a.innerHTML = `<img src="thumbs/${k}.jpg" alt="" loading="lazy"><div><b>${title}</b><span>${note}</span></div>`;
+    box.appendChild(a);
+  }
+}
+</script>
+</body>
+</html>

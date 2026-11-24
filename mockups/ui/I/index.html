@@ -1,0 +1,596 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
+<title>Roti Stand · I · бумага, вырезки, ризограф</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@500;600&family=Neucha&family=Sriracha&family=Underdog&display=swap" rel="stylesheet">
+<style>
+:root{--rv:#222}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;height:100%;background:#d9d2c5;font-family:'IBM Plex Mono',monospace;overflow:hidden}
+#stage{position:fixed;inset:0;display:flex;align-items:center;justify-content:center}
+#phone{position:relative;width:100vw;height:100vh;overflow:hidden;background:#efe6d4}
+@media (min-width:600px){
+  #phone{width:390px;height:844px;border-radius:46px;box-shadow:0 0 0 10px #1c1b1a,0 0 0 11px #555,0 30px 60px rgba(0,0,0,.35)}
+}
+#scene{position:absolute;inset:0;width:100%;height:100%;display:block}
+.hot{position:absolute;cursor:pointer;min-width:44px;min-height:44px}
+body.debughot .hot{outline:2px dashed #f0f}
+/* stop-motion: movement in steps, like re-shot paper puppets */
+@keyframes bob{0%{transform:rotate(-.8deg)}50%{transform:rotate(.9deg) translateY(-1px)}100%{transform:rotate(-.8deg)}}
+.bob{animation:bob 1.6s steps(4) infinite;transform-box:fill-box;transform-origin:50% 100%}
+@keyframes nod{0%,60%,100%{transform:rotate(0)}70%{transform:rotate(6deg)}85%{transform:rotate(2deg)}}
+.nod{animation:nod 2.4s steps(6) infinite;transform-box:fill-box;transform-origin:50% 90%}
+@keyframes fall{0%{transform:translate(0,-60px) rotate(-14deg);opacity:0}15%{opacity:1}100%{transform:translate(var(--dx),0) rotate(var(--r));opacity:1}}
+.heart{animation:fall 3.2s steps(16) both}
+@keyframes slipin{0%{transform:translate(40px,-260px) rotate(18deg)}100%{transform:none}}
+.slipin{animation:slipin .9s steps(7) both}
+@keyframes sheet{0%{transform:translateY(18px) rotate(.6deg);opacity:.0}100%{transform:none;opacity:1}}
+.sheet{animation:sheet .45s steps(4) both}
+@keyframes ghost{0%,100%{opacity:.25}50%{opacity:1}}
+.ghost{animation:ghost 1.8s steps(5) infinite}
+@keyframes steam{0%{transform:translateY(0);opacity:.0}30%{opacity:.9}100%{transform:translateY(-26px);opacity:0}}
+.steam{animation:steam 2.2s steps(8) infinite}
+/* reviewer overlay — not part of the game */
+#rv{position:fixed;z-index:20;font:12px/1.35 'IBM Plex Mono',monospace;color:#f6f1e6;background:rgba(28,26,24,.86);border-radius:12px;padding:8px 10px;
+    left:8px;right:8px;top:calc(env(safe-area-inset-top,0px) + 4px)}
+@media (min-width:600px){#rv{left:calc(50% + 225px);right:auto;top:calc(50% - 422px);width:300px}}
+#rv .row{display:flex;gap:6px;align-items:center}
+#rv button{font:inherit;background:#f6f1e6;color:#222;border:0;border-radius:8px;min-width:34px;height:30px;cursor:pointer}
+#rv input{flex:1}
+#cap{margin-top:6px}
+#rv.min #cap,#rv.min .r2{display:none}
+body.clean #rv{display:none}
+body.clean *{animation:none!important}
+</style>
+</head>
+<body>
+<div id="stage"><div id="phone">
+  <svg id="scene" viewBox="0 0 390 844" preserveAspectRatio="xMidYMax slice" xmlns="http://www.w3.org/2000/svg"></svg>
+  <div id="hots"></div>
+</div></div>
+<div id="rv">
+  <div class="row"><button id="prev">◀</button><b id="stn" style="flex:1;text-align:center">1/7</b><button id="next">▶</button><button id="mini" title="свернуть">–</button></div>
+  <div class="row r2" style="margin-top:6px"><span id="hl" style="width:92px">07:40</span><input id="hr" type="range" min="0" max="24" step="0.25"><button id="now">сейчас</button></div>
+  <div id="cap"></div>
+</div>
+<script>
+/* ============ Roti Stand · direction I · cut paper + risograph ============
+   Everything below is drawn procedurally: scissor-cut polygons, halftone dot screens per ink,
+   ink grain + slight misregistration, soft diorama shadows. No raster images. */
+const W=390,H=844;
+const PHASES={
+  morning:{name:'утро · у школы',place:'school',guest:'kid',  paper:'#F2E9D6',warm:'#F5C433',acc:'#EC5D8C',cool:'#3C63AC',sh:'#3a2c4a',dw:1,da:1,tv:[1,.7,.6],inks:'Yellow · Fluo Pink · Medium Blue'},
+  day:    {name:'день · у школы',place:'school',guest:'kid2', paper:'#F3EBD9',warm:'#F2BE2E',acc:'#E4524A',cool:'#15838A',sh:'#2d3a36',dw:1,da:.8,tv:[.85,1,.45],inks:'Yellow · Red · Teal'},
+  evening:{name:'вечер · у канала',place:'canal',guest:'woman',paper:'#EEDDC2',warm:'#F0963A',acc:'#953A5C',cool:'#1D7681',sh:'#3b2130',dw:.9,da:.42,tv:[1,.8,.5],inks:'Orange · Burgundy · Teal'},
+  night:  {name:'ночь · рынок',place:'market',guest:'rider',paper:'#E6D9C0',warm:'#F2CC3F',acc:'#F0559A',cool:'#283877',sh:'#151a33',dw:1,da:.75,tv:[1,.6,.6],inks:'Yellow · Fluo Pink · Federal Blue'}
+};
+function phaseOf(h){h=((h%24)+24)%24;return h>=5&&h<11?'morning':h>=11&&h<16?'day':h>=16&&h<20.5?'evening':'night'}
+const STATES=[
+ {k:1,cap:'Приходишь к тележке: место и свет — как у тебя за окном сейчас. Гостей ещё нет. Тронь жестяную миску с шариками теста — открываешься.'},
+ {k:2,cap:'Подходит гость (утром — школьник) и кладёт листок с заказом-рисунком на прищепку. Тётя Сом кивает на него. Тронь листок — к столу.'},
+ {k:3,cap:'Тесто на промасленном столе во весь экран. Тянешь от края к пунктирному квадрату; бумажная рука тёти Сом показывает движение — без слов.'},
+ {k:4,cap:'На таве. Как подрумянилось снизу, видно по краю и по уголку, который загибается сам. Мах наружу — переворот.'},
+ {k:5,cap:'Роти нарезано, полито сгущёнкой, лежит на газетном листе. Сдвинь лист к гостю — отдать; или прижми штамп «показать миру».'},
+ {k:'5б',cap:'Штамп сделал из роти открытку: место, час и дата отпечатаны сами. Смахни вверх — открытка уходит в мир.'},
+ {k:6,cap:'Сердечки прилетают тихо, бумажными вырезками на прищепку, их никто не считает. Тетрадь: вклеены открытки и листки-заказы прошлых дней.'}
+];
+const Q=new URLSearchParams(location.search);
+let st=Math.max(0,Math.min(6,(+Q.get('s')||1)-1));
+let hour=Q.has('h')?+Q.get('h'):(()=>{const d=new Date();return d.getHours()+d.getMinutes()/60})();
+if(Q.has('clean'))document.body.classList.add('clean');
+
+/* ---------- seeded randomness & cut geometry ---------- */
+let sd=1;const seed=n=>{sd=(n*9301+49297)%233280||7};
+const rnd=()=>{sd=(sd*16807)%2147483647;return (sd-1)/2147483646};
+const J=a=>(rnd()*2-1)*a;
+const f=n=>(+n).toFixed(1);
+// scissor cut: straight facets with small irregular jitter
+function cut(pts,jit=.7,seg=13){
+  const o=[];const n=pts.length;
+  for(let i=0;i<n;i++){const [x1,y1]=pts[i],[x2,y2]=pts[(i+1)%n];const L=Math.hypot(x2-x1,y2-y1);
+    const k=Math.max(1,Math.round(L/(seg*(.7+rnd()*.6))));
+    for(let j=0;j<k;j++){const t=j/k;o.push([x1+(x2-x1)*t+J(jit),y1+(y2-y1)*t+J(jit)])}}
+  return 'M'+o.map(p=>f(p[0])+' '+f(p[1])).join('L')+'Z';
+}
+function ell(cx,cy,rx,ry,n,wob=0,rot=0){const p=[];n=n||Math.max(10,Math.round((rx+ry)*0.42));
+  for(let i=0;i<n;i++){const a=i/n*Math.PI*2+rot+J(.04);const w=1+J(wob);p.push([cx+Math.cos(a)*rx*w,cy+Math.sin(a)*ry*w])}return p}
+function rr(x,y,w,h,r,n=4){const p=[];const c=[[x+w-r,y+r,-Math.PI/2],[x+w-r,y+h-r,0],[x+r,y+h-r,Math.PI/2],[x+r,y+r,Math.PI]];
+  for(const [cx,cy,a0] of c)for(let i=0;i<=n;i++){const a=a0+i/n*Math.PI/2;p.push([cx+Math.cos(a)*r,cy+Math.sin(a)*r])}return p}
+const rect=(x,y,w,h)=>[[x,y],[x+w,y],[x+w,y+h],[x,y+h]];
+// hand line: jittered, smoothed through midpoints
+function hl(pts,jit=.6){const q=[];for(let i=0;i<pts.length-1;i++){const [a,b]=pts[i],[c,d]=pts[i+1];const L=Math.hypot(c-a,d-b);const k=Math.max(1,Math.round(L/9));
+  for(let j=0;j<k;j++){const t=j/k;q.push([a+(c-a)*t+J(jit),b+(d-b)*t+J(jit)])}}q.push(pts[pts.length-1]);
+  let s='M'+f(q[0][0])+' '+f(q[0][1]);for(let i=1;i<q.length-1;i++){const mx=(q[i][0]+q[i+1][0])/2,my=(q[i][1]+q[i+1][1])/2;s+='Q'+f(q[i][0])+' '+f(q[i][1])+' '+f(mx)+' '+f(my)}
+  return s+'L'+f(q[q.length-1][0])+' '+f(q[q.length-1][1])}
+
+/* ---------- inks ---------- */
+let P,D,uid;
+const MR={warm:'1.5,-0.9',acc:'-1.5,1.1',cool:'0.7,1.6'};   // misregistration per drum
+const ANG={warm:15,acc:75,cool:45};                          // screen angles per drum
+const pats={};
+function fill(role,t){if(t>0)return P[role];t=-t;const key=role+Math.round(t*100);
+  if(!pats[key]){pats[key]=1;const c=3.6,r=Math.min(c*.62,c*Math.sqrt(t/Math.PI)*1.05);
+    D+=`<pattern id="p${key}" width="${c}" height="${c}" patternUnits="userSpaceOnUse" patternTransform="rotate(${ANG[role]})"><circle cx="${c/2}" cy="${c/2}" r="${r.toFixed(2)}" fill="${P[role]}"/></pattern>`}
+  return `url(#p${key})`}
+// ink printed straight on whatever is below (multiply, grain, misregistered)
+function ink(d,role,t=1,extra=''){return `<path d="${d}" fill="${fill(role,t)}"${t>0&&t<.95?` fill-opacity="${t.toFixed(2)}"`:''} transform="translate(${MR[role]})" filter="url(#gr)" style="mix-blend-mode:multiply"${extra}/>`}
+function stroke(d,role,w=1.4,extra=''){return `<path d="${d}" fill="none" stroke="${P[role]}" stroke-width="${w}" stroke-linecap="round" stroke-linejoin="round" transform="translate(${MR[role]})" filter="url(#gr)" style="mix-blend-mode:multiply"${extra}/>`}
+// a cut piece of paper, printed with inks, with a diorama shadow
+function pc(d,inks=[],o={}){const id='c'+(uid++);
+  let s=`<g${o.sh===0?'':` filter="url(#sh${o.sh||1})"`}${o.attr||''}><path d="${d}" fill="${o.base||P.paper}"/>`;
+  if(inks.length||o.inner){D+=`<clipPath id="${id}"><path d="${d}"/></clipPath>`;s+=`<g clip-path="url(#${id})">`;
+    for(const [r,t] of inks)s+=ink(d,r,t);s+=(o.inner||'')+'</g>'}
+  return s+'</g>'}
+function txt(x,y,str,o={}){const role=o.role||'cool';return `<text x="${x}" y="${y}" font-family="${o.font||'IBM Plex Mono'}" font-size="${o.size||12}" ${o.weight?`font-weight="${o.weight}"`:''} text-anchor="${o.anchor||'start'}" fill="${o.color||P[role]}" ${o.rot?`transform="rotate(${o.rot} ${x} ${y})"`:''} filter="url(#gr)" style="mix-blend-mode:multiply" letter-spacing="${o.ls||0}">${str}</text>`}
+const G=(s,t='',a='')=>`<g${t?` transform="${t}"`:''}${a}>${s}</g>`;
+const skinI=[['warm',.42],['acc',.2]];
+
+/* ---------- filters ---------- */
+function defs(){return `
+<filter id="gr" x="-5%" y="-5%" width="110%" height="110%">
+ <feTurbulence type="fractalNoise" baseFrequency=".9" numOctaves="2" seed="4" result="t"/>
+ <feTurbulence type="fractalNoise" baseFrequency=".022" numOctaves="2" seed="9" result="l"/>
+ <feColorMatrix in="t" type="matrix" values="0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 6 0 0 0 -1.4" result="ta"/>
+ <feColorMatrix in="l" type="matrix" values="0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 .9 0 0 0 .5" result="la"/>
+ <feComposite in="ta" in2="la" operator="arithmetic" k1="1" result="m"/>
+ <feComposite in="SourceGraphic" in2="m" operator="in"/>
+</filter>
+<filter id="sh1" x="-15%" y="-15%" width="140%" height="140%"><feDropShadow dx="1" dy="1.8" stdDeviation="1.1" flood-color="${P.sh}" flood-opacity=".42"/></filter>
+<filter id="sh2" x="-20%" y="-20%" width="150%" height="150%"><feDropShadow dx="2" dy="4" stdDeviation="2.6" flood-color="${P.sh}" flood-opacity=".36"/><feDropShadow dx=".5" dy="1" stdDeviation=".5" flood-color="${P.sh}" flood-opacity=".35"/></filter>
+<filter id="sh3" x="-25%" y="-25%" width="160%" height="170%"><feDropShadow dx="4" dy="9" stdDeviation="6" flood-color="${P.sh}" flood-opacity=".33"/><feDropShadow dx="1" dy="1.5" stdDeviation=".8" flood-color="${P.sh}" flood-opacity=".3"/></filter>
+<filter id="paperf" x="0" y="0" width="100%" height="100%">
+ <feTurbulence type="fractalNoise" baseFrequency=".035 .6" numOctaves="3" seed="12"/>
+ <feColorMatrix type="matrix" values="0 0 0 0 .35  0 0 0 0 .27  0 0 0 0 .18  0 0 0 -1.6 .95"/>
+ <feComposite in2="SourceGraphic" operator="in"/>
+</filter>`}
+
+/* ================= PLACES ================= */
+function awning(){seed(3);let p=[[-5,-5],[395,-5]];
+  for(let k=10;k>=0;k--){for(let i=0;i<=6;i++){const t=i/6;const x=k*39+39-t*39;p.push([x,92+Math.sin(t*Math.PI)*15])}}
+  let inner='';for(let x=0;x<400;x+=39)inner+=ink(`M${x} -5h19.5v120h-19.5Z`,'acc',1);
+  inner+=ink(`M-5 -5h400v58h-400Z`,'cool',.12);
+  let s=pc(cut(p,.5,9),[],{sh:2,inner});
+  // stitched hem
+  let st='';for(let x=4;x<390;x+=9)st+=`M${x} 86l5 ${J(.6)}`;s+=stroke(st,'cool',1,' opacity=".55"');
+  if(P.k==='night'){seed(31);for(let x=20;x<390;x+=44){const y=104+Math.sin(x/62)*6;s+=pc(cut(ell(x,y,10,10,0,.1)),[['warm',.35]],{sh:0,attr:' opacity=".9"'})+pc(cut(ell(x,y,4.5,5.5,9)),[['warm',1]],{sh:1})}}
+  return s}
+
+function school(){let s='';seed(11);const m=P.k==='morning';
+  s+=pc('M0 0H390V360H0Z',[['cool',-.14],['warm',m?.05:.1]],{sh:0});
+  // stepped sky band
+  s+=pc(cut([[-4,190],[394,184],[394,360],[-4,360]],1.2,20),[['warm',m?.16:.1]],{sh:0});
+  const sy=m?168:132,sx=m?322:250;
+  s+=pc(cut(ell(sx,sy,27,27,22,.03)),[['warm',1]],{sh:1});
+  if(m)s+=pc(cut(ell(sx,sy,40,40,26,.04)),[['warm',.22]],{sh:0,attr:' opacity=".7"'});
+  // far trees
+  seed(12);let tp=[[-6,262]];for(let x=0;x<=396;x+=22)tp.push([x,228+Math.sin(x*.07)*10+J(7)]);tp.push([396,262]);
+  s+=pc(cut(tp,1.5,8),[['cool',.55],['warm',.75]],{sh:1});
+  // school building
+  s+=pc(cut(rect(36,200,322,98),.6,18),[['warm',.32],['acc',.08]],{sh:2});
+  s+=pc(cut([[24,204],[370,204],[350,176],[44,176]],.7,16),[['acc',1],['warm',.5]],{sh:1});
+  let w='';for(let r=0;r<2;r++)for(let i=0;i<9;i++){const x=52+i*34,y=216+r*38;seed(40+i+r*9);
+    w+=pc(cut(rect(x,y,20,22),.5,9),[['cool',r?.5:.65]],{sh:0});
+    if((i+r)%3===0)w+=pc(cut([[x,y],[x+20,y],[x+20,y+9],[x,y+13]],.4,8),[],{sh:1,base:'#fbf6ea'})}
+  s+=w;
+  s+=pc(cut(rect(170,170,52,24),.4,10),[['warm',.8]],{sh:1})+txt(196,187,'โรงเรียน',{font:'Sriracha',size:12,anchor:'middle',role:'cool'});
+  // flag
+  s+=stroke(hl([[78,300],[78,128]],.3),'cool',2);
+  seed(17);const fy=130;['acc','paper','cool','cool','paper','acc'].forEach((c,i)=>{s+=pc(cut(rect(79,fy+i*4.2,40,4.4),.25,10),c==='paper'?[]:[[c,1]],{sh:i===0?1:0})});
+  // fence wall
+  s+=pc(cut(rect(-5,292,400,26),.6,14),[['cool',.2],['warm',.15]],{sh:2});
+  let fr='';for(let x=6;x<390;x+=15)fr+=hl([[x,292],[x+J(.5),262]],.3);s+=stroke(fr,'cool',1.6)+stroke(hl([[0,266],[390,264]],.4),'cool',1.6);
+  // kids far away (morning), shade tree
+  seed(21);s+=pc(cut(ell(370,220,40,48,18,.12)),[['cool',.7],['warm',1]],{sh:2})+pc(cut([[362,262],[372,262],[375,320],[358,320]],.5,10),[['acc',.6],['cool',.7]],{sh:1});
+  return s}
+
+function canal(){let s='';seed(51);
+  s+=pc('M0 0H390V360H0Z',[['acc',.3],['warm',.25]],{sh:0});
+  s+=pc(cut([[-4,140],[120,132],[260,146],[394,136],[394,360],[-4,360]],1.4,22),[['warm',-.5],['acc',.12]],{sh:0});
+  s+=pc(cut([[-4,206],[394,198],[394,360],[-4,360]],1.2,22),[['warm',.85]],{sh:0});
+  s+=pc(cut(ell(118,196,40,40,26,.02)),[['acc',.55],['warm',1]],{sh:1});
+  // far shore: stilt houses, lights on
+  seed(52);let hs='';const xs=[[-5,60],[52,100],[96,150],[150,205],[205,250],[248,310],[306,350],[346,400]];
+  xs.forEach(([a,b],i)=>{const top=212+J(10),ridge=top-14-rnd()*10;
+    hs+=pc(cut([[a,268],[a,top],[(a+b)/2,ridge],[b,top],[b,268]],.7,12),[['cool',1],['acc',.55]],{sh:1});
+    if(i%2===0)hs+=pc(cut(rect(a+12,top+10,8,8),.3,8),[['warm',1]],{sh:0})});
+  s+=hs;
+  let sl='';for(let x=4;x<390;x+=13)sl+=hl([[x,264],[x+J(1),282]],.2);s+=stroke(sl,'cool',2);
+  // palm
+  seed(55);s+=stroke(hl([[342,282],[348,230],[360,178]],.8),'cool',4);
+  for(let i=0;i<5;i++){const a=-2.6+i*.55;s+=pc(cut([[360,178],[360+Math.cos(a)*44,178+Math.sin(a)*24+16],[360+Math.cos(a+.2)*30,178+Math.sin(a+.2)*14+10]],.6,9),[['cool',1],['acc',.4]],{sh:1})}
+  // water
+  s+=pc(cut([[-4,278],[394,276],[394,360],[-4,360]],1,20),[['cool',.6],['warm',.2]],{sh:2});
+  seed(57);for(let i=0;i<9;i++){const y=290+i*7+J(2),x=20+rnd()*300,w=20+rnd()*60;s+=pc(cut(rect(x,y,w,2.6),.3,10),[['warm',.8]],{sh:0})}
+  // reflection of sun
+  for(let i=0;i<5;i++)s+=pc(cut(rect(100+J(6),286+i*9,36-i*5,3),.3,10),[['warm',1],['acc',.2]],{sh:0});
+  // longtail boat
+  seed(59);s+=pc(cut([[210,304],[300,304],[318,292],[292,312],[214,312]],.5,10),[['acc',.8],['cool',.6]],{sh:1})+stroke(hl([[296,300],[330,288]],.3),'cool',1.6);
+  s+=pc(cut(ell(250,296,6,6,9)),skinI,{sh:1})+pc(cut([[244,300],[256,300],[258,310],[242,310]],.3,6),[['cool',.7]],{sh:0});
+  return s}
+
+function market(){let s='';seed(71);
+  s+=pc('M0 0H390V360H0Z',[['cool',1],['acc',.18]],{sh:0});
+  let stars='';for(let i=0;i<26;i++){const x=rnd()*390,y=100+rnd()*90;stars+=`<circle cx="${f(x)}" cy="${f(y)}" r="${f(.6+rnd()*1)}" fill="${P.paper}" opacity=".85"/>`}s+=stars;
+  // stalls
+  seed(72);const cols=['acc','warm','acc','cool'];
+  for(let i=0;i<5;i++){const x=-20+i*86,y=196+J(6);
+    s+=pc(cut(rect(x+4,y+22,78,90),.6,12),[['cool',.75],['warm',.25]],{sh:1});
+    s+=pc(cut(rect(x+10,y+40,66,34),.5,12),[['warm',.85],['acc',.2]],{sh:0});
+    let str='';for(let k=0;k<5;k++)str+=ink(`M${x+k*18} ${y-4}h9v40h-9Z`,cols[i%4]==='cool'?'acc':cols[i%4],1);
+    s+=pc(cut([[x-2,y+26],[x+88,y+26],[x+80,y],[x+6,y]],.5,10),[],{sh:2,inner:str});
+    // silhouettes of shoppers
+    seed(80+i);const hx=x+20+rnd()*40;s+=pc(cut([[hx-11,320],[hx-9,y+80],[hx+9,y+80],[hx+11,320]],.5,10),[['cool',1],['acc',.35]],{sh:1})+pc(cut(ell(hx,y+70,8,9,10)),[['cool',1],['acc',.5]],{sh:1})}
+  s+=pc(cut(rect(140,150,110,26),.4,10),[['acc',1]],{sh:2})+txt(195,169,'ตลาดนัด',{font:'Sriracha',size:15,anchor:'middle',color:P.paper});
+  // bulbs string
+  seed(77);let cord=[];for(let x=-5;x<=395;x+=26)cord.push([x,186+Math.sin(x/40)*7]);s+=stroke(hl(cord,.4),'paper',1,' style="mix-blend-mode:normal"');
+  cord.forEach(([x,y],i)=>{if(i%2)return;s+=pc(cut(ell(x,y+7,9,9,12)),[['warm',.3]],{sh:0,attr:' opacity=".85"'})+pc(cut(ell(x,y+7,3.4,4.2,8)),[['warm',1]],{sh:0})});
+  s+=pc(cut(rect(-5,312,400,48),.6,14),[['cool',.55],['warm',.15]],{sh:2});
+  return s}
+
+/* ================= PEOPLE (paper puppets with split pins) ================= */
+const pin=(x,y)=>pc(cut(ell(x,y,2.3,2.3,7)),[['warm',1],['acc',.25]],{sh:1});
+function face(cx,cy,r,o={}){let s=pc(cut(ell(cx,cy,r,r*1.06,0,.03)),skinI,{sh:1});
+  const ey=cy+r*.05;
+  if(o.eyes==='line')s+=stroke(`M${f(cx-r*.42)} ${f(ey+1)}q${f(r*.11)} ${f(-r*.12)} ${f(r*.22)} 0M${f(cx+r*.2)} ${f(ey+1)}q${f(r*.11)} ${f(-r*.12)} ${f(r*.22)} 0`,'cool',1.5);
+  else s+=ink(cut(ell(cx-r*.3+J(.5),ey,1.9,2.3,6),.2,3)+cut(ell(cx+r*.3+J(.5),ey,1.9,2.3,6),.2,3),'cool',1);
+  s+=stroke(hl([[cx+r*.04,ey+r*.05],[cx-r*.06,ey+r*.28],[cx+r*.06,ey+r*.3]],.2),'acc',1,' opacity=".7"');
+  if(o.smile)s+=stroke(`M${f(cx-r*.18)} ${f(cy+r*.42)}q${f(r*.18)} ${f(r*.16)} ${f(r*.36)} 0`,'cool',1.3);else s+=stroke(hl([[cx-r*.1,cy+r*.45],[cx+r*.1,cy+r*.44]],.2),'cool',1.2);
+  s+=ink(cut(ell(cx-r*.58,cy+r*.32,r*.15,r*.1,8)),'acc',.3)+ink(cut(ell(cx+r*.58,cy+r*.32,r*.15,r*.1,8)),'acc',.3);
+  return s}
+function kid(x,y,v){seed(91);let s='';
+  // backpack + body
+  s+=pc(cut([[x-38,y+42],[x+38,y+42],[x+46,y+150],[x-46,y+150]],.6,12),[['acc',.75],['warm',.3]],{sh:2});
+  s+=pc(cut([[x-30,y+34],[x+30,y+34],[x+38,y+150],[x-38,y+150]],.6,12),[],{sh:2,base:'#fbf7ed'});
+  s+=pc(cut([[x-13,y+33],[x,y+48],[x+13,y+33],[x+8,y+30],[x,y+38],[x-8,y+30]],.3,6),[],{sh:1,base:'#fdfaf2'});
+  s+=stroke(hl([[x-24,y+36],[x-28,y+120]],.4),'cool',4)+stroke(hl([[x+24,y+36],[x+28,y+120]],.4),'cool',4);
+  s+=txt(x+16,y+72,'ด.ญ.',{size:6,role:'cool',font:'Sriracha'});
+  s+=pc(cut(rect(x-6,y+20,12,16),.3,6),skinI,{sh:0});
+  const hc=v==='kid2'?'warm':'cool';
+  s+=pc(cut([[x-27,y+12],[x-25,y-22],[x,y-32],[x+25,y-22],[x+27,y+12],[x+18,y+14],[x-18,y+14]],.6,8),[['cool',1],['acc',.55]],{sh:1});
+  s+=face(x,y,22,{smile:true});
+  // straight-cut fringe
+  s+=pc(cut([[x-23,y-6],[x-22,y-20],[x,y-27],[x+22,y-20],[x+23,y-6],[x+12,y-9],[x,y-7],[x-12,y-9]],.5,6),[['cool',1],['acc',.55]],{sh:1});
+  if(v==='kid2')s+=pc(cut(ell(x+24,y-16,7,5,8)),[['acc',1]],{sh:1})+pc(cut(ell(x-24,y-16,7,5,8)),[['acc',1]],{sh:1});
+  return s}
+function woman(x,y){seed(95);let s='';
+  s+=pc(cut([[x-34,y+36],[x+34,y+36],[x+44,y+150],[x-44,y+150]],.6,12),[['cool',.45],['warm',.15]],{sh:2});
+  s+=stroke(hl([[x-12,y+36],[x,y+80],[x+12,y+36]],.4),'acc',2)+pc(cut(rect(x-6,y+78,12,16),.3,6),[],{sh:1,base:'#fbf7ed'});
+  s+=pc(cut([[x+30,y+50],[x+40,y+48],[x+56,y+140],[x+36,y+150]],.5,10),[['warm',.9],['acc',.25]],{sh:2});
+  s+=pc(cut(rect(x-6,y+20,12,18),.3,6),skinI,{sh:0});
+  s+=pc(cut(ell(x+2,y-30,13,11,12)),[['cool',1],['acc',.7]],{sh:1});
+  s+=pc(cut([[x-24,y+4],[x-22,y-18],[x,y-26],[x+22,y-18],[x+24,y+4]],.5,8),[['cool',1],['acc',.7]],{sh:1});
+  s+=face(x,y,21,{smile:true});
+  s+=pc(cut([[x-21,y-6],[x-14,y-21],[x+4,y-24],[x+21,y-12],[x+18,y-6],[x,y-14]],.5,6),[['cool',1],['acc',.7]],{sh:1});
+  return s}
+function rider(x,y){seed(97);let s='';
+  s+=pc(cut([[x-36,y+36],[x+36,y+36],[x+44,y+150],[x-44,y+150]],.6,12),[['cool',.6]],{sh:2});
+  s+=pc(cut([[x-30,y+38],[x-8,y+38],[x-4,y+150],[x-36,y+150]],.5,10),[['warm',1],['acc',.55]],{sh:2})+pc(cut([[x+8,y+38],[x+30,y+38],[x+36,y+150],[x+4,y+150]],.5,10),[['warm',1],['acc',.55]],{sh:2});
+  s+=pc(cut(rect(x+11,y+70,20,16),.3,6),[],{sh:0})+txt(x+21,y+82,'17',{size:11,anchor:'middle',weight:600,role:'cool'});
+  s+=pc(cut(rect(x-6,y+20,12,18),.3,6),skinI,{sh:0});
+  s+=face(x,y,21,{});
+  s+=pc(cut([[x-23,y-4],[x-21,y-22],[x,y-28],[x+21,y-22],[x+24,y-8],[x+40,y-8],[x+38,y-3]],.5,7),[['acc',.9],['cool',.4]],{sh:1});
+  return s}
+function guest(){const g=P.guest,x=226,y=210;return `<g class="bob">${g==='woman'?woman(x,y):g==='rider'?rider(x,y):kid(x,y,g)}</g>`}
+
+// aunt Som: old teacher, grey bun, round glasses, sitting at the cart corner
+function som(pose){seed(131);const x=56,y=266;let s='';
+  s+=pc(cut(rr(x-50,y+34,100,150,26,5),.6,12),[['acc',.55],['cool',.12]],{sh:2,
+     inner:(()=>{let d='';seed(132);for(let i=0;i<22;i++){const cx=x-50+rnd()*104,cy=y+44+rnd()*120;d+=`<circle cx="${f(cx)}" cy="${f(cy)}" r="${f(2+rnd()*2)}" fill="${P.paper}"/>`}return d})()});
+  s+=pc(cut(rect(x-6,y+22,12,20),.3,6),skinI,{sh:0});
+  s+=pc(cut(ell(x+4,y-26,14,12,12)),[['cool',.32]],{sh:1,base:'#ece6da'});
+  s+=pc(cut([[x-25,y+6],[x-24,y-16],[x,y-26],[x+24,y-16],[x+25,y+6]],.5,8),[['cool',.3]],{sh:1,base:'#ece6da'});
+  let fs=`<g class="nod">${face(x,y,22,{smile:true,eyes:'line'})}`;
+  fs+=stroke(hl([[x-22,y-8],[x-10,y-14],[x+4,y-16],[x+22,y-6]],.5),'cool',.9,' opacity=".6"');
+  fs+=stroke(`M${x-16} ${y+1}a6 6 0 1 0 12 0a6 6 0 1 0 -12 0M${x+4} ${y+1}a6 6 0 1 0 12 0a6 6 0 1 0 -12 0M${x-4} ${y}h8`,'cool',1.2)+'</g>';
+  s+=fs;
+  // arm (jointed, split pins)
+  if(pose==='point'){s+=pc(cut([[x+28,y+50],[x+42,y+46],[x+80,y+86],[x+70,y+96]],.4,8),[['acc',.55]],{sh:2})+pc(cut([[x+70,y+86],[x+80,y+90],[x+112,y+118],[x+104,y+126]],.4,8),skinI,{sh:2})+pin(x+36,y+50)+pin(x+75,y+91);}
+  else{s+=pc(cut([[x-30,y+90],[x+30,y+88],[x+34,y+106],[x-34,y+108]],.5,10),[['acc',.55]],{sh:2})+pc(cut(rr(x+14,y+76,18,24,4)),[['cool',.1]],{sh:2,base:'#fbf6ea'})+ink(cut(rect(x+16,y+86,14,12),.3,6),'warm',.7)+pin(x-24,y+98);}
+  return s}
+
+/* ================= CART ================= */
+function glassCase(y=318){seed(201);let s='';
+  s+=pc(cut(rect(-5,y+6,400,62),.5,16),[['cool',.13]],{sh:2,inner:ink(`M20 ${y+70}l60 -66h22l-60 66Z M250 ${y+70}l60-66h10l-60 66Z`,'warm',.08)});
+  // jars and cans behind glass
+  const items=[[118,'can'],[150,'can'],[196,'jar'],[244,'eggs'],[300,'jar']];
+  items.forEach(([x,t],i)=>{seed(210+i);
+    if(t==='can'){s+=pc(cut(rr(x-13,y+22,26,36,3)),[['cool',.8]],{sh:1})+pc(cut(rect(x-13,y+32,26,14),.3,8),[['warm',.9]],{sh:0})+txt(x,y+43,'นม',{font:'Sriracha',size:9,anchor:'middle',role:'cool'})}
+    if(t==='jar'){s+=pc(cut(rr(x-16,y+16,32,42,6)),[['cool',.12]],{sh:1,base:'#f8f2e4'})+pc(cut(rect(x-17,y+12,34,7),.3,8),[['acc',1]],{sh:1});
+      for(let k=0;k<6;k++)s+=ink(cut(ell(x-9+rnd()*18,y+30+rnd()*24,2,2,6)),'warm',1)}
+    if(t==='eggs'){s+=pc(cut(rect(x-26,y+44,52,14),.4,8),[['warm',.35],['cool',.2]],{sh:1});for(let k=0;k<4;k++)s+=pc(cut(ell(x-18+k*12,y+42,6,8,10)),[['warm',.25],['acc',.08]],{sh:1})}});
+  s+=pc(cut(rect(-5,y,400,8),.3,20),[['cool',1]],{sh:2})+pc(cut(rect(-5,y+66,400,8),.3,20),[['cool',.9]],{sh:2});
+  return s}
+function bananas(x,y){seed(221);let s=stroke(hl([[x,96],[x+1,y-4]],.2),'cool',1.4);
+  for(let i=0;i<6;i++){const a=-.9+i*.36,len=50+rnd()*8;const pts=[];
+    for(let k=0;k<=8;k++){const t=k/8,ang=a+t*.9;pts.push([x+Math.sin(ang)*len*t*1.0,y+Math.cos(ang)*len*t*.9])}
+    const outer=pts.map(([px,py],k)=>{const w=(k===0||k===8)?1.5:6.5*Math.sin(k/8*Math.PI)+1.5;return [px+w,py-w*.3]});
+    const inner=pts.slice().reverse().map(([px,py],k)=>{const kk=8-k;const w=(kk===0||kk===8)?1.5:5*Math.sin(kk/8*Math.PI)+1.5;return [px-w,py+w*.3]});
+    s+=pc(cut(outer.concat(inner),.35,6),[['warm',1],['cool',i%2?.12:.05]],{sh:1});
+    const tip=pts[8];s+=ink(cut(ell(tip[0],tip[1],2.2,2.2,6)),'cool',.9)}
+  s+=pc(cut(ell(x,y,6,8,8)),[['cool',.7],['warm',.8]],{sh:1});return s}
+function counter(y=388,y2=770){seed(231);
+  let br='';for(let i=0;i<34;i++){const yy=y+10+rnd()*(y2-y-20),x=rnd()*330;br+=hl([[x,yy],[x+20+rnd()*70,yy+J(.6)]],.2)}
+  let rv='';for(let x=22;x<390;x+=46)rv+=`<circle cx="${x}" cy="${y+12}" r="2.2" fill="${P.paper}"/>`+ink(`M${x-2.2} ${y+12}a2.2 2.2 0 0 0 4.4 0Z`,'cool',.8);
+  const rails=pc(cut(rect(-5,y,18,y2-y),.4,20),[['warm',.9],['acc',.45],['cool',.25]],{sh:2})+pc(cut(rect(377,y,18,y2-y),.4,20),[['warm',.9],['acc',.45],['cool',.25]],{sh:2});
+  return pc(cut(rect(-5,y,400,y2-y),.5,24),[['cool',.2]],{sh:2,inner:stroke(br,'cool',.6,' opacity=".55"')+rv})+rails}
+function oilStains(x,y,n){let s='';for(let i=0;i<n;i++){const r=6+rnd()*14;s+=ink(cut(ell(x+J(60),y+J(40),r,r*.8,10,.12)),'warm',.14)}return s}
+function plank(y=770){seed(241);let g='';for(let i=0;i<7;i++){const yy=y+8+i*11;g+=hl([[-5,yy],[120,yy+J(2)],[260,yy+J(2)],[395,yy+J(1)]],.8)}
+  return pc(cut(rect(-5,y,400,90),.5,20),[['warm',.9],['acc',.45],['cool',.25]],{sh:3,inner:stroke(g,'cool',.8,' opacity=".5"')})}
+function doughBall(x,y,r){return pc(cut(ell(x,y,r,r*.9,0,.04)),[['warm',.2],['acc',.04]],{sh:1,inner:ink(cut(ell(x+r*.3,y+r*.35,r*.6,r*.4,10)),'warm',.14)+`<path d="${cut(ell(x-r*.35,y-r*.35,r*.28,r*.14,8,0,-.5))}" fill="#fffaf0" opacity=".8"/>`})}
+function tin(x,y,r,open=true){seed(251);let s=pc(cut(ell(x,y,r,r*.86,0,.015)),[['cool',.45]],{sh:2});
+  s+=pc(cut(ell(x,y+2,r-9,r*.86-9,0,.015)),[['cool',.25],['warm',.12]],{sh:0});
+  if(open){[[-22,-14],[6,-20],[30,-2],[-28,12],[2,8],[22,24],[-6,30]].forEach(([dx,dy],i)=>{seed(260+i);s+=doughBall(x+dx*r/62,y+dy*r/62,r*.24)})}
+  else s+=pc(cut(ell(x+4,y-6,r+2,r*.86+2,0,.015)),[['cool',.6]],{sh:3,inner:stroke(hl(ell(x+4,y-6,r-10,r*.86-10,24).concat([[x+4+r-10,y-6]])),'paper',1.5,' style="mix-blend-mode:normal" opacity=".55"')});
+  return s}
+function tava(x,y,r,heat=.6){seed(271);const [tc,ta,tw]=P.tv;let s=pc(cut(ell(x,y,r+6,r+6,0,.01)),[['cool',tc*.9],['acc',ta*.85],['warm',tw+.1]],{sh:3});
+  s+=pc(cut(ell(x,y,r,r,0,.012)),[['cool',tc],['acc',ta],['warm',tw]],{sh:0});
+  // heat rings printed in warm
+  for(let k=1;k<=3;k++)s+=stroke(hl(ell(x,y,r*(.3+k*.18),r*(.3+k*.18),30).concat([[x+r*(.3+k*.18),y]])),'warm',1.1,` opacity="${(heat*.9-k*.15).toFixed(2)}"`);
+  s+=`<path d="${hl([[x-r*.7,y-r*.35],[x-r*.45,y-r*.7],[x-r*.1,y-r*.86]],.6)}" stroke="${P.paper}" stroke-width="${f(r*.06)}" fill="none" stroke-linecap="round" opacity=".35"/>`;
+  return s}
+function towel(){seed(291);let inner='';for(let k=0;k<8;k++){inner+=ink(`M${262+k*16} 676h7v90h-7Z`,'acc',.5)+ink(`M250 ${680+k*12}h130v6h-130Z`,'cool',.4)}
+  let s=pc(cut([[256,684],[374,678],[378,762],[252,766]],.8,9),[],{sh:2,base:'#f6f0e4',inner});
+  s+=stroke(hl([[256,700],[376,694]],.4),'cool',.8,' opacity=".5"');return s}
+function spatula(){seed(292);let s=pc(cut([[30,742],[86,700],[106,722],[48,762]],.4,10),[['cool',.35]],{sh:2,base:'#ebe6dc'});
+  s+=pc(cut([[96,712],[150,676],[160,688],[104,724]],.4,10),[['warm',.9],['acc',.45],['cool',.25]],{sh:2});return s}
+function condiments(){let s='';
+  seed(281);s+=pc(cut(ell(70,632,40,26,0,.03)),[['cool',.25]],{sh:2,base:'#f6efe0'});
+  for(let i=0;i<8;i++){const x=48+rnd()*44,y=620+rnd()*22;s+=pc(cut(ell(x,y,8,7,10)),[['warm',.55]],{sh:1,inner:ink(cut(ell(x,y,3,2.5,7)),'warm',.6)+ink(`M${f(x-1)} ${f(y)}h2`,'cool',1)})}
+  seed(282);s+=pc(cut(rr(140,592,40,60,4)),[['cool',.85]],{sh:2})+pc(cut(rect(140,606,40,24),.3,10),[['warm',1]],{sh:0})+txt(160,623,'นม',{font:'Sriracha',size:12,anchor:'middle',role:'cool'})+pc(cut(ell(160,592,20,5,12)),[['cool',.4]],{sh:0,base:'#ece6da'});
+  seed(283);s+=pc(cut(ell(330,640,34,22,0,.03)),[['acc',.25],['cool',.15]],{sh:2,base:'#f6efe0'});
+  s+=pc(cut(ell(320,636,11,13,12)),[['warm',.12]],{sh:1,base:'#fbf6ea'})+pc(cut(ell(342,640,11,13,12)),[['warm',.15],['acc',.06]],{sh:1,base:'#fbf6ea'});
+  return s}
+
+/* ================= ORDER SLIPS (each guest has their own paper) ================= */
+function slip(x,y,cls=''){const g=P.guest;seed(301);let s='',d;
+  if(g==='kid'||g==='kid2'){ // torn from an exercise book
+    const p=[[x,y]];for(let i=1;i<=10;i++)p.push([x+i*13,y+J(2.2)]);p.push([x+130,y+92],[x,y+92]);d=cut(p,.4,6);
+    let lines='';for(let i=1;i<6;i++)lines+=`M${x} ${y+i*15+6}h130`;
+    s+=pc(d,[],{sh:2,base:'#fbf8ef',inner:stroke(lines,'cool',.7,' opacity=".5"')+stroke(`M${x+16} ${y}v92`,'acc',.8,' opacity=".7"')});
+    // child's crayon drawing: roti square + banana + drizzle + heart
+    s+=stroke(hl([[x+26,y+30],[x+60,y+27],[x+62,y+62],[x+27,y+64],[x+26,y+30]],1.4),'warm',3)+stroke(hl([[x+30,y+40],[x+40,y+34],[x+48,y+46],[x+58,y+36]],1),'acc',1.6);
+    s+=stroke(hl([[x+78,y+36],[x+90,y+52],[x+106,y+56]],1),'warm',5)+stroke(hl([[x+78,y+36],[x+76,y+30]],.4),'cool',2);
+    s+=stroke(`M${x+112} ${y+76}c-6-6-12 2 0 10c12-8 6-16 0-10`,'acc',1.6)+txt(x+28,y+84,'x1',{font:'Neucha',size:14,role:'cool'});
+  }else if(g==='woman'){ // printed bus-ticket-like stub
+    d=cut(rr(x,y,130,84,3));const perf=Array.from({length:12},(_,i)=>`<circle cx="${x+98}" cy="${y+6+i*6.6}" r="1.3" fill="${P.sh}" opacity=".5"/>`).join('');
+    s+=pc(d,[['warm',.18]],{sh:2,inner:perf});
+    s+=txt(x+8,y+16,'№ 07',{size:11,weight:600,role:'acc'})+txt(x+8,y+30,(''+hh()).slice(0,5),{size:10,role:'cool'});
+    s+=stroke(hl([[x+12,y+44],[x+40,y+42],[x+42,y+70],[x+12,y+72],[x+12,y+44]],.5),'acc',2)+ink(cut(ell(x+27,y+57,8,6,8)),'warm',1);
+    s+=txt(x+56,y+64,'+ไข่',{font:'Sriracha',size:13,role:'cool'})+stroke(`M${x+104} ${y+30}v26`,'acc',2)+stroke(`M${x+112} ${y+30}v26`,'acc',2);
+  }else{ // night market receipt, curling
+    const p=[[x,y],[x+120,y]];for(let i=10;i>=0;i--)p.push([x+i*12,y+98+(i%2?4:0)]);d=cut(p,.4,6);
+    s+=pc(d,[['acc',.06]],{sh:2,base:'#f8f4ea'});
+    s+=txt(x+60,y+16,'ROTI · โรตี',{size:9,anchor:'middle',role:'cool',ls:1})+stroke(`M${x+8} ${y+24}h104`,'cool',.8,' stroke-dasharray="2 2"');
+    s+=stroke(hl([[x+12,y+34],[x+34,y+32],[x+35,y+54],[x+12,y+56],[x+12,y+34]],.5),'cool',1.6)+txt(x+44,y+50,'×2  ช็อกโกแลต',{size:9,role:'cool'});
+    s+=txt(x+8,y+78,hh().slice(0,5),{size:10,role:'acc',weight:600})+txt(x+112,y+78,'40฿',{size:10,anchor:'end',role:'cool',weight:600});
+  }
+  // bulldog clip
+  s+=pc(cut(rr(x+50,y-12,30,18,3)),[['cool',1]],{sh:2})+stroke(`M${x+56} ${y-12}l-4 -14h26l-4 14`,'cool',1.6);
+  return `<g class="${cls}">${s}</g>`}
+function rail(y=690){seed(311);return pc(cut(rect(10,y-4,370,8),.25,20),[['cool',.7]],{sh:2})}
+function notebook(x,y,rot=-5){seed(321);let s=pc(cut(rr(x,y,92,70,4)),[['warm',.55],['acc',.25],['cool',.1]],{sh:3,base:'#e7d6b8'});
+  s+=stroke(hl([[x+70,y-2],[x+72,y+72]],.3),'acc',3)+pc(cut(rect(x+8,y+16,48,16),.3,8),[],{sh:1,base:'#fbf6ea'})+txt(x+12,y+28,'роти',{font:'Neucha',size:12,role:'cool'});
+  s+=pc(cut([[x+30,y+70],[x+40,y+70],[x+40,y+92],[x+35,y+86],[x+30,y+92]],.2,6),[['acc',1]],{sh:1});
+  return G(s,`rotate(${rot} ${x+46} ${y+35})`)}
+function hh(){const h=Math.floor(hour)%24,m=Math.floor((hour%1)*60);return String(h).padStart(2,'0')+':'+String(m).padStart(2,'0')}
+
+/* ================= ROTI ================= */
+function bubbles(x,y,w,h,n,role='warm'){let s='';for(let i=0;i<n;i++){const bx=x+rnd()*w,by=y+rnd()*h,r=1.5+rnd()*3.5;s+=`M${f(bx-r)} ${f(by)}a${f(r)} ${f(r*.8)} 0 1 0 ${f(2*r)} 0a${f(r)} ${f(r*.8)} 0 1 0 ${f(-2*r)} 0`}return stroke(s,role,.9,' opacity=".7"')}
+function spots(x,y,w,h,n,t){let s='',d1='',d2='';
+  for(let i=0;i<n;i++){const r=5+rnd()*12;const cx=x+rnd()*w,cy=y+rnd()*h;s+=ink(cut(ell(cx,cy,r,r*(.6+rnd()*.5),9,.3,rnd()*3),.8,5),'warm',(.35+t*.3)*P.dw);
+    for(let k=0;k<5;k++){const fx=cx+J(r),fy=cy+J(r*.8),fr=.8+rnd()*2.6;const e=cut(ell(fx,fy,fr,fr*.8,6,.3),.3,3);d1+=e;if(rnd()<.6)d2+=e}}
+  return s+ink(d1,'warm',.94*P.dw)+ink(d2,'acc',(.35+t*.35)*P.da)+(t>.6?ink(d2.split('Z').filter((_,i)=>i%3===0).join('Z')+'Z','cool',.25+(1-P.da)*.3):'')}
+function sheet(cx,cy,w){seed(401);// stretched dough: thin, translucent centre, thicker frilled rim
+  const p=[];const n=56;for(let i=0;i<n;i++){const a=i/n*Math.PI*2;const sq=Math.pow(Math.abs(Math.cos(a))**4+Math.abs(Math.sin(a))**4,-1/4);
+    const r=w/2*sq*(.93+J(.03))+(i%3===0?J(5):0);p.push([cx+Math.cos(a)*r,cy+Math.sin(a)*r*.96])}
+  const sc=k=>p.map(([x,y])=>[cx+(x-cx)*k+J(2),cy+(y-cy)*k+J(2)]);
+  let inner='';
+  // thicker rim and a thick ring of not-yet-stretched dough on one side
+  inner+=ink(cut(p,.8,8)+cut(sc(.86).reverse(),1.2,8),'warm',.34)+ink(cut(sc(.86),1,8)+cut(sc(.8).reverse(),1.4,8),'warm',.16);
+  inner+=ink(cut(ell(cx-w*.3,cy+w*.28,w*.16,w*.1,14,.2,.5)),'warm',.22);
+  // windows: so thin the steel shows through
+  for(let i=0;i<9;i++){const hx=cx+J(w*.28),hy=cy+J(w*.28),r=3+rnd()*8;inner+=ink(cut(ell(hx,hy,r,r*.7,9,.35,rnd()*3),.5,4),'cool',.16)+`<path d="${cut(ell(hx-r*.2,hy-r*.2,r*.35,r*.2,6))}" fill="#fffdf6" opacity=".7"/>`}
+  // stretch wrinkles
+  let wr='';for(let i=0;i<5;i++){const a=rnd()*Math.PI*2,r0=w*.22+rnd()*w*.12;wr+=hl([[cx+Math.cos(a)*r0,cy+Math.sin(a)*r0],[cx+Math.cos(a+.25)*r0*1.04,cy+Math.sin(a+.25)*r0*1.04],[cx+Math.cos(a+.5)*r0,cy+Math.sin(a+.5)*r0]],.8)}
+  inner+=stroke(wr,'warm',1,' opacity=".35"');
+  // oil sheen, knocked out of the print
+  inner+=`<path d="${hl([[cx-w*.32,cy-w*.3],[cx-w*.08,cy-w*.37],[cx+w*.22,cy-w*.33]],1.5)}" stroke="#fffdf6" stroke-width="4" fill="none" stroke-linecap="round" opacity=".85"/>`
+        +`<path d="${hl([[cx+w*.3,cy-w*.1],[cx+w*.36,cy+w*.12]],1)}" stroke="#fffdf6" stroke-width="2.5" fill="none" stroke-linecap="round" opacity=".7"/>`;
+  return pc(cut(p,.9,8),[['warm',.13],['acc',.03]],{sh:1,base:'#f8f1e2',inner})}
+function flap(pts,t){const xs=pts.map(q=>q[0]),ys=pts.map(q=>q[1]),x=Math.min(...xs),y=Math.min(...ys),w=Math.max(...xs)-x,h=Math.max(...ys)-y;
+  const free=pts.slice(2,pts.length-1);
+  return pc(cut(pts,.9,7),[['warm',(.55+t*.15)*P.dw],['acc',(.05+t*.08)*P.da]],{sh:1,base:'#f8eedb',inner:spots(x,y,w,h,Math.round(w*h/700*(0.6+t)),t)+stroke(hl([pts[1]].concat(free,[pts[pts.length-1]]),.8),'acc',3.5,' opacity=".45"')})}
+function panRoti(cx,cy,s,t){seed(411);const h=s/2,x0=cx-h,y0=cy-h,x1=cx+h,y1=cy+h;
+  let o=pc(cut([[x0,y0+4],[x0+6,y0],[x1-4,y0+2],[x1,y0+8],[x1-2,y1-6],[x1-8,y1],[x0+6,y1-2],[x0+1,y1-8]],.8,10),[['warm',.45*P.dw]],{sh:2,base:'#f8eedb',inner:spots(x0,y0,s,s,10,t)});
+  // envelope: four flaps folded in, each a separate piece lying on the last
+  const m=.56*s;
+  o+=flap([[x0+2,y0+2],[x1-2,y0+2],[x1-10,y0+m*.62],[cx+20,y0+m*.75],[cx-24,y0+m*.7],[x0+8,y0+m*.6]],t);
+  o+=flap([[x0+2,y1-2],[x1-2,y1-2],[x1-8,y1-m*.62],[cx+16,y1-m*.72],[cx-20,y1-m*.76],[x0+10,y1-m*.6]],t);
+  o+=flap([[x0+1,y0+3],[x0+m*.66,y0+12],[x0+m*.78,cy-10],[x0+m*.7,cy+20],[x0+m*.6,y1-12],[x0+1,y1-3]],t);
+  o+=flap([[x1-1,y0+3],[x1-m*.62,y0+14],[x1-m*.74,cy+8],[x1-m*.66,cy+30],[x1-m*.58,y1-10],[x1-1,y1-3]],t);
+  // banana bumps under the flaps
+  for(let i=0;i<4;i++)o+=ink(cut(ell(cx-26+i*17+J(3),cy+J(6),8,6,9,.2)),'warm',.3);
+  o+=bubbles(x0+14,y0+14,s-28,s-28,10,'acc');
+  // a corner lifts by itself: underside colour = doneness, no meter needed
+  o+=pc(cut([[x1-40,y1-1],[x1-1,y1-40],[x1-50+t*10,y1-50+t*10]],.5,6),[['warm',P.dw],['acc',(.35+t*.35)*P.da],['cool',.05+t*.12+(1-P.da)*.2]],{sh:2,inner:spots(x1-52,y1-52,46,46,3,1)});
+  return o}
+function cutRoti(cx,cy,s,o={}){seed(421);let out='';const n=3,c=s/n,g=4;
+  for(let i=0;i<n;i++)for(let j=0;j<n;j++){const x=cx-s/2+i*c+J(1.5),y=cy-s/2+j*c+J(1.5);
+    const pts=[[x+g/2,y+g/2],[x+c-g/2,y+g/2+J(1)],[x+c-g/2+J(1),y+c-g/2],[x+g/2,y+c-g/2+J(1)]];
+    let inner=spots(x,y,c,c,4,.8)+`<path d="${cut(pts,.5,8)}" fill="none" stroke="${P.acc}" stroke-opacity=".35" stroke-width="3" transform="translate(${MR.acc})" style="mix-blend-mode:multiply"/>`;
+    // flaky layers and banana at the cut edge
+    inner+=stroke(hl([[x+4,y+c*.55],[x+c*.5,y+c*.5+J(2)],[x+c-4,y+c*.56]],.6),'acc',.8,' opacity=".5"');
+    if((i+j)%2===0)inner+=pc(cut(ell(x+c*.5+J(6),y+c-g-1,c*.2,c*.11,10)),[['warm',.75]],{sh:0,base:'#fbf2d4'});
+    out+=G(pc(cut(pts,.6,8),[['warm',.72*P.dw],['acc',.12*P.da]],{sh:1,base:'#f8eedb',inner}),`rotate(${f(J(2.5))} ${f(x+c/2)} ${f(y+c/2)})`)}
+  // condensed milk thrown from the can: loose back-and-forth threads, a few pools
+  seed(431);const z=[];let yy=cy-s/2+6;let L=true;
+  while(yy<cy+s/2-4){z.push([L?cx-s/2-4+J(10):cx+s/2+4+J(10),yy]);yy+=s/9+J(s/30);L=!L}
+  const milk=(d,w)=>`<path d="${d}" fill="none" stroke="#fffaee" stroke-width="${w}" stroke-linecap="round" stroke-linejoin="round" filter="url(#sh1)"/>`;
+  out+=milk(hl(z,2.5),o.thin?1.6:2.6);
+  const z2=z.map(([a,b])=>[a+J(14),b+s/18]);out+=milk(hl(z2.slice(1,6),2),o.thin?1.1:1.8);
+  for(let k=0;k<3;k++)out+=`<path d="${cut(ell(cx+J(s*.3),cy+J(s*.3),s*.04+rnd()*s*.03,s*.03,9,.3),.3,4)}" fill="#fffaee" filter="url(#sh1)"/>`;
+  seed(432);let sg='';for(let k=0;k<36;k++)sg+=`<rect x="${f(cx+J(s/2))}" y="${f(cy+J(s/2))}" width="1.6" height="1.6" fill="#fffdf6" opacity=".9"/>`;
+  return out+sg}
+function newspaper(cx,cy,w,h,rot){seed(441);let cols='';for(let c=0;c<3;c++)for(let r=0;r<18;r++){const x=cx-w/2+14+c*(w-28)/3,y=cy-h/2+30+r*8;cols+=`M${f(x)} ${f(y)}h${f((w-28)/3-10-rnd()*14)}`}
+  const inner=stroke(cols,'cool',1.5,' opacity=".35"')+txt(cx-w/2+14,cy-h/2+20,'ข่าวสด',{font:'Sriracha',size:15,role:'cool'})+stroke(`M${cx-w/2+12} ${cy-h/2+24}h${w-24}`,'cool',1.4)
+    +ink(cut(rect(cx+w/2-70,cy-h/2+30,52,40),.5,10),'cool',.3);
+  return G(pc(cut(rect(cx-w/2,cy-h/2,w,h),.9,14),[['warm',.08]],{sh:2,base:'#ede6d6',inner}),`rotate(${rot} ${cx} ${cy})`)}
+
+/* ================= SOM'S HAND (shows, doesn't tell) ================= */
+function hand(x,y,rot,op=1){seed(501);let s=pc(cut([[x-14,y+40],[x-12,y-2],[x-8,y-30],[x-2,y-30],[x+1,y-4],[x+5,y-24],[x+11,y-23],[x+10,y],[x+14,y-14],[x+19,y-12],[x+16,y+40]],.4,6),skinI,{sh:2});
+  s+=pc(cut([[x-18,y+40],[x+20,y+40],[x+24,y+120],[x-22,y+120]],.5,10),[['acc',.55]],{sh:2})+pin(x,y+48);
+  return G(s,`rotate(${rot} ${x} ${y})`,op<1?` opacity="${op}"`:'')}
+function ghostPath(pts,role='acc'){return stroke(hl(pts,.5),role,2,' stroke-dasharray="1 7" opacity=".9"')}
+
+/* ================= CARD (the roti becomes a postcard) ================= */
+function card(cx,cy,w,rot,o={}){seed(601);const h=w*1.32;let s='';
+  const p=[];// deckled edge
+  for(let i=0;i<=20;i++)p.push([cx-w/2+i*w/20+J(.6),cy-h/2+J(1.2)]);for(let i=1;i<=26;i++)p.push([cx+w/2+J(1.2),cy-h/2+i*h/26]);
+  for(let i=19;i>=0;i--)p.push([cx-w/2+i*w/20,cy+h/2+J(1.2)]);for(let i=25;i>0;i--)p.push([cx-w/2+J(1.2),cy-h/2+i*h/26]);
+  const pw=w-24,ph=pw*.86,px=cx-pw/2,py=cy-h/2+12;
+  let inner=ink(`M${px} ${py}h${pw}v${ph}h${-pw}Z`,'cool',P.k==='night'?.85:.22)+ink(`M${px} ${py+ph*.62}h${pw}v${ph*.38}h${-pw}Z`,'warm',.3);
+  s+=pc('M'+p.map(q=>f(q[0])+' '+f(q[1])).join('L')+'Z',[['warm',.06]],{sh:o.sh||3,base:'#f9f3e5',inner});
+  s+=cutRoti(cx,py+ph/2+4,pw*.62,{thin:true});
+  s+=txt(px,py+ph+20,P.name.toUpperCase(),{size:w*.05,role:'cool',weight:600,ls:.5});
+  s+=txt(px,py+ph+20+w*.075,hh()+' · 23.XI.2026',{size:w*.045,role:'acc'});
+  s+=txt(cx+w/2-14,cy+h/2-12,'моё роти',{font:'Neucha',size:w*.075,anchor:'end',role:'cool',rot:-4});
+  // postmark
+  const mx=cx+w/2-36,my=py+ph-6;s+=stroke(`M${mx-22} ${my}a22 22 0 1 0 44 0a22 22 0 1 0 -44 0M${mx-16} ${my}a16 16 0 1 0 32 0a16 16 0 1 0 -32 0`,'acc',1.4,' opacity=".85"')+txt(mx,my+3,'โรตี',{font:'Sriracha',size:9,anchor:'middle',role:'acc'});
+  for(let i=0;i<4;i++)s+=stroke(hl([[mx+24,my-8+i*5],[mx+60,my-10+i*5]],1),'acc',1.1,' opacity=".7"');
+  return G(s,`rotate(${rot} ${cx} ${cy})`)}
+function stamp(x,y){seed(611);let s=pc(cut(ell(x,y+46,44,12,16)),[['cool',.8],['acc',.3]],{sh:3});
+  s+=pc(cut(rr(x-34,y+20,68,26,4)),[['warm',.8],['acc',.4],['cool',.2]],{sh:2});
+  s+=pc(cut([[x-12,y+20],[x-9,y-8],[x+9,y-8],[x+12,y+20]],.4,8),[['warm',.7],['acc',.5],['cool',.3]],{sh:2})+pc(cut(ell(x,y-14,17,14,14)),[['acc',1],['warm',.3]],{sh:2});
+  s+=txt(x,y+37,'МИРУ',{font:'Underdog',size:13,anchor:'middle',role:'cool',ls:1});
+  return s}
+function heartP(x,y,sz,role){const s=sz;return cut([[x,y+s*.9],[x-s*.95,y],[x-s*.95,y-s*.45],[x-s*.55,y-s*.8],[x-s*.15,y-s*.65],[x,y-s*.38],[x+s*.15,y-s*.65],[x+s*.55,y-s*.8],[x+s*.95,y-s*.45],[x+s*.95,y]],.4,5)}
+
+/* ================= COMPOSE STATES ================= */
+function place(){return P.place==='school'?school():P.place==='canal'?canal():market()}
+function base(){return place()}
+let hots=[];
+function hot(x,y,w,h,fn,label){hots.push({x,y,w:Math.max(44,w),h:Math.max(44,h),fn,label})}
+function render(){
+  const ph=phaseOf(hour);P=Object.assign({k:ph},PHASES[ph]);D='';uid=0;for(const k in pats)delete pats[k];hots=[];
+  let s='';const S=STATES[st].k;
+  s+=`<rect width="390" height="844" fill="${P.paper}"/><rect width="390" height="844" fill="#fff" filter="url(#paperf)" opacity=".5"/>`;
+  s+=base();
+  const showGuest=S!==1;
+  if(S===1||S===2||S===5||S==='5б'||S===6){
+    if(showGuest&&S!==6&&S!=='5б')s+=guest();
+    s+=glassCase();
+    s+=counter();seed(250);s+=oilStains(250,560,5);
+    s+=som(S===2?'point':'rest');
+    s+=bananas(352,150);
+    if(S===1||S===2){s+=tin(95,470,62,S===2);s+=tava(278,498,88,S===1?.35:.6);s+=condiments()+towel()+(S===1?spatula():'');
+      if(S===2)s+=rail()+slip(130,700,'slipin');
+      if(S===1){s+=G(stroke(hl([[96,396],[100,386]],.3),'warm',1.5),'',' class="steam"')}
+    }
+    if(S===5){s+=tin(70,452,44,true);s+=tava(300,470,72,.4);
+      s+=G(newspaper(170,610,250,190,-4)+cutRoti(170,610,150),'',' class="sheet"');
+      s+=G(stamp(330,700),'translate(330 700) scale(1.35) translate(-330 -700)');
+      s+=ghostPath([[170,520],[190,440],[214,380]]);
+    }
+    if(S==='5б'){s+=tin(70,452,44,true);s+=tava(300,470,72,.3);
+      s+=`<rect x="0" y="0" width="390" height="844" fill="${P.paper}" opacity=".35"/>`;
+      s+=G(card(195,460,250,-3),'',' class="sheet"');
+      s+=ghostPath([[214,280],[212,200],[214,140]],'cool');
+    }
+    if(S===6){s+=tin(70,452,44,true);s+=tava(300,470,72,.3);
+      // clothesline under the awning with the shared card and the hearts
+      seed(701);s+=stroke(hl([[-5,118],[120,136],[260,138],[395,120]],.6),'cool',1.3);
+      s+=G(card(195,214,120,2,{sh:2})+pc(cut(rect(189,124,12,26),.4,6),[['warm',.8],['acc',.3]],{sh:2}),'',' class="bob"');
+      const hs=[[150,272,10,'acc',-8],[174,282,8,'warm',12],[206,284,12,'acc',-3],[236,280,9,'acc',20],[262,270,7,'warm',-15],[122,256,8,'acc',6],[60,190,9,'acc',10],[300,226,8,'warm',-12],[336,300,10,'acc',8],[96,330,7,'warm',-20],[280,350,8,'acc',14]];
+      hs.forEach(([x,y,z,r,a],i)=>{seed(720+i);s+=`<g class="heart" style="--dx:${f(J(14))}px;--r:${a}deg;animation-delay:${(i*.45).toFixed(2)}s;transform-box:fill-box;transform-origin:center">${pc(heartP(x,y,z),[[r,1]],{sh:2})}</g>`});
+      s+=diary();
+    }
+  }
+  if(S===3){s+=pc('M-5 300H395V318H-5Z',[['cool',1]],{sh:2});
+    s+=guest();s+=glassCase(300);
+    s+=counter(368,780);seed(330);s+=oilStains(195,560,9);
+    s+=tin(46,410,32,true);
+    // target: dotted square on the table
+    s+=stroke(hl(rr(55,420,280,280,26,3).concat([[335-26,420]]),.6),'acc',1.6,' stroke-dasharray="5 6"');
+    s+=sheet(190,566,262);
+    // Som's hand shows the pull: onion-skin prints of the same gesture
+    s+=`<g class="ghost">${hand(338,612,-60,.22)}${hand(360,600,-70,.4)}</g>`+hand(312,622,-52);
+    s+=ghostPath([[300,612],[340,600],[372,590]]);
+    // fingertip prints left on the oil
+    seed(340);for(let i=0;i<5;i++)s+=ink(cut(ell(84+i*12,700+J(4),5,7,8,.2)),'warm',.22);
+    s+=som('rest').replace(/^/,'');
+    s+=plank(780);s+=notebook(20,786);
+  }
+  if(S===4){s+=pc('M-5 300H395V318H-5Z',[['cool',1]],{sh:2});
+    s+=guest();s+=glassCase(300);
+    s+=counter(368,780);
+    s+=tava(196,574,166,.85);
+    s+=G(panRoti(190,566,196,.7),'rotate(4 190 566)');
+    // steam, printed and stepped
+    for(let i=0;i<3;i++)s+=G(stroke(hl([[150+i*40,462],[156+i*40,446],[148+i*40,430],[154+i*40,414]],.6),'paper',2.4,' style="mix-blend-mode:normal" opacity=".8"'),'',` class="steam" style="animation-delay:${i*.6}s"`);
+    // Som shows the flip: hand + arc
+    s+=ghostPath([[260,700],[330,640],[350,560],[318,490]]);
+    s+=`<g class="ghost">${hand(330,560,-20,.25)}</g>`+hand(300,712,-40);
+    s+=som('rest');
+    s+=plank(780);s+=notebook(20,786);
+  }
+  if(S===1||S===2||S===5||S==='5б')s+=plank(770)+notebook(20,778);
+  if(S===6)s+=plank(800);
+  s+=awning();
+  document.getElementById('scene').innerHTML='<defs>'+defs()+D+'</defs>'+s;
+  // hotspots — where a player would tap
+  if(S===1)hot(30,405,130,130,next,'миска');
+  if(S===2)hot(125,686,140,110,next,'листок');
+  if(S===3)hot(55,430,280,280,next,'тесто');
+  if(S===4)hot(60,430,280,290,next,'тава');
+  if(S===5){hot(285,650,90,110,next,'штамп');hot(50,520,240,180,()=>{st=6;render()},'отдать')}
+  if(S==='5б')hot(70,300,250,330,next,'открытка');
+  if(S===6)hot(16,442,358,330,()=>{st=0;render()},'тетрадь');
+  if(S!==6)hot(14,760,110,80,()=>{st=6;render()},'тетрадь');
+  const hd=document.getElementById('hots'),sv=document.getElementById('scene').getBoundingClientRect();
+  const k=Math.max(sv.width/W,sv.height/H),ox=(sv.width-W*k)/2,oy=sv.height-H*k;
+  hd.innerHTML='';hots.forEach(h=>{const e=document.createElement('div');e.className='hot';e.title=h.label;Object.assign(e.style,{left:ox+h.x*k+'px',top:oy+h.y*k+'px',width:h.w*k+'px',height:h.h*k+'px'});e.onclick=h.fn;hd.appendChild(e)});
+  // reviewer overlay
+  document.getElementById('stn').textContent=`${STATES[st].k} · ${st+1}/7`;
+  document.getElementById('cap').textContent=STATES[st].cap;
+  document.getElementById('hl').textContent=hh()+' '+P.name.split(' · ')[0];
+  document.getElementById('hr').value=hour;
+  document.title='Roti · I · '+P.name+' · '+STATES[st].k;
+}
+function diary(){seed(801);let s='';const x=14,y=440,w=362,h=340;
+  s+=pc(cut(rr(x,y,w,h,8),.5,16),[['warm',.55],['acc',.28],['cool',.12]],{sh:3,base:'#e2cfae'});
+  s+=pc(cut(rect(x+10,y+10,w/2-12,h-20),.5,14),[['warm',.05]],{sh:1,base:'#f7f1e2'})+pc(cut(rect(x+w/2+2,y+10,w/2-12,h-20),.5,14),[['warm',.05]],{sh:1,base:'#f7f1e2'});
+  let gl='';for(let i=0;i<16;i++)gl+=`M${x+16} ${y+40+i*18}h${w/2-24}M${x+w/2+8} ${y+40+i*18}h${w/2-24}`;s+=stroke(gl,'cool',.5,' opacity=".35"');
+  s+=stroke(`M${x+w/2-4} ${y+10}v${h-20}`,'cool',.8,' opacity=".5"');
+  s+=txt(x+22,y+34,'23 ноября',{font:'Neucha',size:17,role:'cool'});
+  s+=G(card(x+92,y+130,104,-6,{sh:1}),'');
+  s+=pc(cut(rect(x+64,y+58,52,12),.3,6),[['warm',.3]],{sh:1,base:'#f2e6c8',attr:' opacity=".85"'});
+  const note={kid:['девочка с рюкзаком,','бананы. тётя Сом','кивнула 2 раза'],kid2:['после уроков, двое,','одно на двоих.','тётя Сом: «тоньше»'],woman:['девушка с канала,','с яйцом. тётя Сом','налила ей чаю'],rider:['таксист №17,','шоколад, две.','тётя Сом смеялась']}[P.guest];
+  note.forEach((l,i)=>s+=txt(x+24,y+232+i*18,l,{font:'Neucha',size:14,role:'cool'}));
+  // previous days pasted on the right page — each in its own hour's inks
+  const keep=P;
+  const mini=(k,cx,cy,r)=>{P=Object.assign({k},PHASES[k]);const t=hour;hour=k==='night'?22.3:k==='evening'?18.6:7.7;const c=card(cx,cy,74,r,{sh:1});hour=t;P=keep;return c};
+  const others=['morning','evening','night'].filter(k=>k!==P.k&&!(P.k==='day'&&k==='morning'));
+  s+=mini(others[0],x+w/2+52,y+86,5)+mini(others[1],x+w/2+118,y+150,-4);
+  // the kid's slip from today, glued with tape
+  s+=G(slip(x+w/2+20,y+220),`rotate(3 ${x+w/2+80} ${y+260}) scale(.62) translate(${(x+w/2+20)*.61} ${(y+220)*.61})`);
+  s+=pc(cut(rect(x+w/2+44,y+208,46,11),.3,6),[['warm',.3]],{sh:1,base:'#f2e6c8',attr:' opacity=".85"'});
+  // a few paper hearts tucked in, uncounted
+  [[x+150,y+300,7,'acc'],[x+164,y+310,5,'warm'],[x+140,y+314,5,'acc']].forEach(([a,b,z,r],i)=>{seed(830+i);s+=pc(heartP(a,b,z),[[r,1]],{sh:1})});
+  s+=pc(cut([[x+w-50,y-6],[x+w-36,y-6],[x+w-36,y+40],[x+w-43,y+33],[x+w-50,y+40]],.2,6),[['acc',1]],{sh:1});
+  return `<g class="sheet">${s}</g>`}
+function next(){st=(st+1)%7;render()}
+document.getElementById('prev').onclick=()=>{st=(st+6)%7;render()};
+document.getElementById('next').onclick=next;
+document.getElementById('mini').onclick=()=>document.getElementById('rv').classList.toggle('min');
+document.getElementById('hr').oninput=e=>{hour=+e.target.value;render()};
+document.getElementById('now').onclick=()=>{const d=new Date();hour=d.getHours()+d.getMinutes()/60;render()};
+addEventListener('resize',render);
+render();
+if(document.fonts)document.fonts.ready.then(render);
+</script>
+</body>
+</html>
