@@ -374,12 +374,15 @@ function eveningDraw(g, sx, sy, layer){
   const box = (x, y, w, h, fill) => { g.fillStyle = fill; g.fillRect(x*sx, y*sy, w*sx, h*sy); };
   if(layer === 0){
     // небо темнеет с каждым готовым роти; ночь — когда вечер окончен
-    box(0, G.sky.y0, G.W, G.sky.y1 - G.sky.y0, EVE_SKY[EVE.over ? 3 : Math.min(3, EVE.rotiDone)]);
+    // сборка 103: в облике мелками небо и место — картинка макета H для настоящего часа (crayon.js)
+    if(!(typeof crayonDrawSky === "function" && crayonDrawSky(g, sx, sy, G)))
+      box(0, G.sky.y0, G.W, G.sky.y1 - G.sky.y0, EVE_SKY[EVE.over ? 3 : Math.min(3, EVE.rotiDone)]);
     if(typeof guestDraw === "function") guestDraw(g, sx, sy, G);   // гость за стойкой и полка с подарками — стойка ляжет поверх
     // стойка и готовые роти на ней
     const C = G.counter;
-    box(C.x0, C.y0, C.x1 - C.x0, C.y1 - C.y0, "#3a2c1e");
-    box(C.x0, C.y0, C.x1 - C.x0, Math.max(1, 2*u), "#4a3a24");
+    const CC = typeof crayonCounter === "function" ? crayonCounter() : null;   // сборка 103: тик мелком
+    box(C.x0, C.y0, C.x1 - C.x0, C.y1 - C.y0, CC ? CC[0] : "#3a2c1e");
+    box(C.x0, C.y0, C.x1 - C.x0, Math.max(1, 2*u), CC ? CC[1] : "#4a3a24");
     box(C.x0, C.y1 - Math.max(1, 2*u), C.x1 - C.x0, Math.max(1, 2*u), "#1d150e");
     const cm = { x:(C.x0 + C.x1)/2, y:(C.y0 + C.y1)/2 }, ry = Math.min(11*u, (C.y1 - C.y0)*0.32);
     const onCounter = EVE.rotiDone - (typeof guestTook === "function" ? guestTook() : 0) - (typeof nightTook === "function" ? nightTook() : 0);   // отданные гостю и псу на стойке не лежат
@@ -419,7 +422,8 @@ function eveningDraw(g, sx, sy, layer){
   // вместе со столом (ревью 18.11, п. 6) — яркий шарик при пустой миске читался недоделанным действием.
   if(EVE.over) ell(G.lump, G.lump.r, G.lump.r*0.8, "#f0e0b0");
   // лампа не горит — тележка в сумерках: один плоский тёмный слой, без градиента
-  if(!EVE.lamp) box(0, G.sky.y1, G.W, G.H - G.sky.y1, "rgba(8,6,10,0.55)");
+  // сборка 103: в облике мелками сумерки зависят от часа — днём лампа почти не нужна, ночью без неё темно
+  if(!EVE.lamp) box(0, G.sky.y1, G.W, G.H - G.sky.y1, `rgba(8,6,10,${typeof crayonDim === "function" ? crayonDim() : 0.55})`);
   // лампа над тележкой
   const L = G.lamp, s = L.s, swing = eveLampAngle();
   g.save();
