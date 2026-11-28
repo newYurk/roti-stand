@@ -358,9 +358,11 @@ function eveningUpdate(dt){
 }
 // Нарезанный роти на лотке стойки: квадрат полушириной hw и полувысотой hh (наклон стола), резы — по третям.
 function eveCounterRoti(g, sx, sy, x, y, hw, hh, u){
-  g.fillStyle = "#8a6232"; g.fillRect((x - hw)*sx, (y - hh + Math.max(.5, u))*sy, 2*hw*sx, 2*hh*sy);   // кромка снизу
-  g.fillStyle = "#c9a15a"; g.fillRect((x - hw)*sx, (y - hh)*sy, 2*hw*sx, 2*hh*sy);
-  g.strokeStyle = "rgba(92,60,28,.7)"; g.lineWidth = Math.max(1, 0.8*u*sx); g.beginPath();
+  const K = (key, old) => typeof crayonCol === "function" ? crayonCol(key, old) : old;   // сборка 104: мелком — цвета макета H
+  g.fillStyle = K("rotiEdge", "#8a6232"); g.fillRect((x - hw)*sx, (y - hh + Math.max(.5, u))*sy, 2*hw*sx, 2*hh*sy);   // кромка снизу
+  if(typeof crayonOn !== "undefined" && crayonOn) crayonRect(g, (x - hw)*sx, (y - hh)*sy, 2*hw*sx, 2*hh*sy, K("roti", "#c9a15a"));
+  else { g.fillStyle = "#c9a15a"; g.fillRect((x - hw)*sx, (y - hh)*sy, 2*hw*sx, 2*hh*sy); }
+  g.strokeStyle = K("rotiCut", "rgba(92,60,28,.7)"); g.lineWidth = Math.max(1, 0.8*u*sx); g.beginPath();
   for(const k of [-1/3, 1/3]){
     g.moveTo((x + k*2*hw)*sx, (y - hh)*sy); g.lineTo((x + k*2*hw)*sx, (y + hh)*sy);
     g.moveTo((x - hw)*sx, (y + k*2*hh)*sy); g.lineTo((x + hw)*sx, (y + k*2*hh)*sy);
@@ -370,8 +372,11 @@ function eveCounterRoti(g, sx, sy, x, y, hw, hh, u){
 function eveningDraw(g, sx, sy, layer){
   if(eveDev) return;
   const G = eveGeo(), u = G.u;
-  const ell = (c, rx, ry, fill) => { g.fillStyle = fill; g.beginPath(); g.ellipse(c.x*sx, c.y*sy, Math.max(.5, rx*sx), Math.max(.5, ry*sy), 0, 0, Math.PI*2); g.fill(); };
-  const box = (x, y, w, h, fill) => { g.fillStyle = fill; g.fillRect(x*sx, y*sy, w*sx, h*sy); };
+  // сборка 104: в облике мелками овалы и прямоугольники — с рваным краем, штрихом и контуром (crayon.js), цвета — K()
+  const CR = typeof crayonOn !== "undefined" && crayonOn;
+  const K = (key, old) => typeof crayonCol === "function" ? crayonCol(key, old) : old;
+  const ell = (c, rx, ry, fill) => { if(CR){ crayonBlob(g, c.x*sx, c.y*sy, Math.max(.5, rx*sx), Math.max(.5, ry*sy), fill); return; } g.fillStyle = fill; g.beginPath(); g.ellipse(c.x*sx, c.y*sy, Math.max(.5, rx*sx), Math.max(.5, ry*sy), 0, 0, Math.PI*2); g.fill(); };
+  const box = (x, y, w, h, fill, grain) => { if(CR){ crayonRect(g, x*sx, y*sy, w*sx, h*sy, fill, grain); return; } g.fillStyle = fill; g.fillRect(x*sx, y*sy, w*sx, h*sy); };
   if(layer === 0){
     // небо темнеет с каждым готовым роти; ночь — когда вечер окончен
     // сборка 103: в облике мелками небо и место — картинка макета H для настоящего часа (crayon.js)
@@ -381,7 +386,7 @@ function eveningDraw(g, sx, sy, layer){
     // стойка и готовые роти на ней
     const C = G.counter;
     const CC = typeof crayonCounter === "function" ? crayonCounter() : null;   // сборка 103: тик мелком
-    box(C.x0, C.y0, C.x1 - C.x0, C.y1 - C.y0, CC ? CC[0] : "#3a2c1e");
+    box(C.x0, C.y0, C.x1 - C.x0, C.y1 - C.y0, CC ? CC[0] : "#3a2c1e", true);
     box(C.x0, C.y0, C.x1 - C.x0, Math.max(1, 2*u), CC ? CC[1] : "#4a3a24");
     box(C.x0, C.y1 - Math.max(1, 2*u), C.x1 - C.x0, Math.max(1, 2*u), "#1d150e");
     const cm = { x:(C.x0 + C.x1)/2, y:(C.y0 + C.y1)/2 }, ry = Math.min(11*u, (C.y1 - C.y0)*0.32);
@@ -391,21 +396,21 @@ function eveningDraw(g, sx, sy, layer){
     // 2+2, как его подали: квадрат в наклоне стола, тонкие линии резов, тонкая тёмная кромка снизу
     for(let i=0;i<onCounter;i++){
       const x = cm.x + (i - 1)*66*u;
-      box(x - 30*u, cm.y - ry*1.25, 60*u, ry*2.5, "#e8dcc2");
+      box(x - 30*u, cm.y - ry*1.25, 60*u, ry*2.5, K("tray", "#e8dcc2"));
       eveCounterRoti(g, sx, sy, x, cm.y, 21*u, Math.min(ry*0.95, 21*u*TILT*1.6), u);
     }
     // радио
     const R = G.radio;
-    box(R.x0 + R.w*0.78, R.y0 - 9*u, Math.max(1, 1.5*u), 9*u, "#8b7f6e");
-    box(R.x0, R.y0, R.w, R.h, "#4b4338");
-    ell({ x:R.x0 + R.w*0.30, y:R.y }, R.h*0.30, R.h*0.30, "#2a2622");
-    box(R.x0 + R.w*0.58, R.y0 + R.h*0.30, R.w*0.30, R.h*0.16, "#d98b3a");
+    box(R.x0 + R.w*0.78, R.y0 - 9*u, Math.max(1, 1.5*u), 9*u, K("radioAnt", "#8b7f6e"));
+    box(R.x0, R.y0, R.w, R.h, K("radio", "#4b4338"));
+    ell({ x:R.x0 + R.w*0.30, y:R.y }, R.h*0.30, R.h*0.30, K("radioSpk", "#2a2622"));
+    box(R.x0 + R.w*0.58, R.y0 + R.h*0.30, R.w*0.30, R.h*0.16, K("radioDial", "#d98b3a"));
     if(typeof notebookDrawItem === "function") notebookDrawItem(g, sx, sy, G);   // тетрадь рядом с радио
     // миска: сколько шариков осталось
     const B = G.bowl;
-    ell(B, B.rx, B.ry, "#8b7f6e");
-    ell({ x:B.x, y:B.y - 2*u }, B.rx*0.88, B.ry*0.80, "#1d150e");
-    for(let i=0;i<EVE.ballsLeft;i++) ell({ x:B.x + (i - 1)*30*u, y:B.y - 4*u }, 13*u, 12*u, "#f0e0b0");
+    ell(B, B.rx, B.ry, K("bowlRim", "#8b7f6e"));
+    ell({ x:B.x, y:B.y - 2*u }, B.rx*0.88, B.ry*0.80, K("bowlIn", "#1d150e"));
+    for(let i=0;i<EVE.ballsLeft;i++) ell({ x:B.x + (i - 1)*30*u, y:B.y - 4*u }, 13*u, 12*u, K("ball", "#f0e0b0"));
     if(typeof nightDrawUnder === "function") nightDrawUnder(g, sx, sy, G);   // пёс под тележкой, слева от миски
     return;
   }
@@ -414,13 +419,13 @@ function eveningDraw(g, sx, sy, layer){
   // крышка: дома на столе (конец вечера), в руке или на таве
   const lid = eveLidAt(G);
   if(lid){
-    ell(lid, G.lidR, G.lidR*TILT, "#2a2622");
-    ell(lid, G.lidR*0.94, G.lidR*TILT*0.94, "#5d564b");
-    ell({ x:lid.x, y:lid.y - G.lidR*TILT*0.06 }, G.lidR*0.13, G.lidR*TILT*0.13, "#2a2622");
+    ell(lid, G.lidR, G.lidR*TILT, K("lidRim", "#2a2622"));
+    ell(lid, G.lidR*0.94, G.lidR*TILT*0.94, K("lidTop", "#5d564b"));
+    ell({ x:lid.x, y:lid.y - G.lidR*TILT*0.06 }, G.lidR*0.13, G.lidR*TILT*0.13, K("lidKnob", "#2a2622"));
   }
   // вечер окончен: ком теста на столе — касание начинает следующий вечер. Сборка 94: ком лежит под сумерками
   // вместе со столом (ревью 18.11, п. 6) — яркий шарик при пустой миске читался недоделанным действием.
-  if(EVE.over) ell(G.lump, G.lump.r, G.lump.r*0.8, "#f0e0b0");
+  if(EVE.over) ell(G.lump, G.lump.r, G.lump.r*0.8, K("lump", "#f0e0b0"));
   // лампа не горит — тележка в сумерках: один плоский тёмный слой, без градиента
   // сборка 103: в облике мелками сумерки зависят от часа — днём лампа почти не нужна, ночью без неё темно
   if(!EVE.lamp) box(0, G.sky.y1, G.W, G.H - G.sky.y1, `rgba(8,6,10,${typeof crayonDim === "function" ? crayonDim() : 0.55})`);
@@ -428,13 +433,13 @@ function eveningDraw(g, sx, sy, layer){
   const L = G.lamp, s = L.s, swing = eveLampAngle();
   g.save();
   if(swing){ g.translate(L.x*sx, 0); g.rotate(swing); g.translate(-L.x*sx, 0); }   // качается на шнуре, вокруг точки подвеса
-  box(L.x - Math.max(.5, 0.75*u), 0, Math.max(1, 1.5*u), L.y - s, EVE.lamp ? "#1d150e" : "#4b4338");   // негорящая: шнур виден на тёмном небе
-  g.fillStyle = EVE.lamp ? "#d98b3a" : "#3a342d";
+  box(L.x - Math.max(.5, 0.75*u), 0, Math.max(1, 1.5*u), L.y - s, EVE.lamp ? K("cordOn", "#1d150e") : K("cordOff", "#4b4338"));   // негорящая: шнур виден на тёмном небе
+  g.fillStyle = EVE.lamp ? K("lampOn", "#d98b3a") : K("lampOff", "#3a342d");
   g.beginPath();
   g.moveTo((L.x - s*0.45)*sx, (L.y - s)*sy); g.lineTo((L.x + s*0.45)*sx, (L.y - s)*sy);
   g.lineTo((L.x + s*1.15)*sx, (L.y + s*0.15)*sy); g.lineTo((L.x - s*1.15)*sx, (L.y + s*0.15)*sy);
   g.closePath(); g.fill();
-  ell({ x:L.x, y:L.y + s*0.42 }, s*0.5, s*0.5, EVE.lamp ? "#f0c674" : "#4b4338");
+  ell({ x:L.x, y:L.y + s*0.42 }, s*0.5, s*0.5, EVE.lamp ? K("bulbOn", "#f0c674") : K("bulbOff", "#4b4338"));
   g.restore();
   if(typeof nightDraw === "function") nightDraw(g, sx, sy, G);         // ночной кадр: снимки вечера над стойкой
   if(typeof notebookDraw === "function") notebookDraw(g, sx, sy, G);   // открытая тетрадь — поверх всей сцены

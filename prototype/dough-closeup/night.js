@@ -133,16 +133,23 @@ function nightSpots(){
 function nightDogDraw(g, sx, sy, G, sil){
   const B = nightDogBox(G), pose = nightDogPose(), grow = sil ? NIGHT_SIL*G.u : 0;
   const X = nx => (B.x0 + nx*B.w)*sx, Y = ny => (B.y0 + ny*B.h)*sy, RX = n => Math.max(.5, (n*B.w + grow)*sx), RY = n => Math.max(.5, (n*B.h + grow)*sy);
-  const ell = (nx, ny, rx, ry, fill, rot) => { g.fillStyle = sil ? NIGHT_DARK : fill; g.beginPath(); g.ellipse(X(nx), Y(ny), RX(rx), RY(ry), rot || 0, 0, Math.PI*2); g.fill(); };
+  // сборка 104: в облике мелками — рваный край, штрих и контур (crayon.js), шерсть — палевая уличного пса из макета H
+  const CR = typeof crayonOn !== "undefined" && crayonOn && !sil;
+  const PAL = CR ? { [NIGHT_FUR]:CRAYON_PROP.fur, [NIGHT_EAR]:CRAYON_PROP.ear, [NIGHT_DARK]:CRAYON_PROP.dark, "#c9a15a":CRAYON_PROP.roti, "#f0e0b0":"#fbf4e2" } : null;
+  const col = c => PAL && PAL[c] || c;
+  const ell = (nx, ny, rx, ry, fill, rot) => {
+    if(CR){ crayonBlob(g, X(nx), Y(ny), RX(rx), RY(ry), col(fill), rot || 0); return; }
+    g.fillStyle = sil ? NIGHT_DARK : fill; g.beginPath(); g.ellipse(X(nx), Y(ny), RX(rx), RY(ry), rot || 0, 0, Math.PI*2); g.fill(); };
   const stroke = (pts, w, color) => {
-    g.strokeStyle = sil ? NIGHT_DARK : color; g.lineWidth = Math.max(1, (w*B.w + 2*grow)*sx); g.lineCap = "round"; g.beginPath();
+    g.strokeStyle = sil ? NIGHT_DARK : col(color); g.lineWidth = Math.max(1, (w*B.w + 2*grow)*sx); g.lineCap = "round"; g.beginPath();
     g.moveTo(X(pts[0][0]), Y(pts[0][1]));
     if(pts.length === 3) g.quadraticCurveTo(X(pts[1][0]), Y(pts[1][1]), X(pts[2][0]), Y(pts[2][1]));
     else g.lineTo(X(pts[1][0]), Y(pts[1][1]));
     g.stroke();
   };
   if(pose === 2){                                          // ест: стоит, голова у куска роти, хвост вверх и две чёрточки взмаха
-    for(const lx of [0.22, 0.34, 0.56, 0.66]){ g.fillStyle = lx === 0.34 || lx === 0.56 ? NIGHT_EAR : NIGHT_FUR; g.fillRect(X(lx), Y(0.50), RX(0.07), RY(0.48)); }
+    for(const lx of [0.22, 0.34, 0.56, 0.66]){ const lc = lx === 0.34 || lx === 0.56 ? NIGHT_EAR : NIGHT_FUR;
+      if(CR) crayonRect(g, X(lx), Y(0.50), RX(0.07), RY(0.48), col(lc)); else { g.fillStyle = lc; g.fillRect(X(lx), Y(0.50), RX(0.07), RY(0.48)); } }
     ell(0.44, 0.44, 0.30, 0.21, NIGHT_FUR);
     stroke([[0.17, 0.40], [0.07, 0.30], [0.08, 0.06]], 0.05, NIGHT_FUR);
     stroke([[0.00, 0.14], [0.02, 0.02]], 0.02, "#f0e0b0");
