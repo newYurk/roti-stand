@@ -11,7 +11,7 @@ const CRAYON_PH = {
   night:   { table:"#8f8fa6", line:"#ffd25e", tint:"#5f62a3",  tintA:0.16, counter:["#6e4430","#3f2a22"], ink:"#f3e6c8" },
   deep:    { table:"#6f7084", line:"#b9b7d8", tint:"#3b3f7a",  tintA:0.18, counter:["#5a3c30","#33241e"], ink:"#dcd6f0" },
 };
-const CRAYON_V = "2026-11-23-b103";
+const CRAYON_V = "2026-11-28-b104";
 let crayonOn = false, crayonPhase = "evening", crayonBand = null, crayonTableImg = null, crayonTablePat = null, crayonTooth = null;
 
 function crayonHour(){
@@ -128,6 +128,81 @@ function crayonOver(c){
   const pat = c.createPattern(crayonTooth, "repeat");
   if(pat){ const k = Math.max(1, cvs.width/520); pat.setTransform && pat.setTransform(new DOMMatrix([k, 0, 0, k, 0, 0])); c.fillStyle = pat; c.fillRect(0, 0, cvs.width, cvs.height); }
   c.restore();
+}
+
+// ─────────────── Сборка 104: предметы на стойке и пёс — мелком
+// Миска с шариками, радио, крышка, лампа, лотки с роти и пёс рисуются теми же овалами и прямоугольниками, что раньше
+// (место и размер — прежние, касания не меняются), но край у них рваный, внутри — штрих мелка, по краю — контур
+// темнее заливки. Цвета — из палитры макета H. Форма края зависит только от размера предмета, не от места:
+// крышка в руке и пёс поверх роти не «дрожат» при движении.
+const CRAYON_PROP = {
+  bowlRim:"#8e9b9b", bowlIn:"#56605f", ball:"#f3e2bd",
+  radio:"#b8432f", radioSpk:"#3a2a24", radioDial:"#e9c25a", radioAnt:"#7c706a",
+  lidRim:"#1f1d22", lidTop:"#4a4752", lidKnob:"#1f1d22",
+  lampOn:"#e9733a", lampOff:"#5a4a42", bulbOn:"#ffd25e", bulbOff:"#6e6258", cordOn:"#3a2a24", cordOff:"#5a4a42",
+  lump:"#f3e2bd", tray:"#efe3c6", roti:"#e9a53c", rotiEdge:"#b8621c", rotiCut:"rgba(126,60,16,.75)",
+  fur:"#c9a878", ear:"#8a6a44", dark:"#3a2a24",
+};
+function crayonCol(key, old){ return crayonOn && CRAYON_PROP[key] ? CRAYON_PROP[key] : old; }
+function crayonDarker(c, f){
+  const m = /^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(c);
+  if(!m) return "rgba(40,25,20,0.5)";
+  const d = i => Math.round(parseInt(m[i], 16)*f);
+  return `rgb(${d(1)},${d(2)},${d(3)})`;
+}
+// Заливка готового контура как мелком: цвет, косой штрих темнее (тень снизу справа), контур темнее заливки.
+function crayonFillPath(g, path, fill, x0, y0, w, h, grain){
+  g.fillStyle = fill; g.fill(path);
+  const m = Math.min(w, h), dark = crayonDarker(fill, 0.72);
+  if(grain && m >= 10){
+    // волокно тика: волнистые штрихи вдоль доски
+    g.save(); g.clip(path); g.globalAlpha = 0.32; g.strokeStyle = dark; g.lineWidth = Math.max(1, m*0.02); g.beginPath();
+    for(let i=1;i<6;i++){
+      const yy = y0 + h*i/6;
+      g.moveTo(x0, yy);
+      for(let x = x0; x <= x0 + w; x += 24) g.lineTo(x, yy + Math.sin(x*0.021 + i*1.7)*m*0.03);
+    }
+    g.stroke(); g.restore();
+  } else if(m >= 10){
+    g.save(); g.clip(path);
+    g.globalAlpha = 0.28; g.strokeStyle = dark; g.lineWidth = Math.max(1, m*0.035); g.beginPath();
+    const step = Math.max(3, m*0.13);
+    for(let t = -h; t < w; t += step){ g.moveTo(x0 + t + h*0.45, y0 + h*0.45); g.lineTo(x0 + t + h*1.05, y0 + h*1.05); }
+    g.stroke(); g.restore();
+  }
+  if(m >= 4){
+    g.save(); g.globalAlpha = 0.6; g.strokeStyle = dark; g.lineWidth = Math.max(1, Math.min(2.6, m*0.06)); g.lineJoin = "round";
+    g.stroke(path); g.restore();
+  }
+}
+function crayonBlob(g, cx, cy, rx, ry, fill, rot){
+  if(!/^#/.test(fill)){ g.fillStyle = fill; g.beginPath(); g.ellipse(cx, cy, rx, ry, rot || 0, 0, Math.PI*2); g.fill(); return; }
+  const seed = (rx*0.71 + ry*1.37) % 6.283, jit = Math.min(0.08, 1.4/Math.max(4, rx, ry));
+  const n = 40, c = Math.cos(rot || 0), s = Math.sin(rot || 0);
+  const P = new Path2D();
+  for(let i=0;i<n;i++){
+    const a = i/n*Math.PI*2, k = 1 + jit*(Math.sin(a*5 + seed)*0.55 + Math.sin(a*11 + seed*2.3)*0.30 + Math.sin(a*23 + seed*0.7)*0.15);
+    const px = Math.cos(a)*rx*k, py = Math.sin(a)*ry*k, x = cx + px*c - py*s, y = cy + px*s + py*c;
+    if(i) P.lineTo(x, y); else P.moveTo(x, y);
+  }
+  P.closePath();
+  crayonFillPath(g, P, fill, cx - rx, cy - ry, 2*rx, 2*ry);
+}
+function crayonRect(g, x, y, w, h, fill, grain){
+  if(w < 4 || h < 4 || !/^#/.test(fill)){ g.fillStyle = fill; g.fillRect(x, y, w, h); return; }
+  const seed = (w*0.37 + h*0.91) % 6.283, amp = Math.min(1.2, Math.min(w, h)*0.06);
+  const pts = [[x, y], [x + w, y], [x + w, y + h], [x, y + h]];
+  const P = new Path2D(); P.moveTo(x, y);
+  for(let e=0;e<4;e++){
+    const [ax, ay] = pts[e], [bx, by] = pts[(e + 1)%4], len = Math.hypot(bx - ax, by - ay), n = Math.max(1, Math.round(len/14));
+    const nx = -(by - ay)/len, ny = (bx - ax)/len;
+    for(let i=1;i<=n;i++){
+      const t = i/n, j = i === n ? 0 : amp*Math.sin(i*2.7 + e*1.9 + seed);
+      P.lineTo(ax + (bx - ax)*t + nx*j, ay + (by - ay)*t + ny*j);
+    }
+  }
+  P.closePath();
+  crayonFillPath(g, P, fill, x, y, w, h, grain);
 }
 
 crayonInit();
